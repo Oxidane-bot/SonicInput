@@ -106,7 +106,8 @@ class HotReloadManager:
                     success = service.on_config_changed(changed_keys, new_config)
                     if not success:
                         app_logger.log_error(
-                            f"Config reload failed for {service_name}", "hot_reload"
+                            Exception(f"Config reload failed for {service_name}"),
+                            "hot_reload",
                         )
                         return False
                 except Exception as e:

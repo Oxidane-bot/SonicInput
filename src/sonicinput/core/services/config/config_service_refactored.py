@@ -513,7 +513,16 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
         if key == "audio.device_id" or key == ConfigKeys.AUDIO_DEVICE_ID:
             return self._validate_audio_device(value)
 
-        # 快捷键验证
+        # 快捷键后端验证
+        if key == "hotkeys.backend" or key == ConfigKeys.HOTKEYS_BACKEND:
+            if value not in ["pynput", "win32"]:
+                return (
+                    False,
+                    f"Invalid hotkey backend: '{value}'. Must be 'pynput' or 'win32'",
+                )
+            return True, ""
+
+        # 快捷键格式验证
         if key == "hotkey" or key.startswith("hotkeys"):
             # 处理单个快捷键或快捷键列表
             if isinstance(value, list):

@@ -72,9 +72,11 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
         # 检查是否有已注册的快捷键
         if not self.registered_hotkeys:
             app_logger.log_audio_event(
-                "No hotkeys registered, skipping listening start", {}
+                "No hotkeys registered yet, listener will start when hotkeys are registered",
+                {},
             )
-            return False
+            self._is_listening_flag = True  # 标记为已启动状态，允许后续注册热键
+            return True
 
         try:
             # 启动listener

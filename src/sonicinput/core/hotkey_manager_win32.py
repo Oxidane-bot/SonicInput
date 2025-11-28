@@ -375,6 +375,14 @@ class Win32HotkeyManager(LifecycleComponent, IHotkeyService):
 
                                 break
 
+                    # Process queued commands (for register/unregister hotkeys)
+                    while not self._command_queue.empty():
+                        try:
+                            cmd = self._command_queue.get_nowait()
+                            cmd()
+                        except queue.Empty:
+                            break
+
                     # Process other messages
                     ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
                     ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
@@ -513,11 +521,9 @@ class Win32HotkeyManager(LifecycleComponent, IHotkeyService):
             if self._is_listening_flag and self._message_thread:
                 import ctypes
 
-                thread_id = ctypes.windll.kernel32.GetThreadId(
-                    self._message_thread.native_id
-                    if hasattr(self._message_thread, "native_id")
-                    else self._message_thread.ident
-                )
+                # On Windows, thread.ident is the native thread ID
+                # No need to call GetThreadId (which requires a HANDLE, not an ID)
+                thread_id = self._message_thread.ident
                 # Post a dummy message to wake up GetMessage
                 ctypes.windll.user32.PostThreadMessageW(
                     thread_id, win32con.WM_NULL, 0, 0
@@ -534,11 +540,16 @@ class Win32HotkeyManager(LifecycleComponent, IHotkeyService):
                         f"Hotkey '{normalized_hotkey}' registration failed silently"
                     )
             else:
-                # Timeout - should not happen in normal operation
-                app_logger.log_audio_event(
-                    "Hotkey registration queued (message loop not ready yet)",
-                    {"hotkey": normalized_hotkey},
+                # Timeout - registration failed because message loop wasn't ready
+                error_msg = (
+                    f"Hotkey '{normalized_hotkey}' registration timed out - "
+                    "message loop not ready"
                 )
+                app_logger.log_error(
+                    Exception(error_msg),
+                    "register_hotkey_timeout",
+                )
+                raise HotkeyRegistrationError(error_msg)
 
             return True
 
