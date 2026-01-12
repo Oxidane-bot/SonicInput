@@ -327,10 +327,19 @@ class ApplicationOrchestrator:
                 model_name = self.config.get_setting(
                     ConfigKeys.TRANSCRIPTION_LOCAL_MODEL, "paraformer"
                 )
-                app_logger.log_audio_event(
-                    "Auto-loading model on startup", {"model_name": model_name}
-                )
-                self._load_model_async(model_name)
+                from sonicinput.speech.sherpa_models import SherpaModelManager
+
+                cache_checker = SherpaModelManager()
+                if cache_checker.is_model_cached(model_name):
+                    app_logger.log_audio_event(
+                        "Auto-loading model on startup", {"model_name": model_name}
+                    )
+                    self._load_model_async(model_name, download_if_missing=False)
+                else:
+                    app_logger.log_audio_event(
+                        "Skipping auto-load: local model not cached",
+                        {"model_name": model_name},
+                    )
             else:
                 # 云端模式不需要预加载模型
                 app_logger.log_audio_event(
@@ -350,7 +359,7 @@ class ApplicationOrchestrator:
         # 否则根据配置决定
         return self.config.get_setting(ConfigKeys.TRANSCRIPTION_LOCAL_AUTO_LOAD, True)
 
-    def _load_model_async(self, model_name: str) -> None:
+    def _load_model_async(self, model_name: str, download_if_missing: bool = False) -> None:
         """异步加载语音模型"""
         if not self._speech_service:
             app_logger.log_audio_event(

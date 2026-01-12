@@ -9,10 +9,10 @@
 - Ready to use: clipboard / text / GUI entry points
 - No admin needed: Win32 RegisterHotKey (default F12, customizable), conflict prompts
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
-- Small footprint: onefile ~52 MB (v0.5.8)
+- Small footprint: onefile ~52 MB (v0.6.0)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
 
-## What’s New (v0.5.8)
+## What’s New (v0.6.0)
 - Onefile builds now bundle `onnxruntime.dll` to keep local ASR available
 - Auto-switch to cloud when local runtime is missing (if API key is set); otherwise start with a stub service so the UI stays up
 - Skip local auto-load when the service is unavailable and log richer dependency diagnostics
@@ -22,7 +22,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.5.8-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
+1. Download `SonicInput-v0.6.0-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
 2. Run the exe; default hotkey is F12 (use Alt+H or customize if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

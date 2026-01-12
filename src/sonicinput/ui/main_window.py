@@ -426,7 +426,7 @@ class MainWindow(QMainWindow):
                 QApplication.processEvents()
 
                 try:
-                    success = self.ui_model_service.load_model(model_name)
+                    success = self.ui_model_service.load_model(model_name, download_if_missing=True)
                     progress.close()
 
                     if not success:
@@ -491,9 +491,22 @@ class MainWindow(QMainWindow):
         """Handle model test request."""
         try:
             if self.ui_model_service:
-                whisper_engine = self.ui_model_service.get_whisper_engine()
+                speech_engine = self.ui_model_service.get_whisper_engine()
 
-                if not whisper_engine.is_model_loaded:
+                if not speech_engine:
+                    QMessageBox.warning(
+                        self._settings_window
+                        if hasattr(self, "_settings_window")
+                        else None,
+                        QCoreApplication.translate("MainWindow", "Model Not Available"),
+                        QCoreApplication.translate(
+                            "MainWindow",
+                            "Local speech engine is not initialized. Please load a model first.",
+                        ),
+                    )
+                    return
+
+                if not getattr(speech_engine, "is_model_loaded", False):
                     QMessageBox.warning(
                         self._settings_window
                         if hasattr(self, "_settings_window")
@@ -524,7 +537,7 @@ class MainWindow(QMainWindow):
                 progress.setMinimumDuration(0)
                 progress.setCancelButton(None)
 
-                test_thread = ModelTestThread(whisper_engine, self)
+                test_thread = ModelTestThread(speech_engine, self)
 
                 def on_progress_update(message: str):
                     progress.setLabelText(message)
@@ -581,8 +594,8 @@ class MainWindow(QMainWindow):
                                 "{analysis}\n\n"
                                 "The model is working correctly and can process audio!",
                             ).format(
-                                model=whisper_engine.model_name,
-                                device=whisper_engine.device,
+                                model=speech_engine.model_name,
+                                device=speech_engine.device,
                                 language=detected_language,
                                 output=text_output,
                                 confidence=confidence,

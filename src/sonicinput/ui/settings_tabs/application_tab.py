@@ -377,7 +377,7 @@ class ApplicationTab(BaseSettingsTab):
 
         # 加载日志设置
         logging_config = config.get("logging", {})
-        log_level = logging_config.get("level", "INFO")
+        log_level = logging_config.get("level", "WARNING")
         log_level_index = self.log_level_combo.findData(log_level)
         if log_level_index >= 0:
             self.log_level_combo.setCurrentIndex(log_level_index)
@@ -405,7 +405,7 @@ class ApplicationTab(BaseSettingsTab):
                 "theme_color": theme_color,
             },
             "logging": {
-                "level": self.log_level_combo.currentData() or "INFO",
+                "level": self.log_level_combo.currentData() or "WARNING",
                 "console_output": self.console_output_checkbox.isChecked(),
                 "max_log_size_mb": self.max_log_size_spinbox.value(),
             },

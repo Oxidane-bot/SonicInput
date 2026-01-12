@@ -281,7 +281,7 @@ class TestSettingsWindowDialogs:
         qtbot.wait(200)
 
         assert len(question_calls) == 1
-        assert settings_window.application_tab.log_level_combo.currentText() == "INFO"
+        assert settings_window.application_tab.log_level_combo.currentText() == "WARNING"
 
         # verify_real_config_untouched会自动验证真实配置未被修改
 
@@ -394,7 +394,7 @@ class TestSettingsWindowCoreButtons:
                 "show_overlay": True,
             },
             "logging": {
-                "level": "INFO",
+                "level": "WARNING",
                 "console_output": False,
             },
             "hotkeys": ["f12"],
@@ -426,7 +426,7 @@ class TestSettingsWindowCoreButtons:
         qtbot.wait(200)
 
         # Verify setting was reset to default
-        assert settings_window.application_tab.log_level_combo.currentText() == "INFO"
+        assert settings_window.application_tab.log_level_combo.currentText() == "WARNING"
 
     def test_reset_tab_button_cancel(
         self, qtbot, settings_window, isolated_config, monkeypatch

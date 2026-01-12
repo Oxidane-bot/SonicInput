@@ -203,7 +203,7 @@ class UIModelServiceAdapter:
             }
         return {"is_loaded": False, "model_name": "Unknown", "device": "Unknown"}
 
-    def load_model(self, model_name: str) -> bool:
+    def load_model(self, model_name: str, download_if_missing: bool = False) -> bool:
         """加载模型
 
         Args:
@@ -214,7 +214,13 @@ class UIModelServiceAdapter:
         """
         engine = self.get_whisper_engine()
         if engine and hasattr(engine, "load_model"):
-            result = engine.load_model(model_name)
+            try:
+                result = engine.load_model(
+                    model_name, download_if_missing=download_if_missing
+                )
+            except TypeError:
+                # 兼容旧签名
+                result = engine.load_model(model_name)
             return bool(result)
         return False
 

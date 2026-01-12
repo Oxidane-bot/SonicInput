@@ -70,7 +70,12 @@ class ModelManager:
         self._model_state = ModelState.UNLOADED
         app_logger.log_audio_event("ModelManager stopped", {})
 
-    def load_model(self, model_name: Optional[str] = None, timeout: int = 300) -> bool:
+    def load_model(
+        self,
+        model_name: Optional[str] = None,
+        timeout: int = 300,
+        download_if_missing: bool = False,
+    ) -> bool:
         """加载模型（异步兼容方法，推荐使用load_model_sync）
 
         Args:
@@ -80,10 +85,13 @@ class ModelManager:
         Returns:
             True如果加载成功
         """
-        return self.load_model_sync(model_name, timeout)
+        return self.load_model_sync(model_name, timeout, download_if_missing)
 
     def load_model_sync(
-        self, model_name: Optional[str] = None, timeout: int = 300
+        self,
+        model_name: Optional[str] = None,
+        timeout: int = 300,
+        download_if_missing: bool = False,
     ) -> bool:
         """同步加载模型（阻塞直到加载完成）
 
@@ -129,7 +137,9 @@ class ModelManager:
                 self._current_model_name = target_model_name
 
             # 执行模型加载
-            load_success = self._whisper_engine.load_model()
+            load_success = self._whisper_engine.load_model(
+                model_name=model_name, download_if_missing=download_if_missing
+            )
 
             # 检查加载结果
             if not load_success:

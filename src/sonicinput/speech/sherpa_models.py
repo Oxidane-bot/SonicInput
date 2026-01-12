@@ -3,6 +3,8 @@
 负责模型下载、缓存和配置管理
 """
 
+import os
+import sys
 import tarfile
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -13,7 +15,7 @@ from loguru import logger
 from .. import __version__
 
 try:
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QCoreApplication, Qt
     from PySide6.QtWidgets import QApplication, QProgressDialog
 
     PYSIDE6_AVAILABLE = True
@@ -32,14 +34,14 @@ class SherpaModelManager(LifecycleComponent):
             "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2",
             "size_mb": 226,
             "language": ["zh", "en"],
-            "description": "中英双语高精度模型（推荐）",
+            "description": "High-accuracy bilingual model (recommended)",
             "rtf": 0.15,
         },
         "zipformer-small": {
             "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2",
             "size_mb": 112,
             "language": ["zh", "en"],
-            "description": "超轻量级双语模型",
+            "description": "Ultra-lightweight bilingual model",
             "rtf": 0.10,
         },
     }
@@ -48,17 +50,38 @@ class SherpaModelManager(LifecycleComponent):
         """初始化模型管理器
 
         Args:
-            cache_dir: 模型缓存目录，默认为 ~/.sonicinput/sherpa_models
+            cache_dir: Optional model cache root. If not set, resolution order is:
+                1) executable sibling models directory
+                2) SONICINPUT_MODELS_DIR environment variable
+                3) ~/.sonicinput/sherpa_models
         """
         super().__init__("SherpaModelManager")
 
         if cache_dir:
             self.cache_dir = Path(cache_dir)
+            self.cache_dir_source = "custom"
         else:
-            # 默认缓存到用户目录
-            self.cache_dir = Path.home() / ".sonicinput" / "sherpa_models"
+            self.cache_dir, self.cache_dir_source = self._resolve_cache_dir()
+
+        logger.info(
+            f"Model cache directory resolved to {self.cache_dir} "
+            f"(source={self.cache_dir_source})"
+        )
 
         self._model_cache: Dict[str, Path] = {}  # Cache for model directories
+
+    @staticmethod
+    def _resolve_cache_dir() -> tuple[Path, str]:
+        exe_dir = Path(sys.executable).resolve().parent
+        exe_models = exe_dir / "models"
+        if exe_models.is_dir():
+            return exe_models, "exe_models"
+
+        env_dir = os.environ.get("SONICINPUT_MODELS_DIR")
+        if env_dir:
+            return Path(env_dir), "env"
+
+        return Path.home() / ".sonicinput" / "sherpa_models", "default"
 
     def is_model_cached(self, model_name: str) -> bool:
         """检查模型是否已缓存
@@ -122,10 +145,15 @@ class SherpaModelManager(LifecycleComponent):
         progress_dialog = None
         if PYSIDE6_AVAILABLE:
             try:
+                def _tr(text: str) -> str:
+                    return QCoreApplication.translate("ModelDownload", text)
+
                 progress_dialog = QProgressDialog()
-                progress_dialog.setWindowTitle("模型下载")
+                progress_dialog.setWindowTitle(_tr("Model Download"))
                 progress_dialog.setLabelText(
-                    f"正在下载模型：{model_name}\n大小：{size_mb} MB"
+                    _tr("Downloading model: {model}\nSize: {size} MB").format(
+                        model=model_name, size=size_mb
+                    )
                 )
                 progress_dialog.setCancelButton(None)  # 隐藏取消按钮
                 progress_dialog.setWindowModality(Qt.WindowModal)
@@ -168,8 +196,15 @@ class SherpaModelManager(LifecycleComponent):
                                 downloaded_mb = downloaded / (1024 * 1024)
                                 total_mb = total_size / (1024 * 1024)
                                 progress_dialog.setLabelText(
-                                    f"正在下载模型：{model_name}\n"
-                                    f"进度：{downloaded_mb:.1f} MB / {total_mb:.1f} MB ({percent}%)"
+                                    _tr(
+                                        "Downloading model: {model}\n"
+                                        "Progress: {downloaded:.1f} MB / {total:.1f} MB ({percent}%)"
+                                    ).format(
+                                        model=model_name,
+                                        downloaded=downloaded_mb,
+                                        total=total_mb,
+                                        percent=percent,
+                                    )
                                 )
                                 QApplication.processEvents()
                             except Exception as e:
@@ -187,7 +222,9 @@ class SherpaModelManager(LifecycleComponent):
                 try:
                     progress_dialog.setValue(95)
                     progress_dialog.setLabelText(
-                        f"正在解压模型：{model_name}\n请稍候..."
+                        _tr("Extracting model: {model}\nPlease wait...").format(
+                            model=model_name
+                        )
                     )
                     QApplication.processEvents()
                 except Exception as e:
@@ -243,7 +280,9 @@ class SherpaModelManager(LifecycleComponent):
                 archive_path.unlink()
             raise RuntimeError(f"Failed to download model {model_name}: {e}")
 
-    def ensure_model_available(self, model_name: str) -> Path:
+    def ensure_model_available(
+        self, model_name: str, download_if_missing: bool = True
+    ) -> Path:
         """确保模型可用（如果不存在则下载）
 
         Args:
@@ -253,12 +292,16 @@ class SherpaModelManager(LifecycleComponent):
             模型目录路径
         """
         if not self.is_model_cached(model_name):
+            if not download_if_missing:
+                raise RuntimeError(f"Model {model_name} not cached or incomplete")
             logger.info(f"Model {model_name} not cached, downloading...")
             return self.download_model(model_name)
 
         return self._get_model_dir(model_name)
 
-    def get_model_config(self, model_name: str) -> Dict[str, Any]:
+    def get_model_config(
+        self, model_name: str, download_if_missing: bool = True
+    ) -> Dict[str, Any]:
         """获取模型配置（供 sherpa-onnx 使用）
 
         Args:
@@ -271,7 +314,9 @@ class SherpaModelManager(LifecycleComponent):
             ValueError: 如果模型不存在
             RuntimeError: 如果模型文件缺失
         """
-        model_dir = self.ensure_model_available(model_name)
+        model_dir = self.ensure_model_available(
+            model_name, download_if_missing=download_if_missing
+        )
 
         if model_name == "paraformer":
             # Paraformer 配置（只支持greedy_search）
@@ -314,6 +359,10 @@ class SherpaModelManager(LifecycleComponent):
         info = self.MODELS[model_name].copy()
         info["cached"] = self.is_model_cached(model_name)
         info["cache_path"] = str(self._get_model_dir(model_name))
+        if "description" in info and PYSIDE6_AVAILABLE:
+            info["description"] = QCoreApplication.translate(
+                "ModelMetadata", info["description"]
+            )
 
         return info
 

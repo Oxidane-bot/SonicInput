@@ -1742,7 +1742,7 @@ class SettingsWindow(QMainWindow):
 
         # 重置日志设置
         self.ui_settings_service.set_setting(
-            "logging.level", logging_config.get("level", "INFO")
+            "logging.level", logging_config.get("level", "WARNING")
         )
         self.ui_settings_service.set_setting(
             "logging.console_output", logging_config.get("console_output", False)

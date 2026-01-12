@@ -1,217 +1,233 @@
-"""用户友好错误消息转换器
-
-将技术性错误转换为用户可理解的消息
-"""
+"""User-friendly error message translation utilities."""
 
 import re
 from typing import Optional
 
+try:
+    from PySide6.QtCore import QCoreApplication
+except Exception:
+    QCoreApplication = None
+
+
+def _tr(text: str) -> str:
+    if QCoreApplication is None:
+        return text
+    return QCoreApplication.translate("ErrorMessages", text)
+
 
 class ErrorMessageTranslator:
-    """错误消息翻译器 - 将技术错误转换为用户友好消息"""
+    """Translate technical errors into user-friendly messages."""
 
-    # 错误模式到用户消息的映射
     ERROR_PATTERNS = {
-        # 音频设备相关
         r"Invalid number of channels|channels.*not supported": {
-            "user_msg": "音频设备不支持当前配置，请在设置中更换音频设备",
+            "user_msg": (
+                "Audio device does not support the current configuration. "
+                "Please choose another device in Settings."
+            ),
             "category": "audio_device",
         },
         r"Input overflowed|Overflow": {
-            "user_msg": "音频输入过载，请降低麦克风音量或更换设备",
+            "user_msg": "Audio input overflow. Please lower microphone volume or switch devices.",
             "category": "audio_overflow",
         },
         r"No Default Input Device Available|device not found": {
-            "user_msg": "未找到可用的麦克风设备，请检查麦克风连接",
+            "user_msg": (
+                "No available microphone device found. "
+                "Please check your microphone connection."
+            ),
             "category": "audio_device",
         },
         r"Pa.*Error|portaudio": {
-            "user_msg": "音频系统错误，请重启应用或检查音频设备",
+            "user_msg": "Audio system error. Please restart the app or check your audio device.",
             "category": "audio_system",
         },
-        # API相关
         r"API key.*not set|api.*key.*invalid": {
-            "user_msg": "AI服务API密钥未设置或无效，请在设置中配置API密钥",
+            "user_msg": (
+                "AI service API key is not set or invalid. "
+                "Please configure it in Settings."
+            ),
             "category": "api_key",
         },
         r"(401|Unauthorized)": {
-            "user_msg": "API认证失败，请检查API密钥是否正确",
+            "user_msg": "API authentication failed. Please verify your API key.",
             "category": "api_auth",
         },
         r"(429|Too Many Requests|rate limit)": {
-            "user_msg": "API调用次数超限，请稍后再试或升级API套餐",
+            "user_msg": "API rate limit reached. Please try again later or upgrade your plan.",
             "category": "api_rate_limit",
         },
         r"(500|502|503|504|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)": {
-            "user_msg": "AI服务暂时不可用，请稍后重试",
+            "user_msg": "AI service is temporarily unavailable. Please try again later.",
             "category": "api_server",
         },
         r"Connection.*refused|Connection.*timeout|Network.*error": {
-            "user_msg": "网络连接失败，请检查网络连接后重试",
+            "user_msg": "Network connection failed. Please check your network and try again.",
             "category": "network",
         },
-        # 模型加载相关
         r"model.*not found|No such file": {
-            "user_msg": "语音识别模型未找到，应用会自动下载，请稍等片刻",
+            "user_msg": (
+                "Speech recognition model not found. The app will download it automatically. "
+                "Please wait."
+            ),
             "category": "model_not_found",
         },
         r"CUDA.*out of memory|out of memory": {
-            "user_msg": "GPU内存不足，将自动切换到CPU模式（速度较慢）",
+            "user_msg": "GPU out of memory. Switching to CPU mode (slower).",
             "category": "gpu_memory",
         },
         r"CUDA.*not available|No CUDA": {
-            "user_msg": "GPU不可用，使用CPU模式进行识别（速度较慢）",
+            "user_msg": "GPU not available. Using CPU mode for recognition (slower).",
             "category": "gpu_unavailable",
         },
-        # 快捷键相关
         r"hotkey.*already registered|hotkey.*in use": {
-            "user_msg": "快捷键已被其他应用占用，请在设置中更换快捷键",
+            "user_msg": (
+                "Hotkey is already used by another application. "
+                "Please change it in Settings."
+            ),
             "category": "hotkey_conflict",
         },
         r"Invalid hotkey|hotkey.*invalid": {
-            "user_msg": "快捷键格式无效，请检查快捷键设置",
+            "user_msg": "Invalid hotkey format. Please check your hotkey settings.",
             "category": "hotkey_invalid",
         },
-        # 权限相关
         r"Permission denied|Access denied": {
-            "user_msg": "权限不足，请以管理员权限运行应用",
+            "user_msg": "Insufficient permissions. Please run the app as administrator.",
             "category": "permission",
         },
-        # 配置相关
         r"config.*corrupt|JSON.*decode": {
-            "user_msg": "配置文件损坏，已重置为默认配置",
+            "user_msg": "Configuration file is corrupted. It has been reset to defaults.",
             "category": "config_corrupt",
         },
     }
 
     @classmethod
     def translate(cls, error: Exception, context: Optional[str] = None) -> dict:
-        """将异常转换为用户友好消息
-
-        Args:
-            error: 原始异常对象
-            context: 错误上下文（如 "recording", "transcription"）
-
-        Returns:
-            包含以下字段的字典：
-            - user_message: 用户友好消息
-            - technical_message: 技术详情（用于日志）
-            - category: 错误类别
-            - suggestions: 建议操作（可选）
-        """
+        """Translate an error into user-friendly info."""
         error_str = str(error)
         error_type = type(error).__name__
 
-        # 匹配错误模式
         for pattern, info in cls.ERROR_PATTERNS.items():
             if re.search(pattern, error_str, re.IGNORECASE):
                 return {
-                    "user_message": info["user_msg"],
+                    "user_message": _tr(info["user_msg"]),
                     "technical_message": f"{error_type}: {error_str}",
                     "category": info["category"],
                     "suggestions": cls._get_suggestions(info["category"], context),
                 }
 
-        # 未匹配到任何模式，返回通用消息
         return cls._get_generic_message(error, context)
 
     @classmethod
     def _get_generic_message(cls, error: Exception, context: Optional[str]) -> dict:
-        """获取通用错误消息"""
         error_type = type(error).__name__
         error_str = str(error)
 
-        # 根据上下文生成更具体的通用消息
         context_messages = {
-            "recording": "录音过程中出现错误",
-            "transcription": "语音识别过程中出现错误",
-            "ai_processing": "AI文本优化过程中出现错误",
-            "input": "文本输入过程中出现错误",
-            "hotkey": "快捷键注册过程中出现错误",
+            "recording": "An error occurred during recording.",
+            "transcription": "An error occurred during transcription.",
+            "ai_processing": "An error occurred during AI processing.",
+            "input": "An error occurred during input.",
+            "hotkey": "An error occurred during hotkey handling.",
         }
 
-        user_message = context_messages.get(context, "操作过程中出现未知错误")
+        user_message = context_messages.get(
+            context, "An unknown error occurred during the operation."
+        )
 
         return {
-            "user_message": f"{user_message}，请稍后重试",
+            "user_message": f"{_tr(user_message)} {_tr('Please try again later.')}",
             "technical_message": f"{error_type}: {error_str}",
             "category": "unknown",
-            "suggestions": ["重启应用", "检查日志文件获取详细信息"],
+            "suggestions": cls._get_suggestions("unknown", context),
         }
 
     @classmethod
     def _get_suggestions(cls, category: str, context: Optional[str]) -> list:
-        """根据错误类别获取建议操作"""
         suggestions_map = {
-            "audio_device": ["检查麦克风连接", "在设置中选择其他音频设备", "重启应用"],
-            "audio_overflow": [
-                "降低麦克风音量",
-                "更换质量更好的麦克风",
-                "调整音频设备设置",
+            "audio_device": [
+                "Check the audio device connection.",
+                "Try a different audio device.",
+                "Restart the app.",
             ],
-            "audio_system": ["重启应用", "检查系统音频服务", "重新插拔音频设备"],
+            "audio_overflow": [
+                "Lower the microphone volume.",
+                "Adjust the input device gain.",
+                "Try another microphone device.",
+            ],
+            "audio_system": [
+                "Restart the app.",
+                "Check the audio device driver.",
+                "Reconnect the audio device.",
+            ],
             "api_key": [
-                "在设置 → AI配置中设置正确的API密钥",
-                "检查API密钥是否有效",
-                "确认API服务商账户状态",
+                "Open AI Settings and configure the API key.",
+                "Verify the API key is correct.",
+                "Confirm the API key has not expired.",
             ],
             "api_auth": [
-                "检查API密钥是否正确",
-                "确认API服务商账户状态",
-                "重新生成API密钥",
+                "Verify the API key is correct.",
+                "Confirm the API key has not expired.",
+                "Regenerate the API key.",
             ],
-            "api_rate_limit": ["等待几分钟后重试", "升级API套餐", "更换API服务商"],
-            "api_server": ["等待几分钟后重试", "检查服务商状态页面", "更换API服务商"],
-            "network": ["检查网络连接", "检查防火墙设置", "尝试使用VPN"],
+            "api_rate_limit": [
+                "Try again later.",
+                "Upgrade your API plan.",
+                "Reduce API call frequency.",
+            ],
+            "api_server": [
+                "Try again later.",
+                "Check the service status page.",
+                "Switch to another API provider.",
+            ],
+            "network": [
+                "Check your network connection.",
+                "Switch to another network.",
+                "Disable VPN and try again.",
+            ],
             "model_not_found": [
-                "等待模型自动下载完成",
-                "检查网络连接",
-                "手动下载模型文件",
+                "Confirm the model files are downloaded.",
+                "Re-download the model.",
+                "Check the model path settings.",
             ],
             "gpu_memory": [
-                "关闭其他占用GPU的程序",
-                "在设置中切换到CPU模式",
-                "使用更小的模型（如medium或small）",
+                "Close other GPU-intensive programs.",
+                "Use a smaller model size (e.g., small/medium).",
+                "Consider CPU mode.",
             ],
             "gpu_unavailable": [
-                "检查CUDA是否正确安装",
-                "更新显卡驱动",
-                "在设置中切换到CPU模式",
+                "Confirm CUDA drivers are installed correctly.",
+                "Check whether the GPU is supported.",
+                "Consider CPU mode.",
             ],
             "hotkey_conflict": [
-                "在设置中更换快捷键",
-                "关闭占用快捷键的其他应用",
-                "使用不常用的组合键",
+                "Change the hotkey combination.",
+                "Close the application using the hotkey.",
+                "Restart the app.",
             ],
             "hotkey_invalid": [
-                "检查快捷键格式（如 ctrl+shift+v）",
-                "使用支持的按键组合",
-                "重置为默认快捷键",
+                "Check the hotkey format (e.g., ctrl+shift+v).",
+                "Ensure the hotkey includes modifier keys.",
+                "Reconfigure the hotkey.",
             ],
             "permission": [
-                "以管理员权限运行应用",
-                "检查文件夹权限",
-                "关闭安全软件重试",
+                "Run the app as administrator.",
+                "Check security software settings.",
+                "Ensure the app has required permissions.",
             ],
             "config_corrupt": [
-                "应用已自动重置配置",
-                "重新配置偏好设置",
-                "如有备份可手动恢复",
+                "Reconfigure application settings.",
+                "Check config file permissions.",
+                "Contact support.",
             ],
         }
 
-        return suggestions_map.get(category, ["重启应用", "查看日志获取详细信息"])
+        suggestions = suggestions_map.get(
+            category, ["Please try again later.", "Contact support if the issue persists."]
+        )
+        return [_tr(item) for item in suggestions]
 
 
 def get_user_friendly_error(error: Exception, context: Optional[str] = None) -> str:
-    """快捷函数：获取用户友好错误消息（仅返回消息字符串）
-
-    Args:
-        error: 原始异常对象
-        context: 错误上下文
-
-    Returns:
-        用户友好的错误消息字符串
-    """
+    """Convenience: return user-friendly message only."""
     result = ErrorMessageTranslator.translate(error, context)
     return result["user_message"]

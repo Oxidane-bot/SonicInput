@@ -23,7 +23,12 @@ uv sync --extra local --group dev
 uv run python build_nuitka.py
 ```
 
-**输出文件**：`dist/SonicInput-v{version}-win64.exe`
+**输出文件**：`dist/SonicInput-v{version}-win64.exe
+**可选离线包**:
+- 设置 `SONICINPUT_OFFLINE_MODELS_DIR` 指向模型根目录（包含两个已解压的模型文件夹）
+- 运行 `uv run python build_nuitka.py`
+- 输出 `dist/SonicInput-v{version}-win64-offline.zip`（包含 exe + `models/`）
+`
 
 **特性**：
 - 包含 sherpa-onnx C 扩展模块（~5MB）
@@ -230,3 +235,19 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 **最后更新**：2025-11-13
 **适用版本**：v0.3.0+
+
+
+## Release Script
+
+Use the helper script to build the exe and (optionally) the offline bundle:
+
+```powershell
+# Build exe only
+.\scripts\release.ps1
+
+# Build exe + offline zip (models dir must contain both model folders)
+.\scripts\release.ps1 -OfflineModelsDir "C:\path\to\models"
+
+# Optional: build 7z (default off)
+.\scripts\release.ps1 -OfflineModelsDir "C:\path\to\models" -Build7z -SevenZipPath "C:\Program Files\7-Zip\7z.exe"
+```

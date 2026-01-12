@@ -98,7 +98,7 @@ def get_default_config() -> Dict[str, Any]:
             "storage_path": "auto",
         },
         "logging": {
-            "level": "INFO",
+            "level": "WARNING",
             "console_output": True,
             "max_log_size_mb": 10,
             "max_backup_files": 2,

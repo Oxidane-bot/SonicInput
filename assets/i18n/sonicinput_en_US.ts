@@ -3026,4 +3026,296 @@ Right-click for menu, Double-click for settings</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
+<context>
+    <name>ModelDownload</name>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="129"/>
+        <source>Model Download</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="131"/>
+        <source>Downloading model: {model}
+Size: {size} MB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="177"/>
+        <source>Downloading model: {model}
+Progress: {downloaded:.1f} MB / {total:.1f} MB ({percent}%)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="202"/>
+        <source>Extracting model: {model}
+Please wait...</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ErrorMessages</name>
+    <message>
+        <source>Audio device does not support the current configuration. Please choose another device in Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio input overflow. Please lower microphone volume or switch devices.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No available microphone device found. Please check your microphone connection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio system error. Please restart the app or check your audio device.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>AI service API key is not set or invalid. Please configure it in Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>API authentication failed. Please verify your API key.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>API rate limit reached. Please try again later or upgrade your plan.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>AI service is temporarily unavailable. Please try again later.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Network connection failed. Please check your network and try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speech recognition model not found. The app will download it automatically. Please wait.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GPU out of memory. Switching to CPU mode (slower).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GPU not available. Using CPU mode for recognition (slower).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hotkey is already used by another application. Please change it in Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalid hotkey format. Please check your hotkey settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Insufficient permissions. Please run the app as administrator.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configuration file is corrupted. It has been reset to defaults.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>An error occurred during recording.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>An error occurred during transcription.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>An error occurred during AI processing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>An error occurred during input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>An error occurred during hotkey handling.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>An unknown error occurred during the operation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Please try again later.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check the audio device connection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try a different audio device.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restart the app.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lower the microphone volume.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust the input device gain.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try another microphone device.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check the audio device driver.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconnect the audio device.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open AI Settings and configure the API key.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verify the API key is correct.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm the API key has not expired.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Regenerate the API key.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Upgrade your API plan.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reduce API call frequency.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check the service status page.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Switch to another API provider.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check your network connection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Switch to another network.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disable VPN and try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm the model files are downloaded.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Re-download the model.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check the model path settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close other GPU-intensive programs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use a smaller model size (e.g., small/medium).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Consider CPU mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm CUDA drivers are installed correctly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check whether the GPU is supported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change the hotkey combination.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close the application using the hotkey.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check the hotkey format (e.g., ctrl+shift+v).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ensure the hotkey includes modifier keys.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconfigure the hotkey.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run the app as administrator.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check security software settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ensure the app has required permissions.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconfigure application settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check config file permissions.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Contact support.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Contact support if the issue persists.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try again later.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ModelMetadata</name>
+    <message>
+        <source>High-accuracy bilingual model (recommended)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ultra-lightweight bilingual model</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
 </TS>

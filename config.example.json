@@ -101,7 +101,7 @@
     "storage_path": "auto"
   },
     "logging": {
-        "level": "INFO",
+        "level": "WARNING",
         "console_output": true,
         "max_log_size_mb": 10,
         "max_backup_files": 2,

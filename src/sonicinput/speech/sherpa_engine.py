@@ -39,6 +39,7 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
         model_name: str = "paraformer",
         language: str = "zh",
         cache_dir: Optional[str] = None,
+        download_if_missing: bool = False,
     ):
         """初始化 sherpa-onnx 引擎
 
@@ -59,6 +60,7 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
         self.model_manager = SherpaModelManager(cache_dir)
         self.recognizer: Optional[sherpa_onnx.OnlineRecognizer] = None
         self._is_loaded = False
+        self._download_if_missing = download_if_missing
 
         logger.info(
             f"SherpaEngine initialized with model: {model_name}, language: {language}"
@@ -70,7 +72,7 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
         Returns:
             True if model loaded successfully
         """
-        return self.load_model()
+        return self.load_model(download_if_missing=self._download_if_missing)
 
     def _do_stop(self) -> bool:
         """Cleanup model resources (LifecycleComponent API)
@@ -81,7 +83,9 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
         self.unload_model()
         return True
 
-    def load_model(self, model_name: Optional[str] = None) -> bool:
+    def load_model(
+        self, model_name: Optional[str] = None, download_if_missing: bool = False
+    ) -> bool:
         """加载模型
 
         Args:
@@ -97,7 +101,9 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
             logger.info(f"Loading model: {self.model_name}")
 
             # 获取模型配置
-            model_config = self.model_manager.get_model_config(self.model_name)
+            model_config = self.model_manager.get_model_config(
+                self.model_name, download_if_missing=download_if_missing
+            )
 
             # 使用工厂方法创建识别器（sherpa-onnx 1.12+ API）
             if model_config["model_type"] == "paraformer":

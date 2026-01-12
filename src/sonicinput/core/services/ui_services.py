@@ -425,7 +425,7 @@ class UIModelService:
 
         return {"is_loaded": False, "model_name": "Unknown", "device": "Unknown"}
 
-    def load_model(self, model_name: str) -> bool:
+    def load_model(self, model_name: str, download_if_missing: bool = False) -> bool:
         """加载模型 - 通过ModelManager确保事件正确触发
 
         Args:
@@ -438,13 +438,23 @@ class UIModelService:
         if hasattr(self.speech_service, "model_manager"):
             model_manager = self.speech_service.model_manager
             if hasattr(model_manager, "load_model_sync"):
-                result = model_manager.load_model_sync(model_name)
+                try:
+                    result = model_manager.load_model_sync(
+                        model_name, download_if_missing=download_if_missing
+                    )
+                except TypeError:
+                    result = model_manager.load_model_sync(model_name)
                 return bool(result)
 
         # Fallback: 直接调用engine (向后兼容,虽然不会发送事件)
         engine = self._get_engine()
         if engine and hasattr(engine, "load_model"):
-            result = engine.load_model(model_name)
+            try:
+                result = engine.load_model(
+                    model_name, download_if_missing=download_if_missing
+                )
+            except TypeError:
+                result = engine.load_model(model_name)
             return bool(result)
 
         return False

@@ -3204,4 +3204,299 @@ Right-click for menu, Double-click for settings</source>
         <translation>退出</translation>
     </message>
 </context>
+<context>
+    <name>ModelDownload</name>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="129" />
+        <source>Model Download</source>
+        <translation>模型下载</translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="131" />
+        <source>Downloading model: {model}
+Size: {size} MB</source>
+        <translation>正在下载模型：{model}
+大小：{size} MB</translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="177" />
+        <source>Downloading model: {model}
+Progress: {downloaded:.1f} MB / {total:.1f} MB ({percent}%)</source>
+        <translation>正在下载模型：{model}
+进度：{downloaded:.1f} MB / {total:.1f} MB ({percent}%)</translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/speech/sherpa_models.py" line="202" />
+        <source>Extracting model: {model}
+Please wait...</source>
+        <translation>正在解压模型：{model}
+请稍候...</translation>
+    </message>
+</context>
+<context>
+    <name>ErrorMessages</name>
+    <message>
+        <source>Audio device does not support the current configuration. Please choose another device in Settings.</source>
+        <translation>音频设备不支持当前配置，请在设置中选择其他设备。</translation>
+    </message>
+    <message>
+        <source>Audio input overflow. Please lower microphone volume or switch devices.</source>
+        <translation>音频输入过载，请降低麦克风音量或更换设备。</translation>
+    </message>
+    <message>
+        <source>No available microphone device found. Please check your microphone connection.</source>
+        <translation>未找到可用的麦克风设备，请检查麦克风连接。</translation>
+    </message>
+    <message>
+        <source>Audio system error. Please restart the app or check your audio device.</source>
+        <translation>音频系统错误，请重启应用或检查音频设备。</translation>
+    </message>
+    <message>
+        <source>AI service API key is not set or invalid. Please configure it in Settings.</source>
+        <translation>AI 服务 API 密钥未设置或无效，请在设置中配置 API 密钥。</translation>
+    </message>
+    <message>
+        <source>API authentication failed. Please verify your API key.</source>
+        <translation>API 认证失败，请检查 API 密钥是否正确。</translation>
+    </message>
+    <message>
+        <source>API rate limit reached. Please try again later or upgrade your plan.</source>
+        <translation>API 调用次数超限，请稍后再试或升级套餐。</translation>
+    </message>
+    <message>
+        <source>AI service is temporarily unavailable. Please try again later.</source>
+        <translation>AI 服务暂时不可用，请稍后重试。</translation>
+    </message>
+    <message>
+        <source>Network connection failed. Please check your network and try again.</source>
+        <translation>网络连接失败，请检查网络后重试。</translation>
+    </message>
+    <message>
+        <source>Speech recognition model not found. The app will download it automatically. Please wait.</source>
+        <translation>未找到语音识别模型，应用会自动下载，请稍候。</translation>
+    </message>
+    <message>
+        <source>GPU out of memory. Switching to CPU mode (slower).</source>
+        <translation>GPU 内存不足，将切换到 CPU 模式（速度较慢）。</translation>
+    </message>
+    <message>
+        <source>GPU not available. Using CPU mode for recognition (slower).</source>
+        <translation>GPU 不可用，使用 CPU 模式进行识别（速度较慢）。</translation>
+    </message>
+    <message>
+        <source>Hotkey is already used by another application. Please change it in Settings.</source>
+        <translation>快捷键已被其他应用占用，请在设置中更换快捷键。</translation>
+    </message>
+    <message>
+        <source>Invalid hotkey format. Please check your hotkey settings.</source>
+        <translation>快捷键格式无效，请检查快捷键设置。</translation>
+    </message>
+    <message>
+        <source>Insufficient permissions. Please run the app as administrator.</source>
+        <translation>权限不足，请以管理员身份运行应用。</translation>
+    </message>
+    <message>
+        <source>Configuration file is corrupted. It has been reset to defaults.</source>
+        <translation>配置文件损坏，已重置为默认配置。</translation>
+    </message>
+    <message>
+        <source>An error occurred during recording.</source>
+        <translation>录音过程中出现错误。</translation>
+    </message>
+    <message>
+        <source>An error occurred during transcription.</source>
+        <translation>转录过程中出现错误。</translation>
+    </message>
+    <message>
+        <source>An error occurred during AI processing.</source>
+        <translation>AI 处理过程中出现错误。</translation>
+    </message>
+    <message>
+        <source>An error occurred during input.</source>
+        <translation>输入过程中出现错误。</translation>
+    </message>
+    <message>
+        <source>An error occurred during hotkey handling.</source>
+        <translation>快捷键处理过程中出现错误。</translation>
+    </message>
+    <message>
+        <source>An unknown error occurred during the operation.</source>
+        <translation>操作过程中出现未知错误。</translation>
+    </message>
+    <message>
+        <source>Please try again later.</source>
+        <translation>请稍后再试。</translation>
+    </message>
+    <message>
+        <source>Check the audio device connection.</source>
+        <translation>检查音频设备连接。</translation>
+    </message>
+    <message>
+        <source>Try a different audio device.</source>
+        <translation>尝试更换音频设备。</translation>
+    </message>
+    <message>
+        <source>Restart the app.</source>
+        <translation>重启应用。</translation>
+    </message>
+    <message>
+        <source>Lower the microphone volume.</source>
+        <translation>降低麦克风音量。</translation>
+    </message>
+    <message>
+        <source>Adjust the input device gain.</source>
+        <translation>调整输入设备增益。</translation>
+    </message>
+    <message>
+        <source>Try another microphone device.</source>
+        <translation>尝试其他麦克风设备。</translation>
+    </message>
+    <message>
+        <source>Check the audio device driver.</source>
+        <translation>检查音频设备驱动。</translation>
+    </message>
+    <message>
+        <source>Reconnect the audio device.</source>
+        <translation>重新连接音频设备。</translation>
+    </message>
+    <message>
+        <source>Open AI Settings and configure the API key.</source>
+        <translation>前往 AI 设置页面配置 API 密钥。</translation>
+    </message>
+    <message>
+        <source>Verify the API key is correct.</source>
+        <translation>检查 API 密钥是否正确。</translation>
+    </message>
+    <message>
+        <source>Confirm the API key has not expired.</source>
+        <translation>确认 API 密钥未过期。</translation>
+    </message>
+    <message>
+        <source>Regenerate the API key.</source>
+        <translation>重新生成 API 密钥。</translation>
+    </message>
+    <message>
+        <source>Upgrade your API plan.</source>
+        <translation>升级 API 套餐。</translation>
+    </message>
+    <message>
+        <source>Reduce API call frequency.</source>
+        <translation>降低 API 调用频率。</translation>
+    </message>
+    <message>
+        <source>Check the service status page.</source>
+        <translation>查看服务状态页面。</translation>
+    </message>
+    <message>
+        <source>Switch to another API provider.</source>
+        <translation>切换到其他 API 提供商。</translation>
+    </message>
+    <message>
+        <source>Check your network connection.</source>
+        <translation>检查网络连接。</translation>
+    </message>
+    <message>
+        <source>Switch to another network.</source>
+        <translation>切换网络环境。</translation>
+    </message>
+    <message>
+        <source>Disable VPN and try again.</source>
+        <translation>关闭 VPN 后重试。</translation>
+    </message>
+    <message>
+        <source>Confirm the model files are downloaded.</source>
+        <translation>确认模型文件已下载。</translation>
+    </message>
+    <message>
+        <source>Re-download the model.</source>
+        <translation>重新下载模型。</translation>
+    </message>
+    <message>
+        <source>Check the model path settings.</source>
+        <translation>检查模型路径设置。</translation>
+    </message>
+    <message>
+        <source>Close other GPU-intensive programs.</source>
+        <translation>关闭其他占用 GPU 的程序。</translation>
+    </message>
+    <message>
+        <source>Use a smaller model size (e.g., small/medium).</source>
+        <translation>使用更小的模型（如 small/medium）。</translation>
+    </message>
+    <message>
+        <source>Consider CPU mode.</source>
+        <translation>考虑使用 CPU 模式。</translation>
+    </message>
+    <message>
+        <source>Confirm CUDA drivers are installed correctly.</source>
+        <translation>确认 CUDA 驱动安装正确。</translation>
+    </message>
+    <message>
+        <source>Check whether the GPU is supported.</source>
+        <translation>检查 GPU 是否支持。</translation>
+    </message>
+    <message>
+        <source>Change the hotkey combination.</source>
+        <translation>更换快捷键组合。</translation>
+    </message>
+    <message>
+        <source>Close the application using the hotkey.</source>
+        <translation>关闭占用快捷键的应用。</translation>
+    </message>
+    <message>
+        <source>Check the hotkey format (e.g., ctrl+shift+v).</source>
+        <translation>检查快捷键格式（如 ctrl+shift+v）。</translation>
+    </message>
+    <message>
+        <source>Ensure the hotkey includes modifier keys.</source>
+        <translation>确保快捷键包含修饰键。</translation>
+    </message>
+    <message>
+        <source>Reconfigure the hotkey.</source>
+        <translation>重新设置快捷键。</translation>
+    </message>
+    <message>
+        <source>Run the app as administrator.</source>
+        <translation>以管理员身份运行应用。</translation>
+    </message>
+    <message>
+        <source>Check security software settings.</source>
+        <translation>检查安全软件设置。</translation>
+    </message>
+    <message>
+        <source>Ensure the app has required permissions.</source>
+        <translation>确保应用具有必要权限。</translation>
+    </message>
+    <message>
+        <source>Reconfigure application settings.</source>
+        <translation>重新配置应用设置。</translation>
+    </message>
+    <message>
+        <source>Check config file permissions.</source>
+        <translation>检查配置文件权限。</translation>
+    </message>
+    <message>
+        <source>Contact support.</source>
+        <translation>联系技术支持。</translation>
+    </message>
+    <message>
+        <source>Contact support if the issue persists.</source>
+        <translation>如问题持续请联系支持。</translation>
+    </message>
+    <message>
+        <source>Try again later.</source>
+        <translation>请稍后再试。</translation>
+    </message>
+</context>
+<context>
+    <name>ModelMetadata</name>
+    <message>
+        <source>High-accuracy bilingual model (recommended)</source>
+        <translation>高精度中英双语模型（推荐）</translation>
+    </message>
+    <message>
+        <source>Ultra-lightweight bilingual model</source>
+        <translation>超轻量级中英双语模型</translation>
+    </message>
+</context>
 </TS>

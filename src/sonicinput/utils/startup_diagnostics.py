@@ -100,8 +100,11 @@ class StartupDiagnostics:
             "sonicinput.ui.main_window",
             "sonicinput.ui.recording_overlay",
             "sonicinput.audio.recorder",
-            "sonicinput.speech.gpu_manager",
         ]
+
+        # GPU 后端在大多数用户环境下不是必需，默认跳过；显式开启时再检测
+        if os.getenv("VOICE_INPUT_ENABLE_GPU") or os.getenv("CUDA_VISIBLE_DEVICES"):
+            app_imports.append("sonicinput.speech.gpu_manager")
 
         # External dependencies
         external_imports = ["pynput", "loguru", "requests", "numpy", "samplerate"]
@@ -507,6 +510,11 @@ class StartupDiagnostics:
             "pyd_load_error": None,
             "onnxruntime_locations_checked": [],
             "onnxruntime_found": False,
+            "model_cached": False,
+            "model_dir": None,
+            "model_cache_root": None,
+            "model_cache_source": None,
+            "model_missing_files": [],
             "vc_runtime_present": {},
             "errors": [],
             "warnings": [],
@@ -562,6 +570,35 @@ class StartupDiagnostics:
                 f"Missing VC++ runtime DLLs: {', '.join(missing_vc)}"
             )
 
+        # 3) 模型缓存检查（默认 paraformer）
+        try:
+            from sonicinput.speech.sherpa_models import SherpaModelManager
+
+            model_mgr = SherpaModelManager()
+            result["model_cache_root"] = str(model_mgr.cache_dir)
+            result["model_cache_source"] = getattr(model_mgr, "cache_dir_source", None)
+            model_dir = model_mgr._get_model_dir("paraformer")
+            result["model_dir"] = str(model_dir)
+            required = ["tokens.txt", "encoder.int8.onnx", "decoder.int8.onnx"]
+            missing_files = [f for f in required if not (model_dir / f).exists()]
+            result["model_missing_files"] = missing_files
+            result["model_cached"] = len(missing_files) == 0
+
+            # 检查缓存目录可写（下载/解压需要）
+            model_mgr.cache_dir.mkdir(parents=True, exist_ok=True)
+            test_file = model_mgr.cache_dir / ".diag_write"
+            try:
+                test_file.touch()
+            finally:
+                test_file.unlink(missing_ok=True)
+
+            if missing_files:
+                result["warnings"].append(
+                    f"Model not cached or incomplete: missing {', '.join(missing_files)}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"Model cache check failed: {exc}")
+
         result["available"] = (
             result["sherpa_onnx_found"]
             and result["pyd_exists"]
@@ -609,8 +646,11 @@ class StartupDiagnostics:
                 f"Critical imports failed: {critical_failures}"
             )
 
+        optional_ignore = {"sonicinput.speech.gpu_manager"}  # GPU 后端非必需
         optional_failures = [
-            imp for imp in failed_imports if imp not in critical_imports
+            imp
+            for imp in failed_imports
+            if imp not in critical_imports and imp not in optional_ignore
         ]
         if optional_failures:
             summary["warnings"].append(f"Optional imports failed: {optional_failures}")
@@ -622,6 +662,13 @@ class StartupDiagnostics:
                 "Cannot write to application data directory"
             )
             summary["overall_status"] = "critical"
+        # 低磁盘空间预警（模型解压/下载容易失败）
+        disk = fs_check.get("disk_space_available", {})
+        free_gb = disk.get("free_gb")
+        if isinstance(free_gb, (int, float)) and free_gb < 10:
+            summary["warnings"].append(
+                f"Low free disk space: {free_gb} GB remaining (may block model download)"
+            )
 
         # Generate recommendations
         if summary["critical_issues"]:
@@ -645,6 +692,9 @@ class StartupDiagnostics:
                 summary["overall_status"] = "critical"
             if details.get("warnings"):
                 summary["warnings"].extend(details["warnings"])
+            # 专门标记本地 ASR 可用性
+            if check_name == "local_asr" and not details.get("available", False):
+                summary["warnings"].append("Local ASR unavailable; will fall back to cloud/stub")
 
         # Final status determination
         if len(summary["critical_issues"]) > 0:

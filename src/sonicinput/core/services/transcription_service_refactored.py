@@ -479,6 +479,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         timeout: int = 300,
         callback: Optional[Callable] = None,
         error_callback: Optional[Callable] = None,
+        download_if_missing: bool = False,
     ) -> str:
         """加载模型（异步）
 
@@ -494,7 +495,11 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         # 提交模型加载任务
         task_id = self.task_queue_manager.submit_task(
             task_type="load_model",
-            data={"model_name": model_name, "timeout": timeout},
+            data={
+                "model_name": model_name,
+                "timeout": timeout,
+                "download_if_missing": download_if_missing,
+            },
             priority=TaskPriority.HIGH,
             callback=callback,
             error_callback=error_callback,
@@ -759,8 +764,11 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         """
         model_name = task_data.get("model_name")
         timeout = task_data.get("timeout", 300)
+        download_if_missing = task_data.get("download_if_missing", False)
 
-        success = self.model_manager.load_model(model_name, timeout)
+        success = self.model_manager.load_model(
+            model_name, timeout, download_if_missing=download_if_missing
+        )
 
         if success:
             # 更新转录核心

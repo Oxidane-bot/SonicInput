@@ -209,6 +209,47 @@ def _find_onnxruntime_dll() -> Path | None:
     return None
 
 
+def _resolve_offline_models_dir() -> Path | None:
+    candidates = [
+        os.environ.get("SONICINPUT_OFFLINE_MODELS_DIR"),
+        os.environ.get("OFFLINE_MODELS_DIR"),
+    ]
+    for candidate in candidates:
+        if candidate:
+            return Path(candidate)
+    return None
+
+
+def _build_offline_bundle(exe_path: Path, models_dir: Path, dist_dir: Path) -> Path | None:
+    if not models_dir.exists():
+        print(f"[WARN] Offline models dir does not exist: {models_dir}")
+        return None
+
+    expected_dirs = [
+        "sherpa-onnx-streaming-paraformer-bilingual-zh-en",
+        "sherpa-onnx-streaming-zipformer-small-bilingual-zh-en-2023-02-16",
+    ]
+    missing = [name for name in expected_dirs if not (models_dir / name).is_dir()]
+    if missing:
+        print("[WARN] Offline models dir is missing required model folders:")
+        for name in missing:
+            print(f"  - {name}")
+        return None
+
+    staging_dir = dist_dir / "offline_bundle"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(exe_path, staging_dir / exe_path.name)
+    shutil.copytree(models_dir, staging_dir / "models")
+
+    zip_base = dist_dir / f"{exe_path.stem}-offline"
+    zip_path = Path(shutil.make_archive(str(zip_base), "zip", root_dir=staging_dir))
+    print(f"[OFFLINE] Bundle created: {zip_path}")
+    return zip_path
+
+
 version = get_version()
 print(f"Building SonicInput v{version}")
 build_start = time.perf_counter()
@@ -318,6 +359,9 @@ if result.returncode == 0:
         print(f"[SIZE] {new_name.stat().st_size / (1024 * 1024):.2f} MB")
         print(f"[TIME] Compile: {compile_elapsed:.2f}s")
         print(f"[TIME] Total: {total_elapsed:.2f}s")
+        offline_models_dir = _resolve_offline_models_dir()
+        if offline_models_dir:
+            _build_offline_bundle(new_name, offline_models_dir, dist_dir)
     else:
         print(f"\n[WARNING] Expected output file not found: {old_name}")
         # List dist directory contents

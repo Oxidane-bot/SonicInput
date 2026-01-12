@@ -154,7 +154,7 @@ class UnifiedLogger:
 
         try:
             # 读取日志级别
-            level_str = self._config_service.get_setting("logging.level", "INFO")
+            level_str = self._config_service.get_setting("logging.level", "WARNING")
             self._min_level = self._string_to_log_level(level_str)
 
             # 读取控制台输出设置
@@ -195,7 +195,7 @@ class UnifiedLogger:
             "ERROR": LogLevel.ERROR,
             "CRITICAL": LogLevel.CRITICAL,
         }
-        return level_map.get(level_str.upper(), LogLevel.INFO)
+        return level_map.get(level_str.upper(), LogLevel.WARNING)
 
     def _rotate_logs(self) -> None:
         """检查并按大小滚动日志"""
