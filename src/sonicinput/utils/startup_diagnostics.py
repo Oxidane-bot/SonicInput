@@ -694,7 +694,9 @@ class StartupDiagnostics:
                 summary["warnings"].extend(details["warnings"])
             # 专门标记本地 ASR 可用性
             if check_name == "local_asr" and not details.get("available", False):
-                summary["warnings"].append("Local ASR unavailable; will fall back to cloud/stub")
+                summary["warnings"].append(
+                    "Local ASR unavailable; will fall back to cloud/stub"
+                )
 
         # Final status determination
         if len(summary["critical_issues"]) > 0:

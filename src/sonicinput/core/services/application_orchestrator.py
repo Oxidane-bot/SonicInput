@@ -359,7 +359,9 @@ class ApplicationOrchestrator:
         # 否则根据配置决定
         return self.config.get_setting(ConfigKeys.TRANSCRIPTION_LOCAL_AUTO_LOAD, True)
 
-    def _load_model_async(self, model_name: str, download_if_missing: bool = False) -> None:
+    def _load_model_async(
+        self, model_name: str, download_if_missing: bool = False
+    ) -> None:
         """异步加载语音模型"""
         if not self._speech_service:
             app_logger.log_audio_event(

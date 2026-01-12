@@ -426,7 +426,9 @@ class MainWindow(QMainWindow):
                 QApplication.processEvents()
 
                 try:
-                    success = self.ui_model_service.load_model(model_name, download_if_missing=True)
+                    success = self.ui_model_service.load_model(
+                        model_name, download_if_missing=True
+                    )
                     progress.close()
 
                     if not success:

@@ -145,6 +145,7 @@ class SherpaModelManager(LifecycleComponent):
         progress_dialog = None
         if PYSIDE6_AVAILABLE:
             try:
+
                 def _tr(text: str) -> str:
                     return QCoreApplication.translate("ModelDownload", text)
 

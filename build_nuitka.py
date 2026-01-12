@@ -220,7 +220,9 @@ def _resolve_offline_models_dir() -> Path | None:
     return None
 
 
-def _build_offline_bundle(exe_path: Path, models_dir: Path, dist_dir: Path) -> Path | None:
+def _build_offline_bundle(
+    exe_path: Path, models_dir: Path, dist_dir: Path
+) -> Path | None:
     if not models_dir.exists():
         print(f"[WARN] Offline models dir does not exist: {models_dir}")
         return None

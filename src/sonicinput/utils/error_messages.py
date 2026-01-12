@@ -222,7 +222,8 @@ class ErrorMessageTranslator:
         }
 
         suggestions = suggestions_map.get(
-            category, ["Please try again later.", "Contact support if the issue persists."]
+            category,
+            ["Please try again later.", "Contact support if the issue persists."],
         )
         return [_tr(item) for item in suggestions]
 
