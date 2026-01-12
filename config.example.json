@@ -119,7 +119,6 @@
     ]
   },
   "advanced": {
-    "gpu_memory_fraction": 0.8,
     "audio_processing": {
       "normalize_audio": true,
       "remove_silence": true,

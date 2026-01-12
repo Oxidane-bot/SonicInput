@@ -5,6 +5,7 @@
 """
 
 from pathlib import Path
+import copy
 from typing import Any, Dict, Optional
 
 from ...utils import app_logger
@@ -196,9 +197,17 @@ class UISettingsService:
 
     def get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
-        if hasattr(self.config_service, "_default_config"):
-            return self.config_service._default_config
-        return {}
+        if hasattr(self.config_service, "get_default_config"):
+            try:
+                return copy.deepcopy(self.config_service.get_default_config())
+            except Exception:
+                pass
+        try:
+            from .config.config_defaults import get_default_config
+
+            return copy.deepcopy(get_default_config())
+        except Exception:
+            return {}
 
     def get_event_service(self) -> IEventService:
         """获取事件服务"""

@@ -242,9 +242,6 @@ class ConfigKeys:
     """启用的日志类别 (List[str])"""
 
     # ==================== Advanced (高级配置) ====================
-    ADVANCED_GPU_MEMORY_FRACTION = "advanced.gpu_memory_fraction"
-    """GPU内存占用比例 (float): 0.0-1.0"""
-
     ADVANCED_AUDIO_PROCESSING_NORMALIZE = "advanced.audio_processing.normalize_audio"
     """音频标准化 (bool)"""
 

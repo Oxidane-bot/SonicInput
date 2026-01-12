@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ..core.services.config.app_constants import Paths
-from ..core.services.config.defaults_constants import Defaults
 
 # Windows平台窗口隐藏标志
 if sys.platform == "win32":
@@ -419,76 +418,6 @@ def find_available_port(
             continue
 
     return None
-
-
-def cleanup_old_files(
-    directory: Union[str, Path],
-    max_age_days: int = 7,
-    pattern: str = "*",
-    dry_run: bool = False,
-) -> List[Path]:
-    """Clean up old files in directory
-
-    Args:
-        directory: Directory to clean
-        max_age_days: Maximum age in days
-        pattern: File pattern to match
-        dry_run: If True, only return files that would be deleted
-
-    Returns:
-        List of deleted (or would-be-deleted) files
-    """
-    directory = Path(directory)
-    if not directory.exists():
-        return []
-
-    cutoff_time = time.time() - (max_age_days * 24 * 3600)
-    deleted_files = []
-
-    for file_path in directory.glob(pattern):
-        if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
-            if not dry_run:
-                try:
-                    file_path.unlink()
-                    deleted_files.append(file_path)
-                except OSError:
-                    pass  # File might be in use
-            else:
-                deleted_files.append(file_path)
-
-    return deleted_files
-
-
-def get_default_config() -> Dict[str, Any]:
-    """Get default configuration
-
-    Returns:
-        Default configuration dictionary
-    """
-    from ..core.services.config.config_keys import ConfigKeys
-
-    return {
-        ConfigKeys.RECORDING_HOTKEY: Defaults.DEFAULT_HOTKEY,
-        ConfigKeys.WHISPER_MODEL: Defaults.DEFAULT_WHISPER_MODEL,
-        ConfigKeys.SPEECH_LANGUAGE: Defaults.DEFAULT_WHISPER_LANGUAGE,
-        ConfigKeys.WHISPER_TEMPERATURE: Defaults.DEFAULT_WHISPER_TEMPERATURE,
-        ConfigKeys.AUDIO_SAMPLE_RATE: Defaults.DEFAULT_SAMPLE_RATE,
-        ConfigKeys.AUDIO_CHANNELS: Defaults.DEFAULT_CHANNELS,
-        ConfigKeys.OVERLAY_POSITION: Defaults.DEFAULT_OVERLAY_POSITION_PRESET,
-        ConfigKeys.UI_THEME: Defaults.DEFAULT_THEME,
-        ConfigKeys.NOTIFICATIONS_ENABLED: True,
-        ConfigKeys.AUTO_START: False,
-        ConfigKeys.LOG_LEVEL: "INFO",
-        ConfigKeys.HOTKEYS_ENABLED: True,
-        ConfigKeys.TEXT_OPTIMIZATION_ENABLED: True,
-        ConfigKeys.OVERLAY_ENABLED: True,
-        ConfigKeys.OVERLAY_OPACITY: 0.9,
-        ConfigKeys.NOISE_REDUCTION_ENABLED: True,
-        ConfigKeys.VOLUME_THRESHOLD: 0.1,
-        ConfigKeys.RECORDING_TIMEOUT: 30,
-        ConfigKeys.OPENROUTER_TIMEOUT: Defaults.DEFAULT_TIMEOUT,
-        ConfigKeys.OPENROUTER_MAX_RETRIES: Defaults.DEFAULT_MAX_RETRIES,
-    }
 
 
 class SingletonMeta(type):

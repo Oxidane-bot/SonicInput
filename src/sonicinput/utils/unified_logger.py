@@ -99,6 +99,8 @@ class TraceContext:
 class UnifiedLogger:
     """统一日志系统 - 单例模式"""
 
+    _MAX_LOG_SIZE_MB = 100
+
     _instance = None
     _lock = threading.Lock()
 
@@ -126,10 +128,14 @@ class UnifiedLogger:
         self._log_file = log_dir / "app.log"
         self._max_log_size_mb = 10
         self._max_backup_files = 2
+        self._keep_logs_days = 7
 
         # 追踪栈（每线程）
         self._trace_stack: Dict[int, List[TraceContext]] = {}
         self._trace_counter = 0
+
+        # Defer log retention cleanup until after config is loaded to avoid
+        # early import cycles during module initialization.
 
     @staticmethod
     def _is_dev_mode() -> bool:
@@ -162,11 +168,34 @@ class UnifiedLogger:
                 "logging.console_output", False
             )
 
-            self._max_log_size_mb = self._config_service.get_setting(
-                "logging.max_log_size_mb", 10
+            max_log_size_mb = self._config_service.get_setting(
+                "logging.max_log_size_mb", self._max_log_size_mb
             )
-            self._max_backup_files = self._config_service.get_setting(
-                "logging.max_backup_files", 2
+            max_backup_files = self._config_service.get_setting(
+                "logging.max_backup_files", self._max_backup_files
+            )
+            keep_logs_days = self._config_service.get_setting(
+                "logging.keep_logs_days", self._keep_logs_days
+            )
+
+            self._max_log_size_mb = self._validate_positive_number(
+                max_log_size_mb,
+                default=self._max_log_size_mb,
+                name="logging.max_log_size_mb",
+                min_value=1.0,
+                max_value=self._MAX_LOG_SIZE_MB,
+            )
+            self._max_backup_files = self._validate_positive_int(
+                max_backup_files,
+                default=self._max_backup_files,
+                name="logging.max_backup_files",
+                min_value=1,
+            )
+            self._keep_logs_days = self._validate_positive_int(
+                keep_logs_days,
+                default=self._keep_logs_days,
+                name="logging.keep_logs_days",
+                min_value=1,
             )
 
             # 读取启用的类别
@@ -174,17 +203,33 @@ class UnifiedLogger:
                 "logging.enabled_categories", []
             )
             if enabled_categories_str:
-                self._enabled_categories = set(
-                    LogCategory(cat) for cat in enabled_categories_str
-                )
+                resolved_categories = set()
+                invalid_categories = []
+                for cat in enabled_categories_str:
+                    try:
+                        if isinstance(cat, LogCategory):
+                            resolved_categories.add(cat)
+                        else:
+                            resolved_categories.add(LogCategory(str(cat)))
+                    except Exception:
+                        invalid_categories.append(cat)
+
+                if resolved_categories:
+                    self._enabled_categories = resolved_categories
+                else:
+                    self._enabled_categories = set(LogCategory)
+
+                if invalid_categories:
+                    self._warn_config(
+                        f"Ignoring unknown log categories: {invalid_categories}"
+                    )
             else:
                 self._enabled_categories = set(LogCategory)
 
         except Exception as e:
-            print(
-                f"[LOG WARNING] Failed to load logger settings from config: {e}",
-                file=sys.stderr,
-            )
+            self._warn_config(f"Failed to load logger settings from config: {e}")
+
+        self._cleanup_old_logs()
 
     def _string_to_log_level(self, level_str: str) -> LogLevel:
         """将字符串转换为 LogLevel 枚举"""
@@ -222,8 +267,83 @@ class UnifiedLogger:
 
             backup = self._log_file.with_name("app.log.1")
             self._log_file.replace(backup)
-        except Exception:
+        except Exception as e:
+            self._warn_config(f"Log rotation failed: {e}")
             return
+
+    def _cleanup_old_logs(self) -> None:
+        """按天清理过期日志文件"""
+        if self._keep_logs_days < 1:
+            return
+
+        try:
+            cutoff_time = time.time() - (self._keep_logs_days * 24 * 3600)
+            for file_path in self._log_file.parent.glob("app.log*"):
+                if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                    try:
+                        file_path.unlink()
+                    except OSError:
+                        continue
+        except Exception as e:
+            self._warn_config(f"Log retention cleanup failed: {e}")
+
+    def _warn_config(self, message: str) -> None:
+        _safe_print(f"[LOG WARNING] {message}", output_stream=sys.stderr)
+
+    def _validate_positive_int(
+        self,
+        value: Any,
+        default: int,
+        name: str,
+        min_value: int = 1,
+        max_value: Union[int, None] = None,
+    ) -> int:
+        try:
+            if isinstance(value, bool):
+                raise ValueError("bool is not valid")
+            if isinstance(value, str):
+                value = value.strip()
+                if value == "":
+                    raise ValueError("empty string")
+                value = int(float(value))
+            elif isinstance(value, (int, float)):
+                value = int(value)
+            else:
+                raise ValueError("unsupported type")
+            if value < min_value:
+                raise ValueError("too small")
+            if max_value is not None and value > max_value:
+                raise ValueError("too large")
+            return value
+        except Exception:
+            self._warn_config(f"Invalid {name} value '{value}', using {default}")
+            return default
+
+    def _validate_positive_number(
+        self,
+        value: Any,
+        default: float,
+        name: str,
+        min_value: float = 1.0,
+        max_value: Union[float, None] = None,
+    ) -> float:
+        try:
+            if isinstance(value, bool):
+                raise ValueError("bool is not valid")
+            if isinstance(value, str):
+                value = float(value.strip())
+            elif isinstance(value, (int, float)):
+                value = float(value)
+            else:
+                raise ValueError("unsupported type")
+            if value < min_value:
+                raise ValueError("too small")
+            if max_value is not None and value > max_value:
+                raise ValueError("too large")
+            return value
+        except Exception:
+            self._warn_config(f"Invalid {name} value '{value}', using {default}")
+            return float(default)
 
     def set_log_level(self, level: "Union[str, LogLevel]") -> None:
         """动态修改日志级别

@@ -1,5 +1,6 @@
 """配置读取服务 - 单一职责：配置读取和查询"""
 
+import copy
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional, TypeVar
@@ -46,7 +47,7 @@ class ConfigReader:
                 )
             else:
                 # 使用默认配置
-                self._config = self._default_config.copy()
+                self._config = copy.deepcopy(self._default_config)
 
                 app_logger.log_audio_event(
                     "Using default configuration",
@@ -57,7 +58,7 @@ class ConfigReader:
 
         except Exception as e:
             app_logger.log_error(e, "config_reader_load")
-            self._config = self._default_config.copy()
+            self._config = copy.deepcopy(self._default_config)
             return False
 
     def get_setting(self, key: str, default: Optional[T] = None) -> T:
@@ -92,7 +93,7 @@ class ConfigReader:
         Returns:
             配置字典的深拷贝
         """
-        return self._config.copy()
+        return copy.deepcopy(self._config)
 
     def _get_default_value(self, key: str) -> Any:
         """获取配置项的默认值
@@ -113,7 +114,7 @@ class ConfigReader:
                 else:
                     return None
 
-            return value
+            return copy.deepcopy(value)
 
         except Exception:
             return None
@@ -130,7 +131,7 @@ class ConfigReader:
         Returns:
             合并后的配置
         """
-        result = default.copy()
+        result = copy.deepcopy(default)
 
         def merge_recursive(base: Dict[str, Any], update: Dict[str, Any]) -> None:
             for key, value in update.items():

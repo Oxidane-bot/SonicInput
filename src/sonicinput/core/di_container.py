@@ -265,10 +265,6 @@ def create_container() -> "DIContainer":
     """创建依赖注入容器实例并注册所有服务"""
     container = DIContainer()
 
-    # NOTE: ConfigReloadServiceRegistry removed in Phase 2 refactor
-    # TODO: Replace with new HotReloadManager in Phase 3.5
-    # config_reload_registry = ConfigReloadServiceRegistry()
-
     # 显式导入接口（避免import *）
     from ..ai import AIClientFactory
     from ..audio import AudioRecorder
@@ -306,14 +302,6 @@ def create_container() -> "DIContainer":
 
     # Hot Reload Manager - 单例 (Phase 3.5.2b: Registered for VoiceInputApp)
     container.register_singleton(HotReloadManager, HotReloadManager)
-
-    # TODO (Phase 2.3): Replace with HotReloadManager
-    # 配置重载协调器已删除,将在Phase 2.3实现新的HotReloadManager
-    # def create_config_reload_coordinator(container):
-    #     ...
-    # container.register_singleton(
-    #     IConfigReloadService, factory=create_config_reload_coordinator
-    # )
 
     # 历史记录服务 - 单例
     # IMPORTANT: Create instance eagerly and reuse it for true singleton behavior
@@ -431,14 +419,6 @@ def create_container() -> "DIContainer":
                     "Local transcription service failed to start"
                 )
 
-            # 注册到配置重载服务注册中心（带工厂）
-            # TODO: Replace with HotReloadManager
-            # config_reload_registry.register(
-            #     "transcription_service",
-            #     transcription_service,
-            #     factory=lambda: create_speech_service(container)
-            # )
-
             return transcription_service
         else:
             # 云提供商直接返回（Groq/SiliconFlow/Qwen 已实现完整的 ISpeechService）
@@ -459,14 +439,6 @@ def create_container() -> "DIContainer":
                     "service_type": type(cloud_service).__name__,
                 },
             )
-
-            # 注册到配置重载服务注册中心（带工厂）
-            # TODO: Replace with HotReloadManager
-            # config_reload_registry.register(
-            #     "transcription_service",
-            #     cloud_service,
-            #     factory=lambda: create_speech_service(container)
-            # )
 
             return cloud_service
 
@@ -521,14 +493,6 @@ def create_container() -> "DIContainer":
         hotkey_service = HotkeyService(config, hotkey_callback)
 
         # Note: Do NOT call initialize() here - VoiceInputApp will do it
-
-        # 注册到配置重载服务注册中心（带工厂）
-        # TODO: Replace with HotReloadManager
-        # config_reload_registry.register(
-        #     "hotkey_service",
-        #     hotkey_service,
-        #     factory=lambda: create_hotkey_service(container)
-        # )
 
         return hotkey_service
 

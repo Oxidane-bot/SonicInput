@@ -116,7 +116,6 @@ def get_default_config() -> Dict[str, Any]:
             ],
         },
         "advanced": {
-            "gpu_memory_fraction": 0.8,
             "audio_processing": {
                 "normalize_audio": True,
                 "remove_silence": True,

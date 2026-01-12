@@ -4,6 +4,7 @@
 UI组件通过此适配器访问业务逻辑，不直接依赖具体的业务实现。
 """
 
+import copy
 from typing import Any, Dict, Optional
 
 from ...utils import app_logger
@@ -147,7 +148,7 @@ class UISettingsServiceAdapter:
         # are not present on RefactoredConfigService.
         from .config.config_defaults import get_default_config
 
-        return get_default_config()
+        return copy.deepcopy(get_default_config())
 
     def get_event_service(self) -> IEventService:
         """获取事件服务"""

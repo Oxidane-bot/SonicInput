@@ -354,6 +354,12 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
         """
         return self._reader.get_all_settings()
 
+    def get_default_config(self) -> Dict[str, Any]:
+        """获取默认配置的副本"""
+        from .config_defaults import get_default_config
+
+        return copy.deepcopy(get_default_config())
+
     def get_config_path(self) -> Path:
         """获取配置文件路径
 
