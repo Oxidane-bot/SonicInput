@@ -24,10 +24,6 @@ from .services.ui_services import (
     UISettingsService,
 )
 
-# Global singleton instance for HistoryStorageService
-# This must be at module level to work with global keyword in create_history_service()
-_history_service_instance = None
-
 T = TypeVar("T")
 
 
@@ -237,6 +233,18 @@ class DIContainer:
 
         Useful for testing or resetting the container.
         """
+        from ..utils import app_logger
+
+        # Best-effort cleanup for resolved singleton instances
+        for interface, instance in reversed(list(self._singletons.items())):
+            try:
+                if hasattr(instance, "stop"):
+                    instance.stop()
+                elif hasattr(instance, "cleanup"):
+                    instance.cleanup()
+            except Exception as e:
+                app_logger.log_error(e, f"di_container_clear_{interface.__name__}")
+
         self._registrations.clear()
         self._singletons.clear()
 
@@ -304,15 +312,11 @@ def create_container() -> "DIContainer":
     container.register_singleton(HotReloadManager, HotReloadManager)
 
     # 历史记录服务 - 单例
-    # IMPORTANT: Create instance eagerly and reuse it for true singleton behavior
     from .services.storage import HistoryStorageService
 
     def create_history_service(container):
-        global _history_service_instance
-        if _history_service_instance is None:
-            config = container.resolve(IConfigService)
-            _history_service_instance = HistoryStorageService(config)
-        return _history_service_instance
+        config = container.resolve(IConfigService)
+        return HistoryStorageService(config)
 
     container.register_singleton(
         HistoryStorageService, factory=lambda: create_history_service(container)

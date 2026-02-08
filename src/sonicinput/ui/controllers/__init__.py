@@ -6,11 +6,9 @@
 
 from .animation_engine import AnimationDirection, AnimationEngine, AnimationType
 from .overlay_controller import OverlayController
-from .position_manager import PositionManager
 
 __all__ = [
     "OverlayController",
-    "PositionManager",
     "AnimationEngine",
     "AnimationType",
     "AnimationDirection",

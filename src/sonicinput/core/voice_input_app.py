@@ -148,9 +148,6 @@ class VoiceInputApp:
                 input=self._input_controller,
             )
 
-            # 注册关闭回调
-            self.orchestrator.register_shutdown_callback(self._cleanup_resources)
-
             # 使用编排器执行启动流程
             self.orchestrator.orchestrate_startup()
 
@@ -416,15 +413,21 @@ class VoiceInputApp:
         }
 
     def _cleanup_resources(self) -> None:
-        """清理应用资源（供编排器调用）"""
+        """清理应用资源（应用关闭阶段调用）"""
         try:
             app_logger.log_audio_event("Cleaning up application resources", {})
 
             # 移除UI事件桥接
             self.ui_bridge.remove_overlay_events()
 
+            # 停止历史记录服务（关闭线程本地数据库连接）
+            if self._history_service and hasattr(self._history_service, "stop"):
+                self._history_service.stop()
+
             # 清理容器
             self.container.cleanup()
+
+            self.is_initialized = False
 
             app_logger.log_audio_event("Application resources cleaned up", {})
 
@@ -439,9 +442,9 @@ class VoiceInputApp:
             # 使用编排器执行关闭流程
             if hasattr(self.orchestrator, "orchestrate_shutdown"):
                 self.orchestrator.orchestrate_shutdown()
-            else:
-                # 回退到直接清理
-                self._cleanup_resources()
+
+            # 最后执行应用资源清理
+            self._cleanup_resources()
 
             app_logger.log_shutdown()
 

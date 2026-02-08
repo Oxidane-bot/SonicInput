@@ -104,3 +104,6 @@ CLAUDE.md
 
 # Packaging documentation (superseded by BUILD.md)
 PACKAGING_SUMMARY.md
+
+# Local handoff notes (analysis-only, never commit)
+handoff.md

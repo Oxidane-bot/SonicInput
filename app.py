@@ -3,7 +3,6 @@
 Sonic Input - Application Entry Point
 
 Unified entry point providing:
-- Legacy CUDA library path setup (deprecated - sherpa-onnx uses CPU only)
 - Warning suppression for cleaner output
 - CLI argument parsing and mode selection
 - Diagnostic and testing capabilities
@@ -23,83 +22,6 @@ import time
 from pathlib import Path
 from typing import Tuple, Dict, Any
 
-
-# ============================================================================
-# CUDA Path Setup (Legacy - Deprecated for sherpa-onnx)
-# ============================================================================
-
-
-def setup_cuda_paths():
-    """Legacy CUDA/cuDNN DLL path setup (deprecated for sherpa-onnx)
-
-    Note: sherpa-onnx uses CPU-only inference, so CUDA is no longer needed.
-    This function is kept for backward compatibility but effectively does nothing
-    when sherpa-onnx is installed. In cloud-only mode, returns silently.
-    """
-    try:
-        # Check if sherpa-onnx is installed (local transcription mode)
-        # sherpa-onnx uses CPU inference only, no CUDA needed
-        import importlib.util
-
-        spec = importlib.util.find_spec("sherpa_onnx")
-        if spec is None:
-            # Cloud-only mode - skip CUDA setup silently
-            return
-
-        paths_to_add = []
-
-        # 1. Check for nvidia packages in venv
-        venv_path = Path(sys.executable).parent.parent
-        cudnn_bin = venv_path / "Lib" / "site-packages" / "nvidia" / "cudnn" / "bin"
-        cublas_bin = venv_path / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin"
-
-        if cudnn_bin.exists():
-            paths_to_add.append(str(cudnn_bin))
-        if cublas_bin.exists():
-            paths_to_add.append(str(cublas_bin))
-
-        # 2. Check for CUDA Toolkit installation
-        cuda_roots = [
-            Path(os.environ.get("CUDA_PATH", "")),
-            Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"),
-        ]
-
-        for cuda_root in cuda_roots:
-            if not cuda_root.exists():
-                continue
-
-            if cuda_root.name == "CUDA":
-                version_dirs = sorted(cuda_root.glob("v*"), reverse=True)
-                if version_dirs:
-                    cuda_bin = version_dirs[0] / "bin"
-                    if cuda_bin.exists():
-                        paths_to_add.append(str(cuda_bin))
-                        break
-            else:
-                cuda_bin = cuda_root / "bin"
-                if cuda_bin.exists():
-                    paths_to_add.append(str(cuda_bin))
-                    break
-
-        if paths_to_add:
-            if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
-                for path in paths_to_add:
-                    os.add_dll_directory(path)
-
-            current_path = os.environ.get("PATH", "")
-            os.environ["PATH"] = os.pathsep.join(paths_to_add + [current_path])
-            print(f"[OK] Added {len(paths_to_add)} CUDA library path(s) to PATH:")
-            for path in paths_to_add:
-                print(f"     - {path}")
-        else:
-            print("[INFO] No CUDA library paths found (GPU may not be available)")
-
-    except Exception as e:
-        print(f"[WARN] Failed to setup CUDA paths: {e}")
-
-
-# CUDA setup removed - sherpa-onnx uses CPU-only inference (no GPU/CUDA dependency)
-# setup_cuda_paths()  # Deprecated: Not needed for sherpa-onnx
 
 # ============================================================================
 # Warning Filters
