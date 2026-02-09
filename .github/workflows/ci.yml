@@ -1,8 +1,7 @@
 name: Code Quality
 
 # 触发条件：push到任何分支、pull request到main分支
-# 注意：此workflow只进行代码质量检查，不运行功能测试
-# 原因：本项目为Windows专用应用，无法在Linux CI环境中进行有意义的功能测试
+# 注意：本项目为Windows专用应用
 on:
   push:
     branches: [ master, main, develop, feature/*, fix/* ]
@@ -58,6 +57,33 @@ jobs:
       run: |
         uv run mypy src/ --ignore-missing-imports || true
 
+  # 核心回归测试（跳过 GUI/GPU/E2E）
+  tests:
+    name: Core Tests (Windows)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+      with:
+        version: "latest"
+
+    - name: Install dependencies
+      run: |
+        uv sync --extra dev
+
+    - name: Run pytest (non-gui)
+      run: |
+        uv run pytest -m "not gui and not gpu and not e2e" -v
+
   # 安全漏洞扫描
   security:
     name: Security Scan
@@ -83,7 +109,7 @@ jobs:
 
     - name: Run Bandit security scan
       run: |
-        uv run bandit -r src/ -f json -o bandit-report.json || true
+        uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
 
     - name: Upload security report
       if: always()

@@ -70,6 +70,8 @@ class StreamingCoordinator(LifecycleComponent):
         self._realtime_session = None
         self._realtime_partial_text = ""
         self._realtime_last_update = time.time()
+        self._realtime_debug_last_log = 0.0
+        self._realtime_debug_log_interval = 2.0
 
         # 流式统计
         self._streaming_stats = {
@@ -316,24 +318,30 @@ class StreamingCoordinator(LifecycleComponent):
             return None
 
         with self._streaming_lock:
-            # [DEBUG] 记录调用
-            app_logger.log_audio_event(
-                "add_realtime_audio called",
-                {
-                    "streaming_active": self._streaming_active,
-                    "has_session": self._realtime_session is not None,
-                    "audio_length": len(audio_data),
-                },
-            )
-
-            if not self._streaming_active or not self._realtime_session:
+            now = time.time()
+            should_log_debug = (
+                now - self._realtime_debug_last_log
+            ) >= self._realtime_debug_log_interval
+            if should_log_debug:
+                self._realtime_debug_last_log = now
                 app_logger.log_audio_event(
-                    "add_realtime_audio: streaming inactive or no session",
+                    "add_realtime_audio called",
                     {
                         "streaming_active": self._streaming_active,
                         "has_session": self._realtime_session is not None,
+                        "audio_length": len(audio_data),
                     },
                 )
+
+            if not self._streaming_active or not self._realtime_session:
+                if should_log_debug:
+                    app_logger.log_audio_event(
+                        "add_realtime_audio: streaming inactive or no session",
+                        {
+                            "streaming_active": self._streaming_active,
+                            "has_session": self._realtime_session is not None,
+                        },
+                    )
                 return None
 
             try:
@@ -343,11 +351,15 @@ class StreamingCoordinator(LifecycleComponent):
                 # 获取部分结果
                 partial_result = self._realtime_session.get_partial_result()
 
-                # [DEBUG] 记录部分结果
-                app_logger.log_audio_event(
-                    "add_realtime_audio: got partial result",
-                    {"partial_result": partial_result[:50] if partial_result else ""},
-                )
+                if should_log_debug:
+                    app_logger.log_audio_event(
+                        "add_realtime_audio: got partial result",
+                        {
+                            "partial_result": partial_result[:50]
+                            if partial_result
+                            else ""
+                        },
+                    )
 
                 # 检查是否有更新
                 if partial_result != self._realtime_partial_text:

@@ -454,25 +454,59 @@ class HistoryStorageService(LifecycleComponent):
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # 验证order_by以防止SQL注入
-            allowed_fields = [
+            # 验证 order_by，避免动态拼接任意 SQL
+            allowed_fields = {
                 "timestamp",
                 "duration",
                 "transcription_status",
                 "ai_status",
-            ]
-            allowed_orders = ["ASC", "DESC"]
+            }
+            allowed_orders = {"ASC", "DESC"}
 
-            order_parts = order_by.split()
-            if (
-                len(order_parts) != 2
-                or order_parts[0] not in allowed_fields
-                or order_parts[1] not in allowed_orders
-            ):
-                order_by = "timestamp DESC"  # 默认排序
+            normalized_order = "timestamp DESC"
+            order_parts = order_by.strip().split()
+            if len(order_parts) == 2:
+                field = order_parts[0].lower()
+                direction = order_parts[1].upper()
+                if field in allowed_fields and direction in allowed_orders:
+                    normalized_order = f"{field} {direction}"
 
-            query = (
-                f"SELECT * FROM history_records ORDER BY {order_by} LIMIT ? OFFSET ?"
+            query_by_order = {
+                "timestamp ASC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY timestamp ASC LIMIT ? OFFSET ?"
+                ),
+                "timestamp DESC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+                ),
+                "duration ASC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY duration ASC LIMIT ? OFFSET ?"
+                ),
+                "duration DESC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY duration DESC LIMIT ? OFFSET ?"
+                ),
+                "transcription_status ASC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY transcription_status ASC LIMIT ? OFFSET ?"
+                ),
+                "transcription_status DESC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY transcription_status DESC LIMIT ? OFFSET ?"
+                ),
+                "ai_status ASC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY ai_status ASC LIMIT ? OFFSET ?"
+                ),
+                "ai_status DESC": (
+                    "SELECT * FROM history_records "
+                    "ORDER BY ai_status DESC LIMIT ? OFFSET ?"
+                ),
+            }
+            query = query_by_order.get(
+                normalized_order, query_by_order["timestamp DESC"]
             )
 
             cursor.execute(query, (limit, offset))

@@ -8,8 +8,9 @@ import sys
 import tarfile
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
+import requests
 from loguru import logger
 
 from .. import __version__
@@ -112,6 +113,53 @@ class SherpaModelManager(LifecycleComponent):
             (model_dir / f).exists() for f in required_files
         )
 
+    @staticmethod
+    def _validate_download_url(url: str) -> None:
+        """Validate model download URL."""
+        parsed = urlparse(url)
+        if parsed.scheme.lower() != "https":
+            raise RuntimeError(
+                f"Only HTTPS model URLs are allowed, got scheme: {parsed.scheme}"
+            )
+        if not parsed.netloc:
+            raise RuntimeError("Model URL must include a valid host")
+
+    def _safe_extract_members(
+        self, tar: tarfile.TarFile, members: list[tarfile.TarInfo]
+    ) -> None:
+        """Safely extract validated tar members to cache directory."""
+        cache_root = Path(self.cache_dir).resolve()
+
+        for member in members:
+            target_path = (cache_root / member.name).resolve()
+
+            try:
+                target_path.relative_to(cache_root)
+            except ValueError:
+                logger.warning(f"Skipping out-of-root tar member: {member.name}")
+                continue
+
+            if member.isdir():
+                target_path.mkdir(parents=True, exist_ok=True)
+                continue
+
+            if not member.isfile():
+                logger.warning(f"Skipping non-regular tar member: {member.name}")
+                continue
+
+            extracted_file = tar.extractfile(member)
+            if extracted_file is None:
+                logger.warning(f"Skipping unreadable tar member: {member.name}")
+                continue
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with extracted_file as source, open(target_path, "wb") as destination:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    destination.write(chunk)
+
     def download_model(self, model_name: str, progress_callback=None) -> Path:
         """下载模型到本地缓存
 
@@ -137,6 +185,7 @@ class SherpaModelManager(LifecycleComponent):
         model_info = self.MODELS[model_name]
         url = model_info["url"]
         size_mb = model_info["size_mb"]
+        self._validate_download_url(url)
 
         logger.info(f"Downloading model {model_name} from {url}")
         logger.info(f"Size: {size_mb} MB")
@@ -172,16 +221,18 @@ class SherpaModelManager(LifecycleComponent):
 
         try:
             # 下载
-            request = Request(url, headers={"User-Agent": f"SonicInput/{__version__}"})
-            with urlopen(request, timeout=300) as response:
+            headers = {"User-Agent": f"SonicInput/{__version__}"}
+            with requests.get(
+                url, headers=headers, stream=True, timeout=(10, 300)
+            ) as response:
+                response.raise_for_status()
                 total_size = int(response.headers.get("content-length", 0))
                 downloaded = 0
 
                 with open(archive_path, "wb") as f:
-                    while True:
-                        chunk = response.read(8192)
+                    for chunk in response.iter_content(chunk_size=8192):
                         if not chunk:
-                            break
+                            continue
                         f.write(chunk)
                         downloaded += len(chunk)
 
@@ -250,7 +301,7 @@ class SherpaModelManager(LifecycleComponent):
                             f"Skipping potentially unsafe tar member: {member.name}"
                         )
 
-                tar.extractall(self.cache_dir, members=safe_members)
+                self._safe_extract_members(tar, safe_members)
 
             # 删除压缩包
             archive_path.unlink()

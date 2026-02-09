@@ -871,13 +871,39 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             raise
 
     def start_streaming_processing(self) -> None:
-        """开始处理流式转录块"""
-        # 提交一个持续处理流式块的任务
-        self.task_queue_manager.submit_task(
-            task_type="streaming_processor",
-            data={},
-            priority=TaskPriority.LOW,
-            max_retries=0,
+        """开始处理当前待处理的流式转录块。
+
+        该方法会扫描 ``StreamingCoordinator`` 中尚未完成的块，
+        并逐个提交 ``process_streaming_chunk`` 任务到队列中。
+        """
+        if not self.is_running:
+            raise RuntimeError("Transcription service is not started")
+
+        pending_chunks = self.streaming_coordinator.get_pending_chunks()
+        if not pending_chunks:
+            app_logger.audio("No pending streaming chunks to process", {})
+            return
+
+        submitted_count = 0
+        for chunk in pending_chunks:
+            # 避免重复提交已完成的块
+            if chunk.result_event.is_set():
+                continue
+
+            self.task_queue_manager.submit_task(
+                task_type="process_streaming_chunk",
+                data={"chunk_id": chunk.chunk_id, "audio_data": chunk.audio_data},
+                priority=TaskPriority.HIGH,
+                max_retries=0,
+            )
+            submitted_count += 1
+
+        app_logger.audio(
+            "Submitted pending streaming chunks for processing",
+            {
+                "pending_count": len(pending_chunks),
+                "submitted_count": submitted_count,
+            },
         )
 
     def reload_streaming_mode(self) -> None:

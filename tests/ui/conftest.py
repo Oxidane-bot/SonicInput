@@ -56,7 +56,7 @@ def isolated_config(tmp_path):
         try:
             with open(real_config_path, "r", encoding="utf-8") as f:
                 real_config = json.load(f)
-        except:
+        except Exception:
             pass
 
     # 创建默认测试配置,但使用真实的API keys
