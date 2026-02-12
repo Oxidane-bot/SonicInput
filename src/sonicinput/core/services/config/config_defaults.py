@@ -83,6 +83,7 @@ def get_default_config() -> Dict[str, Any]:
                 "auto_save": True,
             },
             "overlay_always_on_top": True,
+            "launch_at_login": False,
             "tray_notifications": False,
             "start_minimized": True,
             "theme_color": "cyan",

@@ -236,6 +236,7 @@ class ConfigValidator:
                 },
                 "ui": {
                     "show_overlay": True,
+                    "launch_at_login": False,
                     "start_minimized": True,
                     "language": "auto",
                 },

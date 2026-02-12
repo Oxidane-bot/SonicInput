@@ -44,7 +44,7 @@ uv run python build_nuitka.py
 # 核心参数
 "--standalone"                      # 创建独立分发包（包含所有依赖）
 "--onefile"                         # 打包成单个 .exe 文件
-"--windows-console-mode=disable"    # GUI 模式（无控制台窗口）
+"--windows-console-mode=attach"     # 从命令行启动时附着控制台，双击时保持 GUI 体验
 
 # 插件和包含
 "--enable-plugin=pyside6"           # 启用 PySide6 插件（Qt 支持）

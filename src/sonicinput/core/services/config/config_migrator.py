@@ -288,6 +288,22 @@ class ConfigMigrator:
                             app_logger.info(f"Migrating: Removing history.{old_field}")
                             migrated = True
 
+            # 3.1 迁移 legacy ui.auto_start -> ui.launch_at_login
+            ui_config = config.get("ui")
+            if isinstance(ui_config, dict):
+                if (
+                    "launch_at_login" not in ui_config
+                    and "auto_start" in ui_config
+                    and isinstance(ui_config.get("auto_start"), bool)
+                ):
+                    ui_config["launch_at_login"] = ui_config["auto_start"]
+                    app_logger.info("Migrating: ui.auto_start -> ui.launch_at_login")
+                    migrated = True
+
+                if "auto_start" in ui_config:
+                    del ui_config["auto_start"]
+                    migrated = True
+
             # 4. 迁移单个 hotkey 到 hotkeys 数组
             if "hotkey" in config and "hotkeys" not in config:
                 old_hotkey = config["hotkey"]

@@ -38,8 +38,8 @@ def validate_ci_workflow() -> Tuple[bool, str]:
         if "jobs:" not in content:
             return False, "CI workflow missing jobs section"
 
-        # Check for required jobs
-        required_jobs = ["lint", "test", "quick-test"]
+        # Check for required jobs in current CI workflow
+        required_jobs = ["lint", "tests", "security"]
         for job in required_jobs:
             if f"{job}:" not in content:
                 return False, f"CI workflow missing {job} job"
@@ -50,10 +50,10 @@ def validate_ci_workflow() -> Tuple[bool, str]:
 
 
 def validate_build_workflow() -> Tuple[bool, str]:
-    """Validate build workflow configuration"""
+    """Validate optional build workflow configuration"""
     build_path = Path(".github/workflows/build.yml")
     if not build_path.exists():
-        return False, "Build workflow file not found"
+        return True, "Build workflow not present (using local build script)"
 
     try:
         content = build_path.read_text(encoding="utf-8")
@@ -114,44 +114,16 @@ def validate_dependencies() -> Tuple[bool, str]:
 
 
 def validate_ci_tests() -> Tuple[bool, str]:
-    """Validate CI test suite"""
-    test_dir = Path("tests/ci")
+    """Validate test suite layout"""
+    test_dir = Path("tests")
     if not test_dir.exists():
-        return False, "CI test directory not found"
+        return False, "tests directory not found"
 
-    required_files = [
-        "tests/ci/run_ci_tests.py",
-        "tests/ci/conftest.py",
-        "tests/ci/pytest.ini",
-    ]
+    test_files = list(test_dir.rglob("test_*.py"))
+    if not test_files:
+        return False, "No test files found under tests/"
 
-    missing_files = []
-    for file_path in required_files:
-        if not Path(file_path).exists():
-            missing_files.append(file_path)
-
-    if missing_files:
-        return False, f"Missing CI test files: {', '.join(missing_files)}"
-
-    # Try running the CI tests
-    try:
-        os.chdir("tests/ci")
-        result = subprocess.run(
-            ["uv", "run", "python", "run_ci_tests.py", "--quick"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        os.chdir("../..")
-
-        if result.returncode == 0:
-            return True, "CI tests validation passed"
-        else:
-            return False, f"CI tests failed: {result.stderr}"
-    except subprocess.TimeoutExpired:
-        return False, "CI tests timed out"
-    except Exception as e:
-        return False, f"CI test validation error: {e}"
+    return True, f"Test suite layout valid ({len(test_files)} test files)"
 
 
 def validate_nuitka() -> Tuple[bool, str]:
@@ -179,7 +151,7 @@ def generate_build_info() -> Dict[str, Any]:
     return {
         "version": version,
         "executable_name": f"SonicInput-v{version}-win64.exe",
-        "build_mode": "cloud",
+        "build_mode": "local",
         "python_version": sys.version.split()[0],
         "platform": sys.platform,
         "working_directory": os.getcwd(),

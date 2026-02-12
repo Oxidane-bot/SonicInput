@@ -30,6 +30,8 @@ from ..core.services.ui_services import (
 )
 from ..utils.logger import app_logger
 
+LAUNCH_AT_LOGIN_KEY = "ui.launch_at_login"
+
 
 class TransactionError(Exception):
     """事务操作异常类
@@ -80,6 +82,7 @@ class ApplyTransaction:
         model_service: UIModelService,
         settings_service: UISettingsService,
         event_service: IEventService,
+        launch_at_login_service=None,
     ):
         """初始化事务管理器
 
@@ -87,15 +90,18 @@ class ApplyTransaction:
             model_service: 模型管理服务实例
             settings_service: 设置管理服务实例
             event_service: 事件服务实例
+            launch_at_login_service: 开机自启系统集成服务（可选）
         """
         self._model_service = model_service
         self._settings_service = settings_service
         self._event_service = event_service
+        self._launch_at_login_service = launch_at_login_service
 
         # 事务状态
         self._in_transaction = False
         self._backup_config: Optional[Dict[str, Any]] = None
         self._backup_model_name: Optional[str] = None
+        self._backup_launch_at_login_state: Optional[bool] = None
         self._changes_applied = False
 
     def begin(self) -> None:
@@ -168,6 +174,31 @@ class ApplyTransaction:
             self.rollback()
             raise TransactionError("应用配置变更失败", e)
 
+    def apply_launch_at_login_change(self, changes: Dict[str, Any]) -> None:
+        """应用开机自启系统集成变更。"""
+        if not self._in_transaction:
+            raise TransactionError("必须先调用 begin() 开始事务")
+
+        if LAUNCH_AT_LOGIN_KEY not in changes:
+            return
+
+        service = self._resolve_launch_at_login_service()
+        if service is None:
+            return
+
+        try:
+            target_enabled = bool(changes.get(LAUNCH_AT_LOGIN_KEY, False))
+            service.sync(target_enabled)
+            self._changes_applied = True
+            app_logger.log_audio_event(
+                "Launch-at-login synced in transaction",
+                {"enabled": target_enabled},
+            )
+        except Exception as e:
+            app_logger.error(f"同步开机自启失败: {e}")
+            self.rollback()
+            raise TransactionError("同步开机自启失败", e)
+
     def commit(self) -> None:
         """提交事务 - 确认所有变更并清理备份
 
@@ -225,6 +256,15 @@ class ApplyTransaction:
                 except Exception as e:
                     app_logger.error(f"恢复模型失败: {e}")
 
+            # 恢复开机自启系统状态
+            if self._backup_launch_at_login_state is not None:
+                launch_service = self._resolve_launch_at_login_service()
+                if launch_service is not None:
+                    try:
+                        launch_service.sync(self._backup_launch_at_login_state)
+                    except Exception as e:
+                        app_logger.error(f"恢复开机自启系统状态失败: {e}")
+
             app_logger.info("事务已回滚")
         except Exception as e:
             app_logger.error(f"回滚事务时发生错误: {e}")
@@ -256,6 +296,15 @@ class ApplyTransaction:
         except Exception as e:
             app_logger.error(f"备份模型名称失败: {e}")
             raise
+
+        # 备份开机自启系统状态（Windows）
+        launch_service = self._resolve_launch_at_login_service()
+        if launch_service is not None:
+            try:
+                self._backup_launch_at_login_state = launch_service.is_enabled()
+            except Exception as e:
+                app_logger.error(f"备份开机自启系统状态失败: {e}")
+                self._backup_launch_at_login_state = None
 
     def _load_model_with_transaction(self, model_name: str) -> None:
         """事务式加载模型
@@ -314,6 +363,7 @@ class ApplyTransaction:
         self._in_transaction = False
         self._backup_config = None
         self._backup_model_name = None
+        self._backup_launch_at_login_state = None
         self._changes_applied = False
 
     def _flatten_config(
@@ -340,3 +390,18 @@ class ApplyTransaction:
             else:
                 result[full_key] = value
         return result
+
+    def _resolve_launch_at_login_service(self):
+        if self._launch_at_login_service is not None:
+            return self._launch_at_login_service
+
+        if hasattr(self._settings_service, "get_launch_at_login_service"):
+            try:
+                service = self._settings_service.get_launch_at_login_service()
+                if service is not None:
+                    self._launch_at_login_service = service
+                return service
+            except Exception:
+                return None
+
+        return None

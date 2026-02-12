@@ -336,6 +336,11 @@ This may take a few seconds.</source>
         <translation>启动:</translation>
     </message>
     <message>
+        <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="221" />
+        <source>Auto Start:</source>
+        <translation>开机自启:</translation>
+    </message>
+    <message>
         <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="212" />
         <source>Notifications:</source>
         <translation>通知:</translation>
@@ -349,6 +354,11 @@ This may take a few seconds.</source>
         <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="218" />
         <source>Start minimized to tray</source>
         <translation>启动时最小化到托盘</translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="237" />
+        <source>Launch at Windows login</source>
+        <translation>Windows 登录时启动</translation>
     </message>
     <message>
         <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="221" />

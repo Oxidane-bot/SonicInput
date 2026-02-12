@@ -99,18 +99,14 @@ Write-Host ""
 Write-Host "5. Available workflows:" -ForegroundColor Yellow
 
 if (Test-Path ".github\workflows\ci.yml") {
-    Write-Host "  - CI Tests (Linux)" -ForegroundColor Green
+    Write-Host "  - CI Checks (ACT-supported jobs)" -ForegroundColor Green
     Write-Host "    Command: act -j lint" -ForegroundColor Cyan
-    Write-Host "    Command: act -j test" -ForegroundColor Cyan
-    Write-Host "    Command: act -j quick-test" -ForegroundColor Cyan
     Write-Host "    Command: act -j security" -ForegroundColor Cyan
+    Write-Host "    Note: tests job uses windows-latest and is not supported by ACT" -ForegroundColor Gray
 }
 
-if (Test-Path ".github\workflows\build.yml") {
-    Write-Host "  - Build (Windows) - NOT AVAILABLE IN ACT" -ForegroundColor Yellow
-    Write-Host "    Reason: ACT doesn't support Windows runners" -ForegroundColor Gray
-    Write-Host "    Alternative: Run locally with uv run nuitka ..." -ForegroundColor Cyan
-}
+Write-Host "  - Build is local-only (not via ACT)" -ForegroundColor Yellow
+Write-Host "    Use: .\\scripts\\release.ps1" -ForegroundColor Cyan
 
 Write-Host ""
 
@@ -130,32 +126,20 @@ if (Test-Path ".github\workflows\ci.yml") {
     }
 }
 
-# 验证测试套件
-if (Test-Path "tests\ci\run_ci_tests.py") {
-    Write-Host "✓ CI test suite exists" -ForegroundColor Green
-}
-
-Write-Host ""
 Write-Host "=== Setup Complete ===" -ForegroundColor Green
 Write-Host ""
 
 Write-Host "Usage:" -ForegroundColor Yellow
-Write-Host "  # Run all CI tests" -ForegroundColor Gray
-Write-Host "  act -j test" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  # Run quick tests only" -ForegroundColor Gray
-Write-Host "  act -j quick-test" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  # Run linting" -ForegroundColor Gray
+Write-Host "  # Run ACT-supported CI jobs" -ForegroundColor Gray
 Write-Host "  act -j lint" -ForegroundColor Cyan
+Write-Host "  act -j security" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  # Check available jobs" -ForegroundColor Gray
+Write-Host "  # List available jobs" -ForegroundColor Gray
 Write-Host "  act -l" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  # Run with specific event" -ForegroundColor Gray
-Write-Host "  act -j test -e push" -ForegroundColor Cyan
+Write-Host "  # Trigger with push event payload" -ForegroundColor Gray
+Write-Host "  act -j lint -e push" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Windows-specific:" -ForegroundColor Yellow
-Write-Host "  # Run local Windows build (not through ACT)" -ForegroundColor Gray
-Write-Host "  uv run nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=pyside6 --include-package=sonicinput --nofollow-import-to=pytest --nofollow-import-to=mypy --windows-icon-from-ico=src/sonicinput/resources/icons/app_icon.ico --output-dir=dist app.py" -ForegroundColor Cyan
+Write-Host "Build (Windows local):" -ForegroundColor Yellow
+Write-Host "  .\\scripts\\release.ps1" -ForegroundColor Cyan
 Write-Host ""

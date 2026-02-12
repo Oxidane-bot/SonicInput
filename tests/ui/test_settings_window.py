@@ -391,6 +391,7 @@ class TestSettingsWindowCoreButtons:
         # Mock get_default_config to return plain dict (avoid pickle issue)
         plain_default_config = {
             "ui": {
+                "launch_at_login": False,
                 "start_minimized": True,
                 "tray_notifications": False,
                 "show_overlay": True,
@@ -730,3 +731,67 @@ class TestConfigManagementIntegration:
 
         # Verify confirmation dialog was shown
         assert len(dialog_called) == 1
+
+
+@pytest.mark.gui
+class TestLaunchAtLoginSetting:
+    """开机自启设置相关 UI 行为测试。"""
+
+    def test_launch_at_login_checkbox_exists(self, qtbot, settings_window):
+        """ApplicationTab 应暴露开机自启勾选框。"""
+        assert hasattr(settings_window.application_tab, "launch_at_login_checkbox")
+        assert settings_window.application_tab.launch_at_login_checkbox is not None
+
+    def test_application_tab_save_includes_launch_at_login(
+        self, qtbot, settings_window
+    ):
+        """保存配置时应包含 ui.launch_at_login。"""
+        settings_window.application_tab.launch_at_login_checkbox.setChecked(True)
+        saved = settings_window.application_tab.save_config()
+        assert saved["ui"]["launch_at_login"] is True
+
+    def test_apply_enforces_minimized_when_launch_at_login_enabled(
+        self, qtbot, settings_window, monkeypatch
+    ):
+        """启用开机自启时，apply 应强制 start_minimized 为 True。"""
+        import sonicinput.ui.settings_window as settings_window_module
+
+        captured = {"changes": None}
+
+        class FakeTransaction:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def begin(self):
+                return None
+
+            def apply_model_change(self, _model_name):
+                return None
+
+            def apply_config_changes(self, changes):
+                captured["changes"] = dict(changes)
+
+            def apply_launch_at_login_change(self, _changes):
+                return None
+
+            def commit(self):
+                return None
+
+        monkeypatch.setattr(settings_window_module, "ApplyTransaction", FakeTransaction)
+
+        # 避免误触发模型重载分支
+        settings_window.ui_model_service.get_model_info = lambda: {
+            "model_name": "paraformer"
+        }
+
+        settings_window.show()
+        qtbot.waitExposed(settings_window, timeout=1000)
+
+        settings_window.application_tab.launch_at_login_checkbox.setChecked(True)
+        settings_window.application_tab.start_minimized_checkbox.setChecked(False)
+
+        settings_window.apply_settings()
+
+        assert captured["changes"] is not None
+        assert captured["changes"]["ui.launch_at_login"] is True
+        assert captured["changes"]["ui.start_minimized"] is True

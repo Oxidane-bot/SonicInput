@@ -45,6 +45,10 @@ class ApplicationTab(BaseSettingsTab):
         self.start_minimized_checkbox = QCheckBox("Start minimized to tray")
         app_layout.addRow("Startup:", self.start_minimized_checkbox)
 
+        # 开机自启（Windows）
+        self.launch_at_login_checkbox = QCheckBox("Launch at Windows login")
+        app_layout.addRow("Auto Start:", self.launch_at_login_checkbox)
+
         # 托盘通知
         self.tray_notifications_checkbox = QCheckBox("Show tray notifications")
         app_layout.addRow("Notifications:", self.tray_notifications_checkbox)
@@ -168,6 +172,7 @@ class ApplicationTab(BaseSettingsTab):
         # 保存控件引用
         self.controls = {
             "start_minimized": self.start_minimized_checkbox,
+            "launch_at_login": self.launch_at_login_checkbox,
             "tray_notifications": self.tray_notifications_checkbox,
             "language": self.language_combo,
             "show_overlay": self.show_overlay_checkbox,
@@ -181,6 +186,7 @@ class ApplicationTab(BaseSettingsTab):
 
         # 暴露控件到parent_window
         self.parent_window.start_minimized_checkbox = self.start_minimized_checkbox
+        self.parent_window.launch_at_login_checkbox = self.launch_at_login_checkbox
         self.parent_window.tray_notifications_checkbox = (
             self.tray_notifications_checkbox
         )
@@ -211,6 +217,11 @@ class ApplicationTab(BaseSettingsTab):
         )
         set_label(
             self.app_layout,
+            self.launch_at_login_checkbox,
+            QCoreApplication.translate("ApplicationTab", "Auto Start:"),
+        )
+        set_label(
+            self.app_layout,
             self.tray_notifications_checkbox,
             QCoreApplication.translate("ApplicationTab", "Notifications:"),
         )
@@ -221,6 +232,9 @@ class ApplicationTab(BaseSettingsTab):
         )
         self.start_minimized_checkbox.setText(
             QCoreApplication.translate("ApplicationTab", "Start minimized to tray")
+        )
+        self.launch_at_login_checkbox.setText(
+            QCoreApplication.translate("ApplicationTab", "Launch at Windows login")
         )
         self.tray_notifications_checkbox.setText(
             QCoreApplication.translate("ApplicationTab", "Show tray notifications")
@@ -334,6 +348,9 @@ class ApplicationTab(BaseSettingsTab):
 
         # 加载应用设置
         self.start_minimized_checkbox.setChecked(ui_config.get("start_minimized", True))
+        self.launch_at_login_checkbox.setChecked(
+            ui_config.get("launch_at_login", False)
+        )
         self.tray_notifications_checkbox.setChecked(
             ui_config.get("tray_notifications", True)
         )
@@ -398,6 +415,7 @@ class ApplicationTab(BaseSettingsTab):
         config = {
             "ui": {
                 "start_minimized": self.start_minimized_checkbox.isChecked(),
+                "launch_at_login": self.launch_at_login_checkbox.isChecked(),
                 "tray_notifications": self.tray_notifications_checkbox.isChecked(),
                 "show_overlay": self.show_overlay_checkbox.isChecked(),
                 "overlay_always_on_top": self.overlay_on_top_checkbox.isChecked(),

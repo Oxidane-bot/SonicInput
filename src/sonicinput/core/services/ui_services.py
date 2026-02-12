@@ -6,7 +6,7 @@
 
 from pathlib import Path
 import copy
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ...utils import app_logger
 from ..interfaces import (
@@ -17,6 +17,9 @@ from ..interfaces import (
 )
 from .config import ConfigKeys
 from ..services.storage.history_storage_service import HistoryStorageService
+
+if TYPE_CHECKING:
+    from .launch_at_login_service import LaunchAtLoginService
 
 
 class UIMainService:
@@ -125,6 +128,7 @@ class UISettingsService:
         transcription_service=None,
         ai_processing_controller=None,
         localization_service=None,
+        launch_at_login_service: "LaunchAtLoginService | None" = None,
         container=None,
     ):
         """初始化UI设置服务
@@ -135,6 +139,7 @@ class UISettingsService:
             history_service: 历史记录存储服务
             transcription_service: 转录服务(可选,用于retry processing)
             ai_processing_controller: AI处理控制器(可选,用于retry processing)
+            launch_at_login_service: 开机自启系统集成服务（可选）
             container: DI容器(可选,用于热重载后获取最新服务)
         """
         self.config_service = config_service
@@ -143,6 +148,7 @@ class UISettingsService:
         self._transcription_service = transcription_service
         self.ai_processing_controller = ai_processing_controller
         self.localization_service = localization_service
+        self._launch_at_login_service = launch_at_login_service
         self._container = container
         app_logger.log_audio_event("UISettingsService initialized", {})
 
@@ -237,6 +243,31 @@ class UISettingsService:
     def get_ai_processing_controller(self):
         """获取AI处理控制器"""
         return self.ai_processing_controller
+
+    def get_launch_at_login_service(self):
+        """获取开机自启系统集成服务。"""
+        if self._launch_at_login_service is not None:
+            return self._launch_at_login_service
+
+        if self._container is None:
+            return None
+
+        try:
+            from .launch_at_login_service import LaunchAtLoginService
+
+            service = self._container.resolve(LaunchAtLoginService)
+            if service:
+                self._launch_at_login_service = service
+            return service
+        except Exception:
+            return None
+
+    def sync_launch_at_login(self, enabled: bool) -> None:
+        """同步开机自启设置到系统层。"""
+        service = self.get_launch_at_login_service()
+        if service is None:
+            return
+        service.sync(enabled)
 
     def get_localization_service(self):
         """Get UI localization service."""

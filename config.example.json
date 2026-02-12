@@ -85,6 +85,7 @@
       "auto_save": true
     },
     "overlay_always_on_top": true,
+    "launch_at_login": false,
     "tray_notifications": false,
     "start_minimized": true,
     "theme_color": "cyan",

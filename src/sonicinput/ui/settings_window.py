@@ -757,6 +757,15 @@ class SettingsWindow(QMainWindow):
 
         # 步骤1: 收集UI设置
         new_config = self.collect_settings_from_ui()
+        ui_config = new_config.setdefault("ui", {})
+
+        # 开机自启策略：启用时强制最小化启动，避免登录时弹主窗口
+        if ui_config.get("launch_at_login", False):
+            ui_config["start_minimized"] = True
+            if hasattr(self, "application_tab") and hasattr(
+                self.application_tab, "start_minimized_checkbox"
+            ):
+                self.application_tab.start_minimized_checkbox.setChecked(True)
 
         # 步骤1.5: 验证配置（在保存前捕获错误）
         flat_config = self._flatten_config(new_config)
@@ -829,10 +838,18 @@ class SettingsWindow(QMainWindow):
         try:
             # 获取事件服务
             events = self.ui_settings_service.get_event_service()
+            launch_at_login_service = None
+            if hasattr(self.ui_settings_service, "get_launch_at_login_service"):
+                launch_at_login_service = (
+                    self.ui_settings_service.get_launch_at_login_service()
+                )
 
             # 创建事务
             transaction = ApplyTransaction(
-                self.ui_model_service, self.ui_settings_service, events
+                self.ui_model_service,
+                self.ui_settings_service,
+                events,
+                launch_at_login_service=launch_at_login_service,
             )
 
             # 步骤4: 执行事务操作
@@ -945,6 +962,9 @@ class SettingsWindow(QMainWindow):
                 else:
                     # 普通配置变更，不涉及提供商切换
                     transaction.apply_config_changes(flat_config)
+
+                # 同步系统开机自启（Windows）
+                transaction.apply_launch_at_login_change(flat_config)
 
                 # 提交事务
                 transaction.commit()
@@ -1706,6 +1726,9 @@ class SettingsWindow(QMainWindow):
         # 重置UI设置
         self.ui_settings_service.set_setting(
             "ui.start_minimized", ui_config.get("start_minimized", True)
+        )
+        self.ui_settings_service.set_setting(
+            "ui.launch_at_login", ui_config.get("launch_at_login", False)
         )
         self.ui_settings_service.set_setting(
             "ui.tray_notifications", ui_config.get("tray_notifications", True)

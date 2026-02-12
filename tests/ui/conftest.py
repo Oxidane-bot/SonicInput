@@ -107,6 +107,7 @@ def isolated_config(tmp_path):
             "max_recording_duration": 60,
         },
         "ui": {
+            "launch_at_login": False,
             "start_minimized": False,
             "tray_notifications": True,
             "show_overlay": True,

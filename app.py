@@ -601,6 +601,19 @@ def run_gui():
         from sonicinput.core.interfaces.config import IConfigService
 
         config_service = container.get(IConfigService)
+        try:
+            from sonicinput.core.services.launch_at_login_service import (
+                LaunchAtLoginService,
+            )
+
+            launch_service = container.get(LaunchAtLoginService)
+            launch_at_login_enabled = bool(
+                config_service.get_setting("ui.launch_at_login", False)
+            )
+            launch_service.sync(launch_at_login_enabled)
+        except Exception as e:
+            print(f"[WARN] Failed to reconcile launch-at-login state: {e}")
+
         theme_color = config_service.get_setting("ui.theme_color", "cyan")
 
         # Apply UI language before creating windows

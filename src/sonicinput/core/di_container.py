@@ -285,6 +285,7 @@ def create_container() -> "DIContainer":
     from .services.dynamic_event_system import DynamicEventSystem
     from .services.hot_reload_manager import HotReloadManager
     from .services.hotkey_service import HotkeyService
+    from .services.launch_at_login_service import LaunchAtLoginService
     from .services.state_manager import StateManager
     from .services.transcription_service_refactored import (
         RefactoredTranscriptionService,
@@ -304,6 +305,9 @@ def create_container() -> "DIContainer":
     container.register_singleton(
         IConfigService, factory=lambda: create_config_service(container)
     )
+
+    # Launch-at-login integration service - singleton
+    container.register_singleton(LaunchAtLoginService, LaunchAtLoginService)
 
     # 状态管理器 - 单例（需要 EventService）
     container.register_singleton(IStateManager, StateManager)
@@ -567,6 +571,7 @@ def create_container() -> "DIContainer":
         events = container.resolve(IEventService)
         history = container.resolve(HistoryStorageService)
         localization_service = container.resolve(UILocalizationService)
+        launch_at_login_service = container.resolve(LaunchAtLoginService)
 
         # 尝试获取转录服务和AI控制器(可能还未注册)
         transcription_service = None
@@ -595,6 +600,7 @@ def create_container() -> "DIContainer":
             transcription_service=transcription_service,
             ai_processing_controller=ai_processing_controller,
             localization_service=localization_service,
+            launch_at_login_service=launch_at_login_service,
             container=container,  # Pass container for dynamic service resolution after hot reload
         )
 

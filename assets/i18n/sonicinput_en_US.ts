@@ -326,6 +326,11 @@ This may take a few seconds.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="221"/>
+        <source>Auto Start:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="212"/>
         <source>Notifications:</source>
         <translation type="unfinished"></translation>
@@ -338,6 +343,11 @@ This may take a few seconds.</source>
     <message>
         <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="218"/>
         <source>Start minimized to tray</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../src/sonicinput/ui/settings_tabs/application_tab.py" line="237"/>
+        <source>Launch at Windows login</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

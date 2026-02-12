@@ -196,6 +196,9 @@ class ConfigKeys:
     UI_TRAY_NOTIFICATIONS = "ui.tray_notifications"
     """系统托盘通知 (bool)"""
 
+    UI_LAUNCH_AT_LOGIN = "ui.launch_at_login"
+    """Windows 登录后自动启动应用 (bool)"""
+
     UI_START_MINIMIZED = "ui.start_minimized"
     """启动时最小化 (bool)"""
 
@@ -411,6 +414,7 @@ class ConfigKeyGroups:
         ConfigKeys.UI_SHOW_OVERLAY,
         ConfigKeys.UI_OVERLAY_ALWAYS_ON_TOP,
         ConfigKeys.UI_TRAY_NOTIFICATIONS,
+        ConfigKeys.UI_LAUNCH_AT_LOGIN,
         ConfigKeys.UI_START_MINIMIZED,
         ConfigKeys.UI_LANGUAGE,
         ConfigKeys.UI_THEME_COLOR,
