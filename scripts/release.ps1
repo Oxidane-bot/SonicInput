@@ -13,6 +13,10 @@ Set-Location $repoRoot
 
 if (-not $SkipBuild) {
     if (-not $NoOffline -and $OfflineModelsDir) {
+        if (-not (Test-Path $OfflineModelsDir -PathType Container)) {
+            throw "Offline models dir not found: $OfflineModelsDir"
+        }
+        $OfflineModelsDir = (Resolve-Path $OfflineModelsDir).Path
         $env:SONICINPUT_OFFLINE_MODELS_DIR = $OfflineModelsDir
         Write-Output "[INFO] Offline models dir: $OfflineModelsDir"
     } else {
@@ -36,9 +40,19 @@ if (Test-Path $distDir) {
         Write-Output "[OUTPUT] $($exe.FullName)"
     }
 
-    $offlineZip = Get-ChildItem -Path $distDir -Filter "SonicInput-v*-win64-offline.zip" |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
+    $offlineZip = $null
+    if ($exe) {
+        $expectedOfflineZip = Join-Path $distDir "$($exe.BaseName)-offline.zip"
+        if (Test-Path $expectedOfflineZip -PathType Leaf) {
+            $offlineZip = Get-Item $expectedOfflineZip
+        }
+    }
+    if (-not $offlineZip) {
+        $offlineZip = Get-ChildItem -Path $distDir -Filter "SonicInput-v*-win64-offline.zip" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+    }
+
     if ($offlineZip) {
         Write-Output "[OUTPUT] $($offlineZip.FullName)"
 

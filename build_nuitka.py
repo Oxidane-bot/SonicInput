@@ -11,6 +11,7 @@ import shutil
 import string
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from xml.etree import ElementTree
@@ -216,13 +217,20 @@ def _resolve_offline_models_dir() -> Path | None:
     ]
     for candidate in candidates:
         if candidate:
-            return Path(candidate)
+            models_dir = Path(candidate).expanduser()
+            if not models_dir.is_absolute():
+                models_dir = (Path.cwd() / models_dir).resolve()
+            return models_dir
     return None
 
 
 def _build_offline_bundle(
     exe_path: Path, models_dir: Path, dist_dir: Path
 ) -> Path | None:
+    models_dir = models_dir.expanduser()
+    if not models_dir.is_absolute():
+        models_dir = (Path.cwd() / models_dir).resolve()
+
     if not models_dir.exists():
         print(f"[WARN] Offline models dir does not exist: {models_dir}")
         return None
@@ -238,16 +246,19 @@ def _build_offline_bundle(
             print(f"  - {name}")
         return None
 
-    staging_dir = dist_dir / "offline_bundle"
-    if staging_dir.exists():
-        shutil.rmtree(staging_dir)
-    staging_dir.mkdir(parents=True, exist_ok=True)
-
-    shutil.copy2(exe_path, staging_dir / exe_path.name)
-    shutil.copytree(models_dir, staging_dir / "models")
-
     zip_base = dist_dir / f"{exe_path.stem}-offline"
-    zip_path = Path(shutil.make_archive(str(zip_base), "zip", root_dir=staging_dir))
+    zip_path = zip_base.with_suffix(".zip")
+    if zip_path.exists():
+        zip_path.unlink()
+
+    with tempfile.TemporaryDirectory(
+        prefix=f"{exe_path.stem}-offline-staging-", dir=dist_dir
+    ) as temp_dir:
+        staging_dir = Path(temp_dir)
+        shutil.copy2(exe_path, staging_dir / exe_path.name)
+        shutil.copytree(models_dir, staging_dir / "models")
+        zip_path = Path(shutil.make_archive(str(zip_base), "zip", root_dir=staging_dir))
+
     print(f"[OFFLINE] Bundle created: {zip_path}")
     return zip_path
 
