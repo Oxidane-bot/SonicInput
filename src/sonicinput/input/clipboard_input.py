@@ -250,7 +250,9 @@ class ClipboardInput:
         normalized = format_name.strip().lower()
         if normalized in self.SAFE_REGISTERED_FORMAT_NAMES:
             return True
-        return any(keyword in normalized for keyword in self.SAFE_REGISTERED_FORMAT_KEYWORDS)
+        return any(
+            keyword in normalized for keyword in self.SAFE_REGISTERED_FORMAT_KEYWORDS
+        )
 
     def _can_restore_format(self, fmt: int, data: Any) -> Tuple[bool, str]:
         """判断格式是否可安全恢复，避免触发 Win32 堆损坏。"""
@@ -270,7 +272,9 @@ class ClipboardInput:
 
             if fmt == 13 and not isinstance(data, str):  # CF_UNICODETEXT
                 return False, f"unicode_requires_str:{type(data).__name__}"
-            if fmt in {1, 7} and not isinstance(data, (bytes, str)):  # CF_TEXT/CF_OEMTEXT
+            if fmt in {1, 7} and not isinstance(
+                data, (bytes, str)
+            ):  # CF_TEXT/CF_OEMTEXT
                 return False, f"text_requires_bytes_or_str:{type(data).__name__}"
             if fmt in {8, 17} and not isinstance(data, (bytes, bytearray)):  # DIB/DIBV5
                 return False, f"dib_requires_bytes:{type(data).__name__}"
