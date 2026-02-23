@@ -19,8 +19,15 @@ import warnings
 import argparse
 import signal
 import time
+import atexit
+import faulthandler
+import json
+import threading
+import traceback
+from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from types import TracebackType
+from typing import Tuple, Dict, Any, Optional
 
 
 # ============================================================================
@@ -61,6 +68,263 @@ _app_instance = None
 _container_instance = None
 _qt_app_instance = None
 
+# Runtime diagnostics state (for unexpected exits with missing logs)
+_LOG_DIR = Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "logs"
+_RUNTIME_STATE_FILE = _LOG_DIR / "runtime_state.json"
+_CRASH_LOG_FILE = _LOG_DIR / "crash.log"
+_FAULT_LOG_FILE = _LOG_DIR / "fault.log"
+
+_fault_log_handle = None
+_runtime_diagnostics_initialized = False
+_runtime_unclean_exit_detected = False
+
+
+def _now_iso() -> str:
+    """Return current local time in ISO format."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _ensure_log_dir() -> None:
+    """Ensure diagnostics log directory exists."""
+    try:
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Best effort only; app must continue even if path is unavailable.
+        pass
+
+
+def _append_crash_log(message: str, extra: Optional[Dict[str, Any]] = None) -> None:
+    """Append a structured line to crash.log without relying on app logger."""
+    try:
+        _ensure_log_dir()
+        payload: Dict[str, Any] = {
+            "timestamp": _now_iso(),
+            "pid": os.getpid(),
+            "message": message,
+        }
+        if extra:
+            payload["extra"] = extra
+
+        with open(_CRASH_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        pass
+
+
+def _read_runtime_state() -> Optional[Dict[str, Any]]:
+    """Read runtime state file. Return None on missing/invalid file."""
+    try:
+        if not _RUNTIME_STATE_FILE.exists():
+            return None
+        with open(_RUNTIME_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _write_runtime_state(state: Dict[str, Any]) -> None:
+    """Write runtime state atomically."""
+    try:
+        _ensure_log_dir()
+        tmp_file = _RUNTIME_STATE_FILE.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False, default=str)
+            f.write("\n")
+        os.replace(tmp_file, _RUNTIME_STATE_FILE)
+    except Exception:
+        pass
+
+
+def _update_runtime_state(
+    stage: Optional[str] = None,
+    *,
+    clean_shutdown: Optional[bool] = None,
+    shutdown_reason: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Update runtime state for post-mortem diagnostics."""
+    state = _read_runtime_state() or {}
+    state["pid"] = os.getpid()
+    state.setdefault("startup_time", _now_iso())
+
+    if stage is not None:
+        state["last_stage"] = stage
+        state["last_stage_time"] = _now_iso()
+    if clean_shutdown is not None:
+        state["clean_shutdown"] = clean_shutdown
+        if clean_shutdown:
+            state["shutdown_time"] = _now_iso()
+    if shutdown_reason:
+        state["shutdown_reason"] = shutdown_reason
+    if extra:
+        state["details"] = extra
+
+    _write_runtime_state(state)
+
+
+def _record_previous_unclean_shutdown() -> None:
+    """Report previous unclean exit if marker from last run remains."""
+    previous_state = _read_runtime_state()
+    if not previous_state or previous_state.get("clean_shutdown", False):
+        return
+
+    message = (
+        "[CRASH-DETECT] Detected previous unclean shutdown "
+        f"(pid={previous_state.get('pid', 'unknown')}, "
+        f"startup={previous_state.get('startup_time', 'unknown')}, "
+        f"last_stage={previous_state.get('last_stage', 'unknown')})"
+    )
+    print(message)
+    _append_crash_log("Detected previous unclean shutdown", previous_state)
+
+    if app_logger and LogCategory:
+        try:
+            app_logger.warning(
+                "Detected previous unclean shutdown",
+                category=LogCategory.ERROR,
+                context=previous_state,
+                component="runtime_diagnostics",
+            )
+        except Exception:
+            pass
+
+
+def _configure_fault_handler() -> None:
+    """Enable faulthandler so native crashes also leave a traceback."""
+    global _fault_log_handle
+    try:
+        _ensure_log_dir()
+        if _fault_log_handle is None:
+            _fault_log_handle = open(_FAULT_LOG_FILE, "a", encoding="utf-8")
+
+        _fault_log_handle.write(
+            f"[{_now_iso()}] Enabled faulthandler for pid={os.getpid()}\n"
+        )
+        _fault_log_handle.flush()
+        faulthandler.enable(file=_fault_log_handle, all_threads=True)
+    except Exception as e:
+        print(f"Warning: Could not enable faulthandler: {e}")
+        _append_crash_log("Failed to enable faulthandler", {"error": str(e)})
+
+
+def _record_unhandled_exception(
+    origin: str,
+    exc_type: type,
+    exc_value: BaseException,
+    exc_tb: Optional[TracebackType],
+    thread_name: Optional[str] = None,
+) -> None:
+    """Persist unhandled exception details for crash diagnosis."""
+    global _runtime_unclean_exit_detected
+    _runtime_unclean_exit_detected = True
+
+    traceback_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    context: Dict[str, Any] = {
+        "origin": origin,
+        "exception_type": exc_type.__name__,
+        "exception": str(exc_value),
+    }
+    if thread_name:
+        context["thread"] = thread_name
+
+    _append_crash_log(f"Unhandled exception ({origin})", context)
+    _append_crash_log("Unhandled traceback", {"traceback": traceback_text})
+    _update_runtime_state(
+        stage="unhandled_exception",
+        clean_shutdown=False,
+        shutdown_reason=origin,
+        extra=context,
+    )
+
+    if app_logger:
+        try:
+            if isinstance(exc_value, Exception):
+                app_logger.log_error(exc_value, origin)
+            else:
+                app_logger.error(
+                    f"Unhandled base exception in {origin}",
+                    category=LogCategory.ERROR if LogCategory else None,
+                    context=context,
+                    component="runtime_diagnostics",
+                )
+        except Exception:
+            pass
+
+    print(
+        f"[UNHANDLED] {origin} -> {exc_type.__name__}: {exc_value}",
+        file=sys.stderr,
+    )
+    print(traceback_text, file=sys.stderr)
+
+
+def _global_excepthook(exc_type: type, exc_value: BaseException, exc_tb) -> None:
+    """Process-level excepthook."""
+    if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+
+    _record_unhandled_exception("sys.excepthook", exc_type, exc_value, exc_tb)
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+def _thread_excepthook(args: threading.ExceptHookArgs) -> None:
+    """Thread-level excepthook."""
+    if args.exc_type and issubclass(args.exc_type, (KeyboardInterrupt, SystemExit)):
+        if hasattr(threading, "__excepthook__"):
+            threading.__excepthook__(args)
+        return
+
+    _record_unhandled_exception(
+        origin="threading.excepthook",
+        exc_type=args.exc_type,
+        exc_value=args.exc_value,
+        exc_tb=args.exc_traceback,
+        thread_name=args.thread.name if args.thread else None,
+    )
+    if hasattr(threading, "__excepthook__"):
+        threading.__excepthook__(args)
+
+
+def _on_process_exit() -> None:
+    """Atexit handler to mark clean shutdown."""
+    if _runtime_unclean_exit_detected:
+        _update_runtime_state(
+            stage="process_exit_unclean",
+            clean_shutdown=False,
+            shutdown_reason="unhandled_exception",
+        )
+        return
+
+    _update_runtime_state(
+        stage="process_exit",
+        clean_shutdown=True,
+        shutdown_reason="normal_exit",
+    )
+
+
+def initialize_runtime_diagnostics() -> None:
+    """Install crash diagnostics hooks and runtime exit markers."""
+    global _runtime_diagnostics_initialized
+    if _runtime_diagnostics_initialized:
+        return
+
+    _ensure_log_dir()
+    _record_previous_unclean_shutdown()
+    _update_runtime_state(
+        stage="process_start",
+        clean_shutdown=False,
+        extra={"argv": sys.argv},
+    )
+    _configure_fault_handler()
+
+    sys.excepthook = _global_excepthook
+    threading.excepthook = _thread_excepthook
+    atexit.register(_on_process_exit)
+    _runtime_diagnostics_initialized = True
+
 
 def handle_shutdown(signum, frame):
     """Handle shutdown signals gracefully with proper cleanup
@@ -68,6 +332,12 @@ def handle_shutdown(signum, frame):
     Note: Refactored to avoid try-finally with return for Nuitka compatibility
     """
     print("\n[SHUTDOWN] Received shutdown signal, cleaning up...")
+    _update_runtime_state(
+        stage="signal_shutdown",
+        clean_shutdown=False,
+        shutdown_reason=f"signal_{signum}",
+        extra={"signal": signum},
+    )
 
     global _app_instance, _container_instance, _qt_app_instance
 
@@ -457,6 +727,7 @@ def test_gui_components() -> bool:
 def run_gui_with_diagnostics() -> int:
     """Launch GUI with simplified validation (system checks moved to test mode)"""
     print("=== GUI Startup ===")
+    _update_runtime_state(stage="gui_startup_begin")
 
     # Early-load logger configuration to suppress console output if configured
     try:
@@ -808,7 +1079,12 @@ def run_gui():
         qt_app.aboutToQuit.connect(on_about_to_quit)
 
         # Run Qt event loop
+        _update_runtime_state(stage="qt_event_loop_running")
         exit_code = qt_app.exec()
+        _update_runtime_state(
+            stage="qt_event_loop_exited",
+            extra={"exit_code": exit_code},
+        )
 
         # Cleanup in optimized order
         try:
@@ -845,6 +1121,12 @@ def run_gui():
         return exit_code
 
     except Exception as e:
+        _update_runtime_state(
+            stage="gui_startup_exception",
+            clean_shutdown=False,
+            shutdown_reason="gui_startup_exception",
+            extra={"error": str(e)},
+        )
         print(f"ERROR: Failed to start GUI: {e}")
         print("Full traceback:")
         import traceback
@@ -891,6 +1173,9 @@ def run_diagnostics():
 
 def main():
     """Main application entry point"""
+    initialize_runtime_diagnostics()
+    _update_runtime_state(stage="main_entry")
+
     parser = argparse.ArgumentParser(description="Sonic Input")
     parser.add_argument("--gui", action="store_true", help="Launch with GUI")
     parser.add_argument(
@@ -912,14 +1197,18 @@ def main():
     print("=== Sonic Input ===")
 
     if args.test:
+        _update_runtime_state(stage="run_tests")
         run_tests()
     elif args.diagnostics:
+        _update_runtime_state(stage="run_diagnostics")
         run_diagnostics()
     elif args.validate:
+        _update_runtime_state(stage="run_validate")
         success, report = validate_environment()
         sys.exit(0 if success else 1)
     else:
         # Default: always launch GUI (with or without --gui flag)
+        _update_runtime_state(stage="launch_gui")
         sys.exit(run_gui_with_diagnostics())
         print("  --diagnostics Run comprehensive diagnostics")
         print("  --validate    Validate environment only")

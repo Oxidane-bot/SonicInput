@@ -2,7 +2,7 @@
 
 import ctypes
 import time
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import pyperclip
 import win32api
@@ -30,6 +30,53 @@ class ClipboardInput:
         9: "CF_PALETTE",  # HPALETTE - 调色板句柄
         14: "CF_ENHMETAFILE",  # HENHMETAFILE - 增强型图元文件句柄
     }
+    REGISTERED_FORMAT_START = 0xC000
+
+    # 标准格式名（用于日志）
+    STANDARD_FORMAT_NAMES = {
+        1: "CF_TEXT",
+        2: "CF_BITMAP",
+        3: "CF_METAFILEPICT",
+        7: "CF_OEMTEXT",
+        8: "CF_DIB",
+        9: "CF_PALETTE",
+        13: "CF_UNICODETEXT",
+        14: "CF_ENHMETAFILE",
+        16: "CF_LOCALE",
+        17: "CF_DIBV5",
+    }
+
+    # 仅恢复这些标准格式（文本 + 主要图像格式）
+    SAFE_STANDARD_RESTORE_FORMATS = {1, 7, 8, 13, 16, 17}
+
+    # 注册格式白名单（保留常见富文本/网页/图像格式）
+    SAFE_REGISTERED_FORMAT_NAMES = {
+        "html format",
+        "rich text format",
+        "rtf",
+        "png",
+        "jfif",
+        "gif",
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/gif",
+        "image/bmp",
+        "bitmap",
+    }
+    SAFE_REGISTERED_FORMAT_KEYWORDS = (
+        "html",
+        "rtf",
+        "rich text",
+        "image",
+        "png",
+        "jpeg",
+        "jpg",
+        "gif",
+        "bitmap",
+        "dib",
+    )
+    MAX_RESTORABLE_FORMAT_SIZE_BYTES = 32 * 1024 * 1024  # 32MB
 
     def __init__(self):
         self.original_clipboard = ""
@@ -181,6 +228,75 @@ class ClipboardInput:
 
         return formats
 
+    def _get_clipboard_format_name(self, fmt: int) -> str:
+        """获取剪贴板格式名称（标准格式或注册格式）。"""
+        standard_name = self.STANDARD_FORMAT_NAMES.get(fmt)
+        if standard_name:
+            return standard_name
+
+        if fmt >= self.REGISTERED_FORMAT_START:
+            try:
+                name = win32clipboard.GetClipboardFormatName(fmt)
+                if name:
+                    return name
+            except Exception:
+                pass
+            return f"Registered({fmt})"
+
+        return f"Format({fmt})"
+
+    def _is_allowed_registered_format(self, format_name: str) -> bool:
+        """判断注册格式是否在可安全恢复集合中。"""
+        normalized = format_name.strip().lower()
+        if normalized in self.SAFE_REGISTERED_FORMAT_NAMES:
+            return True
+        return any(keyword in normalized for keyword in self.SAFE_REGISTERED_FORMAT_KEYWORDS)
+
+    def _can_restore_format(self, fmt: int, data: Any) -> Tuple[bool, str]:
+        """判断格式是否可安全恢复，避免触发 Win32 堆损坏。"""
+        if data is None:
+            return False, "data_none"
+
+        # 明确排除 GDI 句柄类格式和句柄值
+        if fmt in self.HANDLE_FORMATS:
+            return False, "handle_format"
+        if isinstance(data, int):
+            return False, "handle_value"
+
+        # 标准格式：仅允许安全子集
+        if fmt < self.REGISTERED_FORMAT_START:
+            if fmt not in self.SAFE_STANDARD_RESTORE_FORMATS:
+                return False, "standard_not_allowlisted"
+
+            if fmt == 13 and not isinstance(data, str):  # CF_UNICODETEXT
+                return False, f"unicode_requires_str:{type(data).__name__}"
+            if fmt in {1, 7} and not isinstance(data, (bytes, str)):  # CF_TEXT/CF_OEMTEXT
+                return False, f"text_requires_bytes_or_str:{type(data).__name__}"
+            if fmt in {8, 17} and not isinstance(data, (bytes, bytearray)):  # DIB/DIBV5
+                return False, f"dib_requires_bytes:{type(data).__name__}"
+            if fmt == 16 and not isinstance(data, (bytes, bytearray)):  # CF_LOCALE
+                return False, f"locale_requires_bytes:{type(data).__name__}"
+
+            if isinstance(data, (bytes, bytearray)) and len(data) == 0:
+                return False, "empty_binary_data"
+            return True, "safe_standard"
+
+        # 注册格式：仅放行白名单格式名，且必须是 bytes-like
+        if not isinstance(data, (bytes, bytearray)):
+            return False, f"registered_requires_bytes:{type(data).__name__}"
+
+        data_size = len(data)
+        if data_size == 0:
+            return False, "registered_empty_data"
+        if data_size > self.MAX_RESTORABLE_FORMAT_SIZE_BYTES:
+            return False, f"registered_too_large:{data_size}"
+
+        format_name = self._get_clipboard_format_name(fmt)
+        if not self._is_allowed_registered_format(format_name):
+            return False, f"registered_not_allowlisted:{format_name}"
+
+        return True, f"safe_registered:{format_name}"
+
     def backup_clipboard(self) -> Union[str, Dict[int, bytes]]:
         """备份当前剪贴板内容 - 支持所有格式
 
@@ -245,7 +361,7 @@ class ClipboardInput:
         # 定义格式优先级（数字越小优先级越高）
         FORMAT_PRIORITY = {
             8: 1,  # CF_DIB - 设备无关位图（最高优先级）
-            17: 2,  # CF_METAFILEPICT - 图元文件
+            17: 2,  # CF_DIBV5 - DIB v5
             2: 3,  # CF_BITMAP - 位图
             13: 4,  # CF_UNICODETEXT - Unicode文本
             16: 5,  # CF_LOCALE - 区域设置
@@ -361,6 +477,45 @@ class ClipboardInput:
         try:
             # 关键优化：按格式依赖关系排序
             sorted_formats = self._sort_formats_by_dependency(formats)
+            restorable_formats: Dict[int, Any] = {}
+            skipped_formats = []
+
+            # 恢复前先做安全筛选，避免某些注册格式导致 Win32 崩溃（0xc0000374）
+            for fmt, data in sorted_formats.items():
+                can_restore, reason = self._can_restore_format(fmt, data)
+                if can_restore:
+                    restorable_formats[fmt] = data
+                else:
+                    skipped_formats.append(
+                        {
+                            "format": fmt,
+                            "name": self._get_clipboard_format_name(fmt),
+                            "reason": reason,
+                            "data_type": type(data).__name__,
+                            "data_size": len(data)
+                            if isinstance(data, (bytes, bytearray, str))
+                            else "unknown",
+                        }
+                    )
+
+            if skipped_formats:
+                app_logger.log_audio_event(
+                    "Skipping unsafe clipboard formats during restore",
+                    {
+                        "skipped_count": len(skipped_formats),
+                        "skipped_formats": skipped_formats,
+                    },
+                )
+
+            if not restorable_formats:
+                app_logger.log_audio_event(
+                    "No clipboard formats eligible for safe restore",
+                    {
+                        "original_count": len(sorted_formats),
+                        "skipped_count": len(skipped_formats),
+                    },
+                )
+                return
 
             # 获取窗口句柄（关键修复！）
             hwnd = None
@@ -393,9 +548,10 @@ class ClipboardInput:
                 validation_failed_formats = []
 
                 # 按依赖关系排序后的顺序恢复格式
-                for fmt, data in sorted_formats.items():
+                for fmt, data in restorable_formats.items():
                     try:
-                        result = win32clipboard.SetClipboardData(fmt, data)
+                        payload = bytes(data) if isinstance(data, bytearray) else data
+                        result = win32clipboard.SetClipboardData(fmt, payload)
                         # 验证返回值
                         if result is not None:
                             api_success_count += 1
@@ -403,22 +559,27 @@ class ClipboardInput:
                                 "Format API call succeeded",
                                 {
                                     "format": fmt,
-                                    "data_size": len(data)
-                                    if isinstance(data, bytes)
+                                    "name": self._get_clipboard_format_name(fmt),
+                                    "data_size": len(payload)
+                                    if isinstance(payload, (bytes, bytearray, str))
                                     else "unknown",
                                 },
                             )
 
-                            # 关键改进：验证格式是否真正可用
-                            is_valid = self._validate_format_restored(fmt, data)
-                            if is_valid:
+                            # 对注册格式不做二次读取验证，降低复杂格式上的不确定性
+                            if fmt >= self.REGISTERED_FORMAT_START:
                                 validated_count += 1
+                            # 标准格式继续验证
                             else:
-                                validation_failed_formats.append(fmt)
-                                app_logger.log_audio_event(
-                                    f"Format {fmt} API succeeded but validation failed",
-                                    {"format": fmt, "result": "validation_failed"},
-                                )
+                                is_valid = self._validate_format_restored(fmt, payload)
+                                if is_valid:
+                                    validated_count += 1
+                                else:
+                                    validation_failed_formats.append(fmt)
+                                    app_logger.log_audio_event(
+                                        f"Format {fmt} API succeeded but validation failed",
+                                        {"format": fmt, "result": "validation_failed"},
+                                    )
                         else:
                             failed_formats.append(fmt)
                             app_logger.log_audio_event(
@@ -437,7 +598,9 @@ class ClipboardInput:
                 app_logger.log_audio_event(
                     "Clipboard formats restoration completed",
                     {
-                        "total_formats": len(sorted_formats),
+                        "total_formats": len(restorable_formats),
+                        "requested_formats": len(sorted_formats),
+                        "skipped_unsafe_formats": len(skipped_formats),
                         "api_success_count": api_success_count,
                         "validated_count": validated_count,
                         "api_failed_count": len(failed_formats),
