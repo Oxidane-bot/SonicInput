@@ -252,21 +252,14 @@ class SmartTextInput(LifecycleComponent, IInputService):
                 except Exception as e:
                     app_logger.log_error(e, "delayed_restore_clipboard")
 
-        # 使用普通线程（非daemon），确保剪贴板恢复完成
-        # daemon=False 确保线程有机会完成剪贴板恢复，避免用户数据丢失
+        # 使用普通线程（非daemon），确保进程退出前仍有机会完成恢复。
+        # 不在这里 join，避免阻塞输入完成事件链路。
         restore_thread = threading.Thread(target=delayed_restore, daemon=False)
         restore_thread.start()
-
-        # 等待线程完成，设置合理超时防止阻塞关闭流程
-        # 超时时间 = restore_delay + 0.5秒（宽限时间）
-        timeout = restore_delay + 0.5
-        restore_thread.join(timeout=timeout)
-
-        if restore_thread.is_alive():
-            app_logger.log_audio_event(
-                "Clipboard restore thread timeout, but will complete in background",
-                {"timeout": timeout},
-            )
+        app_logger.log_audio_event(
+            "Clipboard restore scheduled in background",
+            {"restore_delay": restore_delay},
+        )
 
         self._recording_mode = False
         self._original_clipboard = ""

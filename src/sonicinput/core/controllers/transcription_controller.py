@@ -189,6 +189,10 @@ class TranscriptionController(
                 # 从返回结果中提取文本和统计信息
                 text = result.get("text", "")
                 stats = result.get("stats", {})
+                if text is None:
+                    text = ""
+                elif not isinstance(text, str):
+                    text = str(text)
 
                 app_logger.log_audio_event(
                     "Streaming transcription stopped",
@@ -202,6 +206,10 @@ class TranscriptionController(
                 )
                 text = self._transcribe_from_file_for_cloud()
                 stats = {}
+                if text is None:
+                    text = ""
+                elif not isinstance(text, str):
+                    text = str(text)
 
             # 关键修复：Realtime模式下，文本已在录音过程中实时输入，清空最终文本避免重复
             if streaming_mode == "realtime":
@@ -215,13 +223,21 @@ class TranscriptionController(
                 self._events.emit(Events.TEXT_INPUT_COMPLETED, "")
                 self._state_manager.set_app_state(AppState.IDLE)
 
-            # 仅针对本地提供商的chunked模式：如果流式转录失败，fallback到同步转录
-            if not text and streaming_mode == "chunked" and self._audio_service:
-                app_logger.log_audio_event(
-                    "No text from chunked streaming, falling back to sync transcription",
-                    {"streaming_mode": streaming_mode},
-                )
-                text = self._sync_transcribe_last_audio()
+            # Chunked 模式下如果最终文本为空（含仅空白），执行 fallback。
+            # 本地提供商走同步转录；云提供商走文件转录。
+            if streaming_mode == "chunked" and not text.strip():
+                if self._audio_service:
+                    app_logger.log_audio_event(
+                        "No text from chunked streaming, falling back to sync transcription",
+                        {"streaming_mode": streaming_mode, "fallback": "local_sync"},
+                    )
+                    text = self._sync_transcribe_last_audio()
+                else:
+                    app_logger.log_audio_event(
+                        "No text from chunked streaming, falling back to file transcription",
+                        {"streaming_mode": streaming_mode, "fallback": "cloud_file"},
+                    )
+                    text = self._transcribe_from_file_for_cloud()
 
             transcribe_duration = time.time() - transcribe_start
 

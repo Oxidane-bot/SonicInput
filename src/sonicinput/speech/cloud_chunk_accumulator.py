@@ -138,7 +138,24 @@ class CloudChunkAccumulator:
         for attempt in range(max_retries):
             try:
                 result = self._speech_service.transcribe(audio_data)
+                if not isinstance(result, dict):
+                    raise RuntimeError(
+                        f"Unexpected transcription result type: {type(result).__name__}"
+                    )
+
+                # Cloud speech services return {"error": "..."} on failures.
+                # Treating that as empty text would silently hide backend failures.
+                if result.get("error"):
+                    error_code = result.get("error_code", "unknown")
+                    raise RuntimeError(
+                        f"Cloud transcription error ({error_code}): {result.get('error')}"
+                    )
+
                 text = result.get("text", "")
+                if text is None:
+                    text = ""
+                elif not isinstance(text, str):
+                    text = str(text)
 
                 app_logger.log_audio_event(
                     "Cloud chunk transcription completed",
@@ -236,13 +253,22 @@ class CloudChunkAccumulator:
 
         # Sort by chunk_id and combine text
         results.sort(key=lambda x: x[0])
-        combined_text = " ".join(text for _, text in results)
+        text_parts = []
+        for _, text in results:
+            if not isinstance(text, str):
+                continue
+            cleaned = text.strip()
+            if cleaned:
+                text_parts.append(cleaned)
+        combined_text = " ".join(text_parts)
 
         stats = {
             "total_chunks": self._chunk_counter,
             "successful_chunks": len(results),
             "failed_chunks": len(failed_chunks),
             "failed_chunk_ids": failed_chunks,
+            "non_empty_chunks": len(text_parts),
+            "empty_chunks": len(results) - len(text_parts),
             "streaming_mode": "chunked",
         }
 
@@ -252,6 +278,8 @@ class CloudChunkAccumulator:
                 "total_chunks": stats["total_chunks"],
                 "successful": stats["successful_chunks"],
                 "failed": stats["failed_chunks"],
+                "non_empty_chunks": stats["non_empty_chunks"],
+                "empty_chunks": stats["empty_chunks"],
                 "text_length": len(combined_text),
             },
         )
