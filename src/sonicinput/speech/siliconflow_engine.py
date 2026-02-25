@@ -25,6 +25,7 @@ class SiliconFlowEngine(CloudTranscriptionBase):
     display_name = "SiliconFlow"
     description = "Ultra-low latency cloud transcription with Chinese dialect support"
     api_endpoint = "https://api.siliconflow.cn/v1/audio/transcriptions"
+    default_base_url = "https://api.siliconflow.cn/v1"
 
     # 支持的模型列表
     AVAILABLE_MODELS = [
@@ -49,17 +50,20 @@ class SiliconFlowEngine(CloudTranscriptionBase):
         """
         super().__init__(api_key, config_service)
         self.model_name = model_name
-        self.base_url = base_url if base_url else "https://api.siliconflow.cn/v1"
+        self.base_url = base_url if base_url else self.default_base_url
+        self._available_models = self.AVAILABLE_MODELS.copy()
 
-        # 验证模型名称
-        if model_name not in self.AVAILABLE_MODELS:
+        # Keep model configurable even when provider adds new IDs before local defaults update
+        if model_name and model_name not in self._available_models:
             app_logger.log_audio_event(
-                "Invalid SiliconFlow model, using default",
+                "SiliconFlow model is not in built-in defaults",
                 {
                     "requested_model": model_name,
-                    "default_model": self.AVAILABLE_MODELS[0],
+                    "defaults": self._available_models,
                 },
             )
+            self._available_models.append(model_name)
+        elif not model_name:
             self.model_name = self.AVAILABLE_MODELS[0]
 
     def prepare_request_data(self, **kwargs) -> Dict[str, Any]:
@@ -111,6 +115,60 @@ class SiliconFlowEngine(CloudTranscriptionBase):
         """
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    def _models_endpoint(self) -> str:
+        """构建模型列表接口地址。"""
+        return f"{self.base_url.rstrip('/')}/models"
+
+    def fetch_available_models(self, timeout: int = 10) -> List[str]:
+        """从 SiliconFlow 平台拉取可用语音识别模型列表。
+
+        Args:
+            timeout: HTTP 请求超时时间（秒）
+
+        Returns:
+            更新后的模型 ID 列表；如果接口无语音模型返回，则回退到内存默认列表。
+
+        Raises:
+            RuntimeError: 拉取或解析失败
+        """
+        session = self._get_session()
+        try:
+            response = session.get(
+                self._models_endpoint(),
+                params={"type": "audio", "sub_type": "speech-to-text"},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch SiliconFlow models: {e}") from e
+
+        data = payload.get("data", [])
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected SiliconFlow models response format")
+
+        model_ids = []
+        for item in data:
+            if isinstance(item, dict):
+                model_id = item.get("id")
+                if isinstance(model_id, str) and model_id.strip():
+                    model_ids.append(model_id.strip())
+
+        models = sorted(set(model_ids))
+        if models:
+            self._available_models = models
+            app_logger.log_audio_event(
+                "SiliconFlow models refreshed",
+                {"count": len(models), "models": models},
+            )
+            return models
+
+        app_logger.log_audio_event(
+            "SiliconFlow models refresh returned empty list, using fallback defaults",
+            {"fallback": self._available_models},
+        )
+        return self._available_models.copy()
+
     def load_model(self, model_name: Optional[str] = None) -> bool:
         """加载模型（云端服务，标记为已加载即可）
 
@@ -121,15 +179,15 @@ class SiliconFlowEngine(CloudTranscriptionBase):
             是否加载成功
         """
         if model_name:
-            if model_name not in self.AVAILABLE_MODELS:
+            if model_name not in self._available_models:
                 app_logger.log_audio_event(
-                    "Invalid model for load_model",
+                    "SiliconFlow model requested outside current model list",
                     {
                         "requested_model": model_name,
-                        "available_models": self.AVAILABLE_MODELS,
+                        "available_models": self._available_models,
                     },
                 )
-                return False
+                self._available_models.append(model_name)
             self.model_name = model_name
 
         # 云端服务无需预加载，API 会在首次转录时验证
@@ -146,7 +204,7 @@ class SiliconFlowEngine(CloudTranscriptionBase):
         Returns:
             模型名称列表
         """
-        return self.AVAILABLE_MODELS.copy()
+        return self._available_models.copy()
 
     def test_connection(self) -> Dict[str, Any]:
         """测试API连接
@@ -179,19 +237,18 @@ class SiliconFlowEngine(CloudTranscriptionBase):
         # 提取配置
         self.api_key = config.get("api_key", "")
         model_name = config.get("model_name", "FunAudioLLM/SenseVoiceSmall")
-        self.base_url = config.get("base_url", "https://api.siliconflow.cn/v1")
+        self.base_url = config.get("base_url", self.default_base_url)
 
         # 验证API密钥
         if not self.api_key or self.api_key.strip() == "":
             raise ValueError("SiliconFlow API key is required")
 
-        # 验证模型
-        if model_name not in self.AVAILABLE_MODELS:
-            raise ValueError(
-                f"Invalid model '{model_name}'. Available: {self.AVAILABLE_MODELS}"
-            )
+        if not model_name:
+            raise ValueError("SiliconFlow model is required")
 
         self.model_name = model_name
+        if model_name not in self._available_models:
+            self._available_models.append(model_name)
 
         # 标记为已加载
         self._is_model_loaded = True

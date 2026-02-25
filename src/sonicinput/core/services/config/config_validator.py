@@ -92,13 +92,8 @@ class ConfigValidator:
                 model = self._get_nested(
                     config, "transcription.groq.model", "whisper-large-v3-turbo"
                 )
-                valid_groq_models = [
-                    "whisper-large-v3",
-                    "whisper-large-v3-turbo",
-                    "distil-whisper-large-v3-en",
-                ]
-                if model not in valid_groq_models:
-                    warnings.append(f"Unknown Groq model: {model}")
+                if not isinstance(model, str) or not model.strip():
+                    warnings.append("Groq model is not set")
 
             # SiliconFlow 云服务配置验证
             elif provider == "siliconflow":
@@ -115,10 +110,8 @@ class ConfigValidator:
                     "transcription.siliconflow.model",
                     "FunAudioLLM/SenseVoiceSmall",
                 )
-                # SiliconFlow 只有一个模型，但允许未来扩展
-                valid_siliconflow_models = ["FunAudioLLM/SenseVoiceSmall"]
-                if model not in valid_siliconflow_models:
-                    warnings.append(f"Unknown SiliconFlow model: {model}")
+                if not isinstance(model, str) or not model.strip():
+                    warnings.append("SiliconFlow model is not set")
 
             # Qwen ASR 云服务配置验证
             elif provider == "qwen":

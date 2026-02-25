@@ -168,6 +168,10 @@ class TranscriptionTab(BaseSettingsTab):
         self.groq_model_combo.setEditable(True)  # 允许用户自定义输入
         self.groq_model_combo.addItems(["whisper-large-v3-turbo", "whisper-large-v3"])
         groq_layout.addRow("Model:", self.groq_model_combo)
+        self.refresh_groq_models_button = QPushButton("Refresh Model List")
+        self.refresh_groq_models_button.setObjectName("refresh_groq_models_btn")
+        self.refresh_groq_models_button.clicked.connect(self._refresh_groq_models)
+        groq_layout.addRow("", self.refresh_groq_models_button)
 
         # 超时设置
         self.groq_timeout_spinbox = QSpinBox()
@@ -215,6 +219,14 @@ class TranscriptionTab(BaseSettingsTab):
         )
         self.siliconflow_model_combo.setCurrentText("FunAudioLLM/SenseVoiceSmall")
         siliconflow_layout.addRow("Model:", self.siliconflow_model_combo)
+        self.refresh_siliconflow_models_button = QPushButton("Refresh Model List")
+        self.refresh_siliconflow_models_button.setObjectName(
+            "refresh_siliconflow_models_btn"
+        )
+        self.refresh_siliconflow_models_button.clicked.connect(
+            self._refresh_siliconflow_models
+        )
+        siliconflow_layout.addRow("", self.refresh_siliconflow_models_button)
 
         # 超时设置
         self.siliconflow_timeout_spinbox = QSpinBox()
@@ -297,11 +309,13 @@ class TranscriptionTab(BaseSettingsTab):
             "groq_api_key": self.groq_api_key_edit,
             "groq_base_url": self.groq_base_url_edit,
             "groq_model": self.groq_model_combo,
+            "refresh_groq_models_btn": self.refresh_groq_models_button,
             "groq_timeout": self.groq_timeout_spinbox,
             "groq_max_retries": self.groq_max_retries_spinbox,
             "siliconflow_api_key": self.siliconflow_api_key_edit,
             "siliconflow_base_url": self.siliconflow_base_url_edit,
             "siliconflow_model": self.siliconflow_model_combo,
+            "refresh_siliconflow_models_btn": self.refresh_siliconflow_models_button,
             "siliconflow_timeout": self.siliconflow_timeout_spinbox,
             "siliconflow_max_retries": self.siliconflow_max_retries_spinbox,
             "qwen_api_key": self.qwen_api_key_edit,
@@ -421,6 +435,9 @@ class TranscriptionTab(BaseSettingsTab):
             self.groq_model_combo,
             QCoreApplication.translate("TranscriptionTab", "Model:"),
         )
+        self.refresh_groq_models_button.setText(
+            QCoreApplication.translate("TranscriptionTab", "Refresh Model List")
+        )
         set_label(
             self.groq_layout,
             self.groq_timeout_spinbox,
@@ -462,6 +479,9 @@ class TranscriptionTab(BaseSettingsTab):
             self.siliconflow_layout,
             self.siliconflow_model_combo,
             QCoreApplication.translate("TranscriptionTab", "Model:"),
+        )
+        self.refresh_siliconflow_models_button.setText(
+            QCoreApplication.translate("TranscriptionTab", "Refresh Model List")
         )
         set_label(
             self.siliconflow_layout,
@@ -1049,6 +1069,316 @@ class TranscriptionTab(BaseSettingsTab):
                 QCoreApplication.translate("TranscriptionTab", "API Test Error"),
                 QCoreApplication.translate(
                     "TranscriptionTab", "Error during API test: {error}"
+                ).format(error=e),
+            )
+
+    def _replace_combo_items(self, combo: QComboBox, models: list[str]) -> None:
+        """Replace combo options while preserving current text."""
+        current_text = combo.currentText().strip()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(models)
+        if current_text and current_text not in models:
+            combo.addItem(current_text)
+        if current_text:
+            combo.setCurrentText(current_text)
+        combo.blockSignals(False)
+
+    def _refresh_groq_models(self) -> None:
+        """Fetch Groq model IDs from provider endpoint."""
+        import threading
+        import time
+
+        from PySide6.QtCore import QTimer
+
+        api_key = self.groq_api_key_edit.text().strip()
+        if not api_key:
+            QMessageBox.warning(
+                self.parent_window,
+                QCoreApplication.translate("TranscriptionTab", "API Key Missing"),
+                QCoreApplication.translate(
+                    "TranscriptionTab",
+                    "Please enter your Groq API key before refreshing model list.",
+                ),
+            )
+            return
+
+        base_url = self.groq_base_url_edit.text().strip() or "https://api.groq.com/openai/v1"
+        progress_dialog = QMessageBox(self.parent_window)
+        progress_dialog.setWindowTitle(
+            QCoreApplication.translate("TranscriptionTab", "Refreshing Groq Models")
+        )
+        progress_dialog.setText(
+            QCoreApplication.translate(
+                "TranscriptionTab",
+                "Refreshing Groq model list...\n\nThis may take a few seconds.",
+            )
+        )
+        progress_dialog.setStandardButtons(QMessageBox.StandardButton.Cancel)
+        progress_dialog.show()
+
+        QApplication.processEvents()
+
+        result_container = {"success": False, "error": "", "models": []}
+
+        def refresh_models_thread():
+            try:
+                from sonicinput.speech import GroqSpeechService
+
+                service = GroqSpeechService(
+                    api_key=api_key,
+                    model=self.groq_model_combo.currentText(),
+                    base_url=base_url,
+                )
+                models = service.fetch_available_models()
+                result_container["models"] = models
+                result_container["success"] = bool(models)
+                if not models:
+                    result_container["error"] = QCoreApplication.translate(
+                        "TranscriptionTab", "No Groq models returned from API"
+                    )
+            except Exception as e:
+                result_container["success"] = False
+                result_container["error"] = str(e)
+
+        refresh_thread = threading.Thread(target=refresh_models_thread, daemon=True)
+        refresh_thread.start()
+
+        self._groq_models_refresh_thread = refresh_thread
+        self._groq_models_refresh_result = result_container
+        self._groq_models_refresh_dialog = progress_dialog
+        self._groq_models_refresh_start_time = time.time()
+
+        self._groq_models_refresh_timer = QTimer()
+        self._groq_models_refresh_timer.timeout.connect(
+            self._check_groq_models_refresh_status
+        )
+        self._groq_models_refresh_timer.start(100)
+
+    def _check_groq_models_refresh_status(self) -> None:
+        """Check Groq model refresh status."""
+        import time
+
+        try:
+            thread_alive = self._groq_models_refresh_thread.is_alive()
+            elapsed_time = time.time() - self._groq_models_refresh_start_time
+
+            if not thread_alive or elapsed_time > 20:
+                self._groq_models_refresh_timer.stop()
+
+                if (
+                    self._groq_models_refresh_dialog
+                    and self._groq_models_refresh_dialog.result()
+                    == QMessageBox.StandardButton.Cancel
+                ):
+                    self.model_status_label.setText(
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model refresh cancelled"
+                        )
+                    )
+                    return
+
+                if self._groq_models_refresh_result["success"]:
+                    models = self._groq_models_refresh_result["models"]
+                    self._replace_combo_items(self.groq_model_combo, models)
+                    self.model_status_label.setText(
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model list updated"
+                        )
+                    )
+                    QMessageBox.information(
+                        self.parent_window,
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model List Updated"
+                        ),
+                        QCoreApplication.translate(
+                            "TranscriptionTab",
+                            "Groq model list refreshed successfully.\n\nFound {count} models.",
+                        ).format(count=len(models)),
+                    )
+                else:
+                    error_msg = self._groq_models_refresh_result[
+                        "error"
+                    ] or QCoreApplication.translate("TranscriptionTab", "Unknown error")
+                    self.model_status_label.setText(
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model refresh failed"
+                        )
+                    )
+                    QMessageBox.critical(
+                        self.parent_window,
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model Refresh Failed"
+                        ),
+                        QCoreApplication.translate(
+                            "TranscriptionTab",
+                            "Failed to refresh Groq model list.\n\nError: {error}",
+                        ).format(error=error_msg),
+                    )
+
+                if self._groq_models_refresh_dialog:
+                    self._groq_models_refresh_dialog.hide()
+
+        except Exception as e:
+            self.model_status_label.setText(
+                QCoreApplication.translate("TranscriptionTab", "Model refresh error")
+            )
+            QMessageBox.critical(
+                self.parent_window,
+                QCoreApplication.translate("TranscriptionTab", "Model Refresh Error"),
+                QCoreApplication.translate(
+                    "TranscriptionTab", "Error during model refresh: {error}"
+                ).format(error=e),
+            )
+
+    def _refresh_siliconflow_models(self) -> None:
+        """Fetch SiliconFlow model IDs from provider endpoint."""
+        import threading
+        import time
+
+        from PySide6.QtCore import QTimer
+
+        api_key = self.siliconflow_api_key_edit.text().strip()
+        if not api_key:
+            QMessageBox.warning(
+                self.parent_window,
+                QCoreApplication.translate("TranscriptionTab", "API Key Missing"),
+                QCoreApplication.translate(
+                    "TranscriptionTab",
+                    "Please enter your SiliconFlow API key before refreshing model list.",
+                ),
+            )
+            return
+
+        base_url = (
+            self.siliconflow_base_url_edit.text().strip() or "https://api.siliconflow.cn/v1"
+        )
+        progress_dialog = QMessageBox(self.parent_window)
+        progress_dialog.setWindowTitle(
+            QCoreApplication.translate(
+                "TranscriptionTab", "Refreshing SiliconFlow Models"
+            )
+        )
+        progress_dialog.setText(
+            QCoreApplication.translate(
+                "TranscriptionTab",
+                "Refreshing SiliconFlow model list...\n\nThis may take a few seconds.",
+            )
+        )
+        progress_dialog.setStandardButtons(QMessageBox.StandardButton.Cancel)
+        progress_dialog.show()
+
+        QApplication.processEvents()
+
+        result_container = {"success": False, "error": "", "models": []}
+
+        def refresh_models_thread():
+            try:
+                from sonicinput.speech.siliconflow_engine import SiliconFlowEngine
+
+                service = SiliconFlowEngine(
+                    api_key=api_key,
+                    model_name=self.siliconflow_model_combo.currentText(),
+                    base_url=base_url,
+                )
+                models = service.fetch_available_models()
+                result_container["models"] = models
+                result_container["success"] = bool(models)
+                if not models:
+                    result_container["error"] = QCoreApplication.translate(
+                        "TranscriptionTab", "No SiliconFlow models returned from API"
+                    )
+            except Exception as e:
+                result_container["success"] = False
+                result_container["error"] = str(e)
+
+        refresh_thread = threading.Thread(target=refresh_models_thread, daemon=True)
+        refresh_thread.start()
+
+        self._siliconflow_models_refresh_thread = refresh_thread
+        self._siliconflow_models_refresh_result = result_container
+        self._siliconflow_models_refresh_dialog = progress_dialog
+        self._siliconflow_models_refresh_start_time = time.time()
+
+        self._siliconflow_models_refresh_timer = QTimer()
+        self._siliconflow_models_refresh_timer.timeout.connect(
+            self._check_siliconflow_models_refresh_status
+        )
+        self._siliconflow_models_refresh_timer.start(100)
+
+    def _check_siliconflow_models_refresh_status(self) -> None:
+        """Check SiliconFlow model refresh status."""
+        import time
+
+        try:
+            thread_alive = self._siliconflow_models_refresh_thread.is_alive()
+            elapsed_time = time.time() - self._siliconflow_models_refresh_start_time
+
+            if not thread_alive or elapsed_time > 20:
+                self._siliconflow_models_refresh_timer.stop()
+
+                if (
+                    self._siliconflow_models_refresh_dialog
+                    and self._siliconflow_models_refresh_dialog.result()
+                    == QMessageBox.StandardButton.Cancel
+                ):
+                    self.model_status_label.setText(
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model refresh cancelled"
+                        )
+                    )
+                    return
+
+                if self._siliconflow_models_refresh_result["success"]:
+                    models = self._siliconflow_models_refresh_result["models"]
+                    self._replace_combo_items(self.siliconflow_model_combo, models)
+                    self.model_status_label.setText(
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model list updated"
+                        )
+                    )
+                    QMessageBox.information(
+                        self.parent_window,
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model List Updated"
+                        ),
+                        QCoreApplication.translate(
+                            "TranscriptionTab",
+                            "SiliconFlow model list refreshed successfully.\n\nFound {count} models.",
+                        ).format(count=len(models)),
+                    )
+                else:
+                    error_msg = self._siliconflow_models_refresh_result[
+                        "error"
+                    ] or QCoreApplication.translate("TranscriptionTab", "Unknown error")
+                    self.model_status_label.setText(
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model refresh failed"
+                        )
+                    )
+                    QMessageBox.critical(
+                        self.parent_window,
+                        QCoreApplication.translate(
+                            "TranscriptionTab", "Model Refresh Failed"
+                        ),
+                        QCoreApplication.translate(
+                            "TranscriptionTab",
+                            "Failed to refresh SiliconFlow model list.\n\nError: {error}",
+                        ).format(error=error_msg),
+                    )
+
+                if self._siliconflow_models_refresh_dialog:
+                    self._siliconflow_models_refresh_dialog.hide()
+
+        except Exception as e:
+            self.model_status_label.setText(
+                QCoreApplication.translate("TranscriptionTab", "Model refresh error")
+            )
+            QMessageBox.critical(
+                self.parent_window,
+                QCoreApplication.translate("TranscriptionTab", "Model Refresh Error"),
+                QCoreApplication.translate(
+                    "TranscriptionTab", "Error during model refresh: {error}"
                 ).format(error=e),
             )
 
