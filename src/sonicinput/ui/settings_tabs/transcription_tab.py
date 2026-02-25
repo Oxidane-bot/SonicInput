@@ -1103,7 +1103,9 @@ class TranscriptionTab(BaseSettingsTab):
             )
             return
 
-        base_url = self.groq_base_url_edit.text().strip() or "https://api.groq.com/openai/v1"
+        base_url = (
+            self.groq_base_url_edit.text().strip() or "https://api.groq.com/openai/v1"
+        )
         progress_dialog = QMessageBox(self.parent_window)
         progress_dialog.setWindowTitle(
             QCoreApplication.translate("TranscriptionTab", "Refreshing Groq Models")
@@ -1251,7 +1253,8 @@ class TranscriptionTab(BaseSettingsTab):
             return
 
         base_url = (
-            self.siliconflow_base_url_edit.text().strip() or "https://api.siliconflow.cn/v1"
+            self.siliconflow_base_url_edit.text().strip()
+            or "https://api.siliconflow.cn/v1"
         )
         progress_dialog = QMessageBox(self.parent_window)
         progress_dialog.setWindowTitle(
