@@ -169,6 +169,50 @@ class TestAITabAPIConnections:
             assert "failed" in dialog_shown[0][1].lower()
             assert "Invalid API key" in dialog_shown[0][1]
 
+    def test_nvidia_refresh_model_list_updates_combo(
+        self, qtbot, settings_window, monkeypatch
+    ):
+        """测试NVIDIA模型列表刷新会更新可编辑下拉框"""
+        mock_client = Mock()
+        mock_client.fetch_available_models = Mock(
+            return_value=[
+                "meta/llama-3.1-8b-instruct",
+                "nvidia/llama-3.1-nemotron-70b-instruct",
+            ]
+        )
+
+        dialog_shown = []
+
+        def mock_info(*args, **kwargs):
+            dialog_shown.append(("success", args[2]))
+
+        monkeypatch.setattr(QMessageBox, "information", mock_info)
+
+        with patch("sonicinput.ai.nvidia.NvidiaClient", return_value=mock_client):
+            settings_window.show()
+            qtbot.waitExposed(settings_window)
+            settings_window.tab_widget.setCurrentIndex(3)  # AI tab
+            qtbot.wait(50)
+
+            ai_tab = settings_window.ai_tab
+            ai_provider_combo = ai_tab.widget.findChild(QComboBox, "ai_provider_combo")
+            ai_provider_combo.setCurrentText("NVIDIA")
+            qtbot.wait(100)
+
+            nvidia_model_combo = ai_tab.widget.findChild(QComboBox, "nvidia_model_input")
+            nvidia_model_combo.setCurrentText("")
+            qtbot.wait(50)
+
+            refresh_btn = ai_tab.widget.findChild(
+                QPushButton, "refresh_nvidia_models_btn"
+            )
+            refresh_btn.click()
+
+            qtbot.waitUntil(lambda: len(dialog_shown) > 0, timeout=5000)
+
+            assert nvidia_model_combo.currentText() == "meta/llama-3.1-8b-instruct"
+            mock_client.fetch_available_models.assert_called_once()
+
     def test_openai_compatible_api_connection_success(
         self, qtbot, settings_window, monkeypatch
     ):

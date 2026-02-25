@@ -4,11 +4,12 @@ import threading
 import time
 from typing import Any, Dict
 
-from PySide6.QtCore import QCoreApplication, QTimer
+from PySide6.QtCore import QCoreApplication, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -140,13 +141,35 @@ class AITab(BaseSettingsTab):
         self.nvidia_api_key_label = QLabel("API Key:")
         nvidia_layout.addRow(self.nvidia_api_key_label, nvidia_api_key_layout)
 
-        # Model input
-        self.nvidia_model_input = QLineEdit()
-        self.nvidia_model_input.setPlaceholderText(
-            "Enter AI model ID (e.g., meta/llama-3.1-8b-instruct)"
+        # Model input (editable combo with type-to-match)
+        self.nvidia_model_input = QComboBox()
+        self.nvidia_model_input.setObjectName("nvidia_model_input")
+        self.nvidia_model_input.setEditable(True)
+        self.nvidia_model_input.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.nvidia_model_input.addItems(
+            [
+                "meta/llama-3.1-8b-instruct",
+                "meta/llama-3.3-70b-instruct",
+                "nvidia/llama-3.1-nemotron-70b-instruct",
+            ]
         )
+        if self.nvidia_model_input.lineEdit():
+            self.nvidia_model_input.lineEdit().setPlaceholderText(
+                "Enter AI model ID (e.g., meta/llama-3.1-8b-instruct)"
+            )
+        nvidia_completer = QCompleter(
+            self.nvidia_model_input.model(), self.nvidia_model_input
+        )
+        nvidia_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        nvidia_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        nvidia_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.nvidia_model_input.setCompleter(nvidia_completer)
         self.nvidia_model_label = QLabel("Model ID:")
         nvidia_layout.addRow(self.nvidia_model_label, self.nvidia_model_input)
+        self.refresh_nvidia_models_button = QPushButton("Refresh Model List")
+        self.refresh_nvidia_models_button.setObjectName("refresh_nvidia_models_btn")
+        self.refresh_nvidia_models_button.clicked.connect(self._refresh_nvidia_models)
+        nvidia_layout.addRow("", self.refresh_nvidia_models_button)
         layout.addWidget(self.nvidia_group)
 
         # --- OpenAI Compatible Group ---
@@ -302,6 +325,7 @@ class AITab(BaseSettingsTab):
             "groq_model": self.groq_model_input,
             "nvidia_api_key": self.nvidia_api_key_input,
             "nvidia_model": self.nvidia_model_input,
+            "refresh_nvidia_models_btn": self.refresh_nvidia_models_button,
             "openai_compatible_base_url": self.openai_compatible_base_url_input,
             "openai_compatible_api_key": self.openai_compatible_api_key_input,
             "openai_compatible_model": self.openai_compatible_model_input,
@@ -319,6 +343,7 @@ class AITab(BaseSettingsTab):
         self.parent_window.groq_model_input = self.groq_model_input
         self.parent_window.nvidia_api_key_input = self.nvidia_api_key_input
         self.parent_window.nvidia_model_input = self.nvidia_model_input
+        self.parent_window.refresh_nvidia_models_button = self.refresh_nvidia_models_button
         self.parent_window.openai_compatible_base_url_input = (
             self.openai_compatible_base_url_input
         )
@@ -392,10 +417,14 @@ class AITab(BaseSettingsTab):
         self.nvidia_api_key_input.setPlaceholderText(
             QCoreApplication.translate("AITab", "Enter your NVIDIA API key")
         )
-        self.nvidia_model_input.setPlaceholderText(
-            QCoreApplication.translate(
-                "AITab", "Enter AI model ID (e.g., meta/llama-3.1-8b-instruct)"
+        if self.nvidia_model_input.lineEdit():
+            self.nvidia_model_input.lineEdit().setPlaceholderText(
+                QCoreApplication.translate(
+                    "AITab", "Enter AI model ID (e.g., meta/llama-3.1-8b-instruct)"
+                )
             )
+        self.refresh_nvidia_models_button.setText(
+            QCoreApplication.translate("AITab", "Refresh Model List")
         )
 
         self.openai_compatible_group.setTitle(
@@ -463,6 +492,10 @@ class AITab(BaseSettingsTab):
             "test_failed": QCoreApplication.translate("AITab", "Test failed"),
             "success": QCoreApplication.translate("AITab", "Connection successful"),
             "failed": QCoreApplication.translate("AITab", "Connection failed"),
+            "model_list_updated": QCoreApplication.translate("AITab", "Model list updated"),
+            "model_refresh_failed": QCoreApplication.translate(
+                "AITab", "Model refresh failed"
+            ),
         }
         if status_key in status_map:
             self.api_status_label.setText(status_map[status_key])
@@ -545,7 +578,7 @@ class AITab(BaseSettingsTab):
 
         # NVIDIA
         self.nvidia_api_key_input.setText(nvidia_config.get("api_key", ""))
-        self.nvidia_model_input.setText(
+        self.nvidia_model_input.setCurrentText(
             nvidia_config.get("model_id", "meta/llama-3.1-8b-instruct")
         )
 
@@ -646,7 +679,7 @@ class AITab(BaseSettingsTab):
                 },
                 "nvidia": {
                     "api_key": self.nvidia_api_key_input.text().strip(),
-                    "model_id": self.nvidia_model_input.text().strip(),
+                    "model_id": self.nvidia_model_input.currentText().strip(),
                 },
                 "openai_compatible": {
                     "api_key": self.openai_compatible_api_key_input.text().strip(),
@@ -736,6 +769,141 @@ class AITab(BaseSettingsTab):
                 QCoreApplication.translate("AITab", "Show")
             )
 
+    def _replace_combo_items(self, combo: QComboBox, models: list[str]) -> None:
+        """Replace combo options while preserving current text."""
+        current_text = combo.currentText().strip()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(models)
+        if current_text and current_text not in models:
+            combo.addItem(current_text)
+        if current_text:
+            combo.setCurrentText(current_text)
+        combo.blockSignals(False)
+
+    def _refresh_nvidia_models(self) -> None:
+        """Fetch NVIDIA model IDs from provider endpoint."""
+        api_key = self.nvidia_api_key_input.text().strip()
+        progress_dialog = QMessageBox(self.parent_window)
+        progress_dialog.setWindowTitle(
+            QCoreApplication.translate("AITab", "Refreshing NVIDIA Models")
+        )
+        progress_dialog.setText(
+            QCoreApplication.translate(
+                "AITab",
+                "Refreshing NVIDIA model list...\n\nThis may take a few seconds.",
+            )
+        )
+        progress_dialog.setStandardButtons(QMessageBox.StandardButton.Cancel)
+        progress_dialog.show()
+
+        QApplication.processEvents()
+
+        result_container: Dict[str, Any] = {"success": False, "error": "", "models": []}
+
+        def refresh_models_thread() -> None:
+            try:
+                from ...ai.nvidia import NvidiaClient
+
+                client = NvidiaClient(api_key=api_key)
+                models = client.fetch_available_models()
+                result_container["models"] = models
+                result_container["success"] = bool(models)
+                if not models:
+                    result_container["error"] = QCoreApplication.translate(
+                        "AITab", "No NVIDIA models returned from API"
+                    )
+            except Exception as e:
+                result_container["success"] = False
+                result_container["error"] = str(e)
+
+        refresh_thread = threading.Thread(target=refresh_models_thread, daemon=True)
+        refresh_thread.start()
+
+        self._nvidia_models_refresh_thread = refresh_thread
+        self._nvidia_models_refresh_result = result_container
+        self._nvidia_models_refresh_dialog = progress_dialog
+        self._nvidia_models_refresh_start_time = time.time()
+
+        self._nvidia_models_refresh_timer = QTimer()
+        self._nvidia_models_refresh_timer.timeout.connect(
+            self._check_nvidia_models_refresh_status
+        )
+        self._nvidia_models_refresh_timer.start(100)
+
+    def _check_nvidia_models_refresh_status(self) -> None:
+        """Check NVIDIA model refresh status."""
+        try:
+            thread_alive = self._nvidia_models_refresh_thread.is_alive()
+            elapsed_time = time.time() - self._nvidia_models_refresh_start_time
+
+            if not thread_alive or elapsed_time > 20:
+                self._nvidia_models_refresh_timer.stop()
+
+                if (
+                    self._nvidia_models_refresh_dialog
+                    and self._nvidia_models_refresh_dialog.result()
+                    == QMessageBox.StandardButton.Cancel
+                ):
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model refresh cancelled")
+                    )
+                    return
+
+                if self._nvidia_models_refresh_result["success"]:
+                    models = self._nvidia_models_refresh_result["models"]
+                    self._replace_combo_items(self.nvidia_model_input, models)
+                    if not self.nvidia_model_input.currentText().strip():
+                        self.nvidia_model_input.setCurrentText(models[0])
+
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model list updated")
+                    )
+                    self.api_status_label.setProperty("status_key", "model_list_updated")
+                    self.api_status_label.setStyleSheet("color: green;")
+
+                    QMessageBox.information(
+                        self.parent_window,
+                        QCoreApplication.translate("AITab", "Model List Updated"),
+                        QCoreApplication.translate(
+                            "AITab",
+                            "NVIDIA model list refreshed successfully.\n\nFound {count} models.",
+                        ).format(count=len(models)),
+                    )
+                else:
+                    error_msg = self._nvidia_models_refresh_result["error"] or (
+                        QCoreApplication.translate("AITab", "Unknown error")
+                    )
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model refresh failed")
+                    )
+                    self.api_status_label.setProperty("status_key", "model_refresh_failed")
+                    self.api_status_label.setStyleSheet("color: red;")
+                    QMessageBox.critical(
+                        self.parent_window,
+                        QCoreApplication.translate("AITab", "Model Refresh Failed"),
+                        QCoreApplication.translate(
+                            "AITab",
+                            "Failed to refresh NVIDIA model list.\n\nError: {error}",
+                        ).format(error=error_msg),
+                    )
+
+                if self._nvidia_models_refresh_dialog:
+                    self._nvidia_models_refresh_dialog.hide()
+
+        except Exception as e:
+            self.api_status_label.setText(
+                QCoreApplication.translate("AITab", "Model refresh error")
+            )
+            self.api_status_label.setStyleSheet("color: red;")
+            QMessageBox.critical(
+                self.parent_window,
+                QCoreApplication.translate("AITab", "Model Refresh Error"),
+                QCoreApplication.translate(
+                    "AITab", "Error during model refresh: {error}"
+                ).format(error=e),
+            )
+
     def _test_api_connection(self) -> None:
         """Test API connection."""
         try:
@@ -753,7 +921,7 @@ class AITab(BaseSettingsTab):
                 model_id = self.groq_model_input.text().strip()
             elif current_provider == "nvidia":
                 api_key = self.nvidia_api_key_input.text().strip()
-                model_id = self.nvidia_model_input.text().strip()
+                model_id = self.nvidia_model_input.currentText().strip()
             elif current_provider == "openai_compatible":
                 api_key = self.openai_compatible_api_key_input.text().strip()
                 base_url = self.openai_compatible_base_url_input.text().strip()
