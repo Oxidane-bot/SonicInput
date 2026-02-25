@@ -107,13 +107,33 @@ class AITab(BaseSettingsTab):
         self.groq_api_key_label = QLabel("API Key:")
         groq_layout.addRow(self.groq_api_key_label, groq_api_key_layout)
 
-        # Model input
-        self.groq_model_input = QLineEdit()
-        self.groq_model_input.setPlaceholderText(
-            "Enter AI model ID (e.g., llama3-70b-8192)"
+        # Model input (editable combo with type-to-match)
+        self.groq_model_input = QComboBox()
+        self.groq_model_input.setObjectName("groq_model_input")
+        self.groq_model_input.setEditable(True)
+        self.groq_model_input.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.groq_model_input.addItems(
+            [
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+                "deepseek-r1-distill-llama-70b",
+            ]
         )
+        if self.groq_model_input.lineEdit():
+            self.groq_model_input.lineEdit().setPlaceholderText(
+                "Enter AI model ID (e.g., llama-3.3-70b-versatile)"
+            )
+        groq_completer = QCompleter(self.groq_model_input.model(), self.groq_model_input)
+        groq_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        groq_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        groq_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.groq_model_input.setCompleter(groq_completer)
         self.groq_model_label = QLabel("Model ID:")
         groq_layout.addRow(self.groq_model_label, self.groq_model_input)
+        self.refresh_groq_models_button = QPushButton("Refresh Model List")
+        self.refresh_groq_models_button.setObjectName("refresh_groq_models_btn")
+        self.refresh_groq_models_button.clicked.connect(self._refresh_groq_models)
+        groq_layout.addRow("", self.refresh_groq_models_button)
         layout.addWidget(self.groq_group)
 
         # --- NVIDIA Group ---
@@ -323,6 +343,7 @@ class AITab(BaseSettingsTab):
             "ai_model": self.ai_model_input,
             "groq_api_key": self.groq_api_key_input,
             "groq_model": self.groq_model_input,
+            "refresh_groq_models_btn": self.refresh_groq_models_button,
             "nvidia_api_key": self.nvidia_api_key_input,
             "nvidia_model": self.nvidia_model_input,
             "refresh_nvidia_models_btn": self.refresh_nvidia_models_button,
@@ -341,6 +362,7 @@ class AITab(BaseSettingsTab):
         self.parent_window.ai_model_input = self.ai_model_input
         self.parent_window.groq_api_key_input = self.groq_api_key_input
         self.parent_window.groq_model_input = self.groq_model_input
+        self.parent_window.refresh_groq_models_button = self.refresh_groq_models_button
         self.parent_window.nvidia_api_key_input = self.nvidia_api_key_input
         self.parent_window.nvidia_model_input = self.nvidia_model_input
         self.parent_window.refresh_nvidia_models_button = self.refresh_nvidia_models_button
@@ -399,10 +421,14 @@ class AITab(BaseSettingsTab):
         self.groq_api_key_input.setPlaceholderText(
             QCoreApplication.translate("AITab", "Enter your Groq API key")
         )
-        self.groq_model_input.setPlaceholderText(
-            QCoreApplication.translate(
-                "AITab", "Enter AI model ID (e.g., llama3-70b-8192)"
+        if self.groq_model_input.lineEdit():
+            self.groq_model_input.lineEdit().setPlaceholderText(
+                QCoreApplication.translate(
+                    "AITab", "Enter AI model ID (e.g., llama-3.3-70b-versatile)"
+                )
             )
+        self.refresh_groq_models_button.setText(
+            QCoreApplication.translate("AITab", "Refresh Model List")
         )
 
         self.nvidia_group.setTitle(
@@ -574,7 +600,9 @@ class AITab(BaseSettingsTab):
 
         # Groq
         self.groq_api_key_input.setText(groq_config.get("api_key", ""))
-        self.groq_model_input.setText(groq_config.get("model_id", "llama3-70b-8192"))
+        self.groq_model_input.setCurrentText(
+            groq_config.get("model_id", "llama-3.3-70b-versatile")
+        )
 
         # NVIDIA
         self.nvidia_api_key_input.setText(nvidia_config.get("api_key", ""))
@@ -675,7 +703,7 @@ class AITab(BaseSettingsTab):
                 },
                 "groq": {
                     "api_key": self.groq_api_key_input.text().strip(),
-                    "model_id": self.groq_model_input.text().strip(),
+                    "model_id": self.groq_model_input.currentText().strip(),
                 },
                 "nvidia": {
                     "api_key": self.nvidia_api_key_input.text().strip(),
@@ -780,6 +808,129 @@ class AITab(BaseSettingsTab):
         if current_text:
             combo.setCurrentText(current_text)
         combo.blockSignals(False)
+
+    def _refresh_groq_models(self) -> None:
+        """Fetch Groq model IDs from provider endpoint."""
+        api_key = self.groq_api_key_input.text().strip()
+        progress_dialog = QMessageBox(self.parent_window)
+        progress_dialog.setWindowTitle(
+            QCoreApplication.translate("AITab", "Refreshing Groq Models")
+        )
+        progress_dialog.setText(
+            QCoreApplication.translate(
+                "AITab",
+                "Refreshing Groq model list...\n\nThis may take a few seconds.",
+            )
+        )
+        progress_dialog.setStandardButtons(QMessageBox.StandardButton.Cancel)
+        progress_dialog.show()
+
+        QApplication.processEvents()
+
+        result_container: Dict[str, Any] = {"success": False, "error": "", "models": []}
+
+        def refresh_models_thread() -> None:
+            try:
+                from ...ai.groq import GroqClient
+
+                client = GroqClient(api_key=api_key)
+                models = client.fetch_available_models()
+                result_container["models"] = models
+                result_container["success"] = bool(models)
+                if not models:
+                    result_container["error"] = QCoreApplication.translate(
+                        "AITab", "No Groq models returned from API"
+                    )
+            except Exception as e:
+                result_container["success"] = False
+                result_container["error"] = str(e)
+
+        refresh_thread = threading.Thread(target=refresh_models_thread, daemon=True)
+        refresh_thread.start()
+
+        self._groq_models_refresh_thread = refresh_thread
+        self._groq_models_refresh_result = result_container
+        self._groq_models_refresh_dialog = progress_dialog
+        self._groq_models_refresh_start_time = time.time()
+
+        self._groq_models_refresh_timer = QTimer()
+        self._groq_models_refresh_timer.timeout.connect(
+            self._check_groq_models_refresh_status
+        )
+        self._groq_models_refresh_timer.start(100)
+
+    def _check_groq_models_refresh_status(self) -> None:
+        """Check Groq model refresh status."""
+        try:
+            thread_alive = self._groq_models_refresh_thread.is_alive()
+            elapsed_time = time.time() - self._groq_models_refresh_start_time
+
+            if not thread_alive or elapsed_time > 20:
+                self._groq_models_refresh_timer.stop()
+
+                if (
+                    self._groq_models_refresh_dialog
+                    and self._groq_models_refresh_dialog.result()
+                    == QMessageBox.StandardButton.Cancel
+                ):
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model refresh cancelled")
+                    )
+                    return
+
+                if self._groq_models_refresh_result["success"]:
+                    models = self._groq_models_refresh_result["models"]
+                    self._replace_combo_items(self.groq_model_input, models)
+                    if not self.groq_model_input.currentText().strip():
+                        self.groq_model_input.setCurrentText(models[0])
+
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model list updated")
+                    )
+                    self.api_status_label.setProperty("status_key", "model_list_updated")
+                    self.api_status_label.setStyleSheet("color: green;")
+
+                    QMessageBox.information(
+                        self.parent_window,
+                        QCoreApplication.translate("AITab", "Model List Updated"),
+                        QCoreApplication.translate(
+                            "AITab",
+                            "Groq model list refreshed successfully.\n\nFound {count} models.",
+                        ).format(count=len(models)),
+                    )
+                else:
+                    error_msg = self._groq_models_refresh_result["error"] or (
+                        QCoreApplication.translate("AITab", "Unknown error")
+                    )
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model refresh failed")
+                    )
+                    self.api_status_label.setProperty("status_key", "model_refresh_failed")
+                    self.api_status_label.setStyleSheet("color: red;")
+                    QMessageBox.critical(
+                        self.parent_window,
+                        QCoreApplication.translate("AITab", "Model Refresh Failed"),
+                        QCoreApplication.translate(
+                            "AITab",
+                            "Failed to refresh Groq model list.\n\nError: {error}",
+                        ).format(error=error_msg),
+                    )
+
+                if self._groq_models_refresh_dialog:
+                    self._groq_models_refresh_dialog.hide()
+
+        except Exception as e:
+            self.api_status_label.setText(
+                QCoreApplication.translate("AITab", "Model refresh error")
+            )
+            self.api_status_label.setStyleSheet("color: red;")
+            QMessageBox.critical(
+                self.parent_window,
+                QCoreApplication.translate("AITab", "Model Refresh Error"),
+                QCoreApplication.translate(
+                    "AITab", "Error during model refresh: {error}"
+                ).format(error=e),
+            )
 
     def _refresh_nvidia_models(self) -> None:
         """Fetch NVIDIA model IDs from provider endpoint."""
@@ -918,7 +1069,7 @@ class AITab(BaseSettingsTab):
                 model_id = self.ai_model_input.text().strip()
             elif current_provider == "groq":
                 api_key = self.groq_api_key_input.text().strip()
-                model_id = self.groq_model_input.text().strip()
+                model_id = self.groq_model_input.currentText().strip()
             elif current_provider == "nvidia":
                 api_key = self.nvidia_api_key_input.text().strip()
                 model_id = self.nvidia_model_input.currentText().strip()
