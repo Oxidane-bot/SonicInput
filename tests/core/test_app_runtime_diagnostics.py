@@ -23,7 +23,9 @@ def _prepare_isolated_runtime(monkeypatch, tmp_path):
     """Isolate runtime diagnostics paths and side effects for tests."""
     log_dir = tmp_path / "logs"
     monkeypatch.setattr(app, "_LOG_DIR", log_dir, raising=False)
-    monkeypatch.setattr(app, "_RUNTIME_STATE_FILE", log_dir / "runtime_state.json", raising=False)
+    monkeypatch.setattr(
+        app, "_RUNTIME_STATE_FILE", log_dir / "runtime_state.json", raising=False
+    )
     monkeypatch.setattr(app, "_CRASH_LOG_FILE", log_dir / "crash.log", raising=False)
     monkeypatch.setattr(app, "_FAULT_LOG_FILE", log_dir / "fault.log", raising=False)
     monkeypatch.setattr(app, "_runtime_diagnostics_initialized", False, raising=False)
@@ -77,7 +79,9 @@ def test_initialize_runtime_diagnostics_detects_previous_unclean_exit(
         for line in app._CRASH_LOG_FILE.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert any(r.get("message") == "Detected previous unclean shutdown" for r in records)
+    assert any(
+        r.get("message") == "Detected previous unclean shutdown" for r in records
+    )
 
 
 def test_on_process_exit_marks_clean_shutdown(monkeypatch, tmp_path):

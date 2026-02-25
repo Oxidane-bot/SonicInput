@@ -87,18 +87,19 @@ def test_groq_and_siliconflow_model_validation_is_not_hardcoded():
         {"api_key": "test-key", "model": "whisper-next-preview-2026"},
     )
     groq_result = validator.validate_config(groq_config)
-    assert "Unknown Groq model: whisper-next-preview-2026" not in groq_result[
-        "warnings"
-    ]
+    assert (
+        "Unknown Groq model: whisper-next-preview-2026" not in groq_result["warnings"]
+    )
 
     siliconflow_config = _base_config(
         "siliconflow",
         {"api_key": "test-key", "model": "Vendor/New-ASR-Model"},
     )
     siliconflow_result = validator.validate_config(siliconflow_config)
-    assert "Unknown SiliconFlow model: Vendor/New-ASR-Model" not in siliconflow_result[
-        "warnings"
-    ]
+    assert (
+        "Unknown SiliconFlow model: Vendor/New-ASR-Model"
+        not in siliconflow_result["warnings"]
+    )
 
 
 def test_qwen_model_validation_remains_static():

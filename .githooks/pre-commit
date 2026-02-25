@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "[pre-commit] Running Ruff formatter..."
+uv run --cache-dir ./.uv_cache ruff format src tests
+
+echo "[pre-commit] Running Ruff linter with auto-fix..."
+uv run --cache-dir ./.uv_cache ruff check src tests --fix
+
+if ! git diff --quiet -- src tests; then
+  echo "[pre-commit] Ruff updated files. Review, stage, and commit again."
+  exit 1
+fi
+
+echo "[pre-commit] Ruff checks passed."

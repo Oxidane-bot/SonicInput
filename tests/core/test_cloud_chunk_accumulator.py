@@ -21,7 +21,9 @@ def test_transcribe_chunk_retries_and_raises_on_error_payload(monkeypatch):
         "error_code": 500,
     }
     accumulator = CloudChunkAccumulator(speech_service)
-    monkeypatch.setattr(accumulator_module.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        accumulator_module.time, "sleep", lambda *_args, **_kwargs: None
+    )
 
     with pytest.raises(RuntimeError, match="Cloud transcription error"):
         accumulator._transcribe_chunk(0, np.zeros(1600, dtype=np.float32))

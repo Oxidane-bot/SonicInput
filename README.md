@@ -36,6 +36,19 @@ uv sync          # 安装运行依赖
 uv run python app.py --gui
 ```
 
+## 代码质量自动化（Ruff）
+```powershell
+# 安装开发依赖
+uv sync --extra dev
+
+# 安装本仓库 Git hooks（pre-commit / pre-push）
+.\scripts\setup-git-hooks.ps1
+```
+
+默认行为：
+- `pre-commit`：自动执行 `ruff format src tests` 和 `ruff check src tests --fix`。
+- `pre-push`：执行 `ruff check src tests` 与 `ruff format --check src tests`。
+
 ## 路径
 - 配置：`%AppData%/SonicInput/config.json`
 - 日志：`%AppData%/SonicInput/logs/app.log`

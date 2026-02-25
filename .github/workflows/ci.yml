@@ -47,11 +47,11 @@ jobs:
 
     - name: Run ruff (linting)
       run: |
-        uv run ruff check src/ --output-format=github
+        uv run ruff check src/ tests/ --output-format=github
 
     - name: Run ruff (formatting check)
       run: |
-        uv run ruff format --check src/
+        uv run ruff format --check src/ tests/
 
     - name: Run mypy (type checking)
       run: |

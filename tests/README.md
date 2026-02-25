@@ -58,7 +58,7 @@ uv run pytest -v
 
 ### 运行CI/CD测试（跳过GUI和GPU）
 ```bash
-uv run pytest -m "not gui and not gpu" -v
+uv run pytest -m "not gui and not gpu and not e2e" -v
 ```
 
 ### 运行快速测试（跳过GUI、GPU、慢速）
@@ -97,14 +97,14 @@ uv run pytest -m "not gui and not gpu and not slow" -v
 uv run pytest -m gui -v
 ```
 
-## 测试覆盖率
+## 代码质量检查
 
 ```bash
-# 生成覆盖率报告（跳过GUI测试）
-uv run pytest --cov=src --cov-report=html -m "not gui"
+# Ruff 代码检查
+uv run ruff check src tests
 
-# 完整覆盖率（包括GUI）
-uv run pytest --cov=src --cov-report=html
+# Ruff 格式检查
+uv run ruff format --check src tests
 ```
 
 ## 调试测试
@@ -156,7 +156,7 @@ uv run pytest tests/ui/test_recording_overlay.py::TestRecordingOverlayDisplay::t
 ### Q: CI中如何跳过GUI测试？
 A: 在CI配置中添加：
 ```bash
-uv run pytest -m "not gui" --cov=src
+uv run pytest -m "not gui and not gpu and not e2e" -v
 ```
 
 ## 测试最佳实践

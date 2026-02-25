@@ -36,9 +36,22 @@ uv sync          # install runtime deps
 uv run python app.py --gui
 ```
 
+## Ruff Automation
+```powershell
+# Install dev dependencies
+uv sync --extra dev
+
+# Install repository Git hooks (pre-commit / pre-push)
+.\scripts\setup-git-hooks.ps1
+```
+
+Default behavior:
+- `pre-commit`: runs `ruff format src tests` and `ruff check src tests --fix`.
+- `pre-push`: runs `ruff check src tests` and `ruff format --check src tests`.
+
 ## Paths
 - Config: `%AppData%/SonicInput/config.json`
-+- Logs: `%AppData%/SonicInput/logs/app.log`
+- Logs: `%AppData%/SonicInput/logs/app.log`
 
 ## License
 MIT License. See [LICENSE](LICENSE).

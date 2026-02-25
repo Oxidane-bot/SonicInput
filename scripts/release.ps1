@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+$uvCacheDir = Join-Path $repoRoot ".uv_cache"
 
 if (-not $SkipBuild) {
     if (-not $NoOffline -and $OfflineModelsDir) {
@@ -28,7 +29,10 @@ if (-not $SkipBuild) {
         }
     }
 
-    uv run --group dev python build_nuitka.py
+    uv run --cache-dir $uvCacheDir --group dev python build_nuitka.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build failed (uv exit code: $LASTEXITCODE)"
+    }
 }
 
 $distDir = Join-Path $repoRoot "dist"
@@ -53,7 +57,7 @@ if (Test-Path $distDir) {
             Select-Object -First 1
     }
 
-    if ($offlineZip) {
+    if ($offlineZip -and -not $NoOffline) {
         Write-Output "[OUTPUT] $($offlineZip.FullName)"
 
         if ($Build7z) {

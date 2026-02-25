@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "[pre-push] Running Ruff lint check..."
+uv run --cache-dir ./.uv_cache ruff check src tests
+
+echo "[pre-push] Running Ruff formatting check..."
+uv run --cache-dir ./.uv_cache ruff format --check src tests
+
+echo "[pre-push] Ruff quality gate passed."
