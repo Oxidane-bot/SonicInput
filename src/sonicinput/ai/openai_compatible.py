@@ -8,8 +8,9 @@
 - 以及其他自托管服务
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
+from ..utils import app_logger
 from ..utils.exceptions import OpenAICompatibleAPIError
 from .base_client import BaseAIClient
 
@@ -61,6 +62,61 @@ class OpenAICompatibleClient(BaseAIClient):
     def _create_api_error(self, message: str) -> Exception:
         """创建 OpenAI Compatible 特定的异常"""
         return OpenAICompatibleAPIError(message)
+
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """获取可用模型列表。"""
+        try:
+            response = self.session.get(
+                f"{self.get_base_url()}/models", timeout=self.timeout
+            )
+
+            if response.status_code != 200:
+                app_logger.log_api_call("OpenAI Compatible", 0, False, response.text)
+                return []
+
+            payload = response.json()
+            if isinstance(payload, dict):
+                models = payload.get("data", [])
+            elif isinstance(payload, list):
+                models = payload
+            else:
+                models = []
+
+            normalized_models: List[Dict[str, Any]] = []
+            for model in models:
+                if isinstance(model, dict):
+                    model_id = str(model.get("id", "")).strip()
+                    owned_by = model.get("owned_by", "")
+                    created = model.get("created", 0)
+                else:
+                    model_id = str(model).strip()
+                    owned_by = ""
+                    created = 0
+
+                if not model_id:
+                    continue
+
+                normalized_models.append(
+                    {
+                        "id": model_id,
+                        "name": model_id,
+                        "description": "",
+                        "owned_by": owned_by,
+                        "created": created,
+                    }
+                )
+
+            normalized_models.sort(key=lambda item: item["id"].lower())
+            app_logger.log_api_call("OpenAI Compatible", 0, True)
+            return normalized_models
+        except Exception as e:
+            app_logger.log_error(e, "openai_compatible_get_available_models")
+            return []
+
+    def fetch_available_models(self) -> List[str]:
+        """返回模型 ID 列表。"""
+        models = self.get_available_models()
+        return [model["id"] for model in models if model.get("id")]
 
     def _extract_response_text(self, result: Dict[str, Any]) -> str:
         """从 API 响应中提取文本（增强 JSON 错误处理）

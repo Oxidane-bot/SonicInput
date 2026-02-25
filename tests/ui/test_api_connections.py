@@ -154,7 +154,9 @@ class TestAITabAPIConnections:
             groq_model_combo.setCurrentText("")
             qtbot.wait(50)
 
-            refresh_btn = ai_tab.widget.findChild(QPushButton, "refresh_groq_models_btn")
+            refresh_btn = ai_tab.widget.findChild(
+                QPushButton, "refresh_groq_models_btn"
+            )
             refresh_btn.click()
 
             qtbot.waitUntil(lambda: len(dialog_shown) > 0, timeout=5000)
@@ -241,7 +243,9 @@ class TestAITabAPIConnections:
             ai_provider_combo.setCurrentText("NVIDIA")
             qtbot.wait(100)
 
-            nvidia_model_combo = ai_tab.widget.findChild(QComboBox, "nvidia_model_input")
+            nvidia_model_combo = ai_tab.widget.findChild(
+                QComboBox, "nvidia_model_input"
+            )
             nvidia_model_combo.setCurrentText("")
             qtbot.wait(50)
 
@@ -253,6 +257,61 @@ class TestAITabAPIConnections:
             qtbot.waitUntil(lambda: len(dialog_shown) > 0, timeout=5000)
 
             assert nvidia_model_combo.currentText() == "meta/llama-3.1-8b-instruct"
+            mock_client.fetch_available_models.assert_called_once()
+
+    def test_openai_compatible_refresh_model_list_updates_combo(
+        self, qtbot, settings_window, monkeypatch
+    ):
+        """测试OpenAI Compatible模型列表刷新会更新可编辑下拉框"""
+        mock_client = Mock()
+        mock_client.fetch_available_models = Mock(
+            return_value=[
+                "gpt-oss-20b",
+                "qwen2.5-7b-instruct",
+            ]
+        )
+
+        dialog_shown = []
+
+        def mock_info(*args, **kwargs):
+            dialog_shown.append(("success", args[2]))
+
+        monkeypatch.setattr(QMessageBox, "information", mock_info)
+
+        with patch(
+            "sonicinput.ai.openai_compatible.OpenAICompatibleClient",
+            return_value=mock_client,
+        ):
+            settings_window.show()
+            qtbot.waitExposed(settings_window)
+            settings_window.tab_widget.setCurrentIndex(3)  # AI tab
+            qtbot.wait(50)
+
+            ai_tab = settings_window.ai_tab
+            ai_provider_combo = ai_tab.widget.findChild(QComboBox, "ai_provider_combo")
+            ai_provider_combo.setCurrentText("OpenAI Compatible")
+            qtbot.wait(100)
+
+            openai_base_url = ai_tab.widget.findChild(
+                QLineEdit, "openai_compatible_base_url_input"
+            )
+            openai_base_url.setText("http://localhost:1234/v1")
+            qtbot.wait(50)
+
+            openai_model_combo = ai_tab.widget.findChild(
+                QComboBox, "openai_compatible_model_input"
+            )
+            openai_model_combo.setCurrentText("")
+            qtbot.wait(50)
+
+            refresh_btn = ai_tab.widget.findChild(
+                QPushButton, "refresh_openai_compatible_models_btn"
+            )
+            refresh_btn.click()
+
+            qtbot.waitUntil(lambda: len(dialog_shown) > 0, timeout=5000)
+
+            assert openai_model_combo.currentText() == "gpt-oss-20b"
             mock_client.fetch_available_models.assert_called_once()
 
     def test_openai_compatible_api_connection_success(

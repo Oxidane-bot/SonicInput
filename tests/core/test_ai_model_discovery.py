@@ -1,5 +1,6 @@
 from sonicinput.ai.groq import GroqClient
 from sonicinput.ai.nvidia import NvidiaClient
+from sonicinput.ai.openai_compatible import OpenAICompatibleClient
 
 
 class _FakeResponse:
@@ -92,6 +93,41 @@ def test_groq_fetch_available_models_returns_sorted_ids():
 def test_groq_get_available_models_returns_empty_on_http_error():
     client = GroqClient(api_key="")
     session = _FakeSession(_FakeResponse(503, text="unavailable"))
+    client.session = session
+
+    models = client.get_available_models()
+
+    assert models == []
+    assert len(session.calls) == 1
+
+
+def test_openai_compatible_fetch_available_models_returns_sorted_ids():
+    client = OpenAICompatibleClient(api_key="", base_url="http://localhost:1234/v1")
+    response = _FakeResponse(
+        200,
+        {
+            "data": [
+                {"id": "qwen2.5-7b-instruct"},
+                {"id": "local-model"},
+                {"id": "gpt-oss-20b"},
+            ]
+        },
+    )
+    session = _FakeSession(response)
+    client.session = session
+
+    model_ids = client.fetch_available_models()
+
+    assert model_ids == ["gpt-oss-20b", "local-model", "qwen2.5-7b-instruct"]
+    assert len(session.calls) == 1
+    url, kwargs = session.calls[0]
+    assert url.endswith("/models")
+    assert kwargs["timeout"] == client.timeout
+
+
+def test_openai_compatible_get_available_models_returns_empty_on_http_error():
+    client = OpenAICompatibleClient(api_key="", base_url="http://localhost:1234/v1")
+    session = _FakeSession(_FakeResponse(404, text="not found"))
     client.session = session
 
     models = client.get_available_models()

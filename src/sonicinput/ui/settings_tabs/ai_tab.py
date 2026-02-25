@@ -123,7 +123,9 @@ class AITab(BaseSettingsTab):
             self.groq_model_input.lineEdit().setPlaceholderText(
                 "Enter AI model ID (e.g., llama-3.3-70b-versatile)"
             )
-        groq_completer = QCompleter(self.groq_model_input.model(), self.groq_model_input)
+        groq_completer = QCompleter(
+            self.groq_model_input.model(), self.groq_model_input
+        )
         groq_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         groq_completer.setFilterMode(Qt.MatchFlag.MatchContains)
         groq_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
@@ -238,12 +240,51 @@ class AITab(BaseSettingsTab):
             self.openai_compatible_api_key_label, openai_compatible_api_key_layout
         )
 
-        # Model ID
-        self.openai_compatible_model_input = QLineEdit()
-        self.openai_compatible_model_input.setPlaceholderText("local-model")
+        # Model ID (editable combo with type-to-match)
+        self.openai_compatible_model_input = QComboBox()
+        self.openai_compatible_model_input.setObjectName(
+            "openai_compatible_model_input"
+        )
+        self.openai_compatible_model_input.setEditable(True)
+        self.openai_compatible_model_input.setInsertPolicy(
+            QComboBox.InsertPolicy.NoInsert
+        )
+        self.openai_compatible_model_input.addItems(
+            [
+                "local-model",
+                "gpt-oss-20b",
+                "qwen2.5-7b-instruct",
+            ]
+        )
+        if self.openai_compatible_model_input.lineEdit():
+            self.openai_compatible_model_input.lineEdit().setPlaceholderText(
+                "local-model"
+            )
+        openai_compatible_completer = QCompleter(
+            self.openai_compatible_model_input.model(),
+            self.openai_compatible_model_input,
+        )
+        openai_compatible_completer.setCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive
+        )
+        openai_compatible_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        openai_compatible_completer.setCompletionMode(
+            QCompleter.CompletionMode.PopupCompletion
+        )
+        self.openai_compatible_model_input.setCompleter(openai_compatible_completer)
         self.openai_compatible_model_label = QLabel("Model ID:")
         openai_compatible_layout.addRow(
             self.openai_compatible_model_label, self.openai_compatible_model_input
+        )
+        self.refresh_openai_compatible_models_button = QPushButton("Refresh Model List")
+        self.refresh_openai_compatible_models_button.setObjectName(
+            "refresh_openai_compatible_models_btn"
+        )
+        self.refresh_openai_compatible_models_button.clicked.connect(
+            self._refresh_openai_compatible_models
+        )
+        openai_compatible_layout.addRow(
+            "", self.refresh_openai_compatible_models_button
         )
 
         # 说明
@@ -350,6 +391,7 @@ class AITab(BaseSettingsTab):
             "openai_compatible_base_url": self.openai_compatible_base_url_input,
             "openai_compatible_api_key": self.openai_compatible_api_key_input,
             "openai_compatible_model": self.openai_compatible_model_input,
+            "refresh_openai_compatible_models_btn": self.refresh_openai_compatible_models_button,
             "ai_enabled": self.ai_enabled_checkbox,
             "api_timeout": self.api_timeout_spinbox,
             "api_retries": self.api_retries_spinbox,
@@ -365,7 +407,9 @@ class AITab(BaseSettingsTab):
         self.parent_window.refresh_groq_models_button = self.refresh_groq_models_button
         self.parent_window.nvidia_api_key_input = self.nvidia_api_key_input
         self.parent_window.nvidia_model_input = self.nvidia_model_input
-        self.parent_window.refresh_nvidia_models_button = self.refresh_nvidia_models_button
+        self.parent_window.refresh_nvidia_models_button = (
+            self.refresh_nvidia_models_button
+        )
         self.parent_window.openai_compatible_base_url_input = (
             self.openai_compatible_base_url_input
         )
@@ -374,6 +418,9 @@ class AITab(BaseSettingsTab):
         )
         self.parent_window.openai_compatible_model_input = (
             self.openai_compatible_model_input
+        )
+        self.parent_window.refresh_openai_compatible_models_button = (
+            self.refresh_openai_compatible_models_button
         )
         self.parent_window.ai_enabled_checkbox = self.ai_enabled_checkbox
         self.parent_window.api_timeout_spinbox = self.api_timeout_spinbox
@@ -473,8 +520,12 @@ class AITab(BaseSettingsTab):
                 "AITab", "Optional (for services requiring auth)"
             )
         )
-        self.openai_compatible_model_input.setPlaceholderText(
-            QCoreApplication.translate("AITab", "local-model")
+        if self.openai_compatible_model_input.lineEdit():
+            self.openai_compatible_model_input.lineEdit().setPlaceholderText(
+                QCoreApplication.translate("AITab", "local-model")
+            )
+        self.refresh_openai_compatible_models_button.setText(
+            QCoreApplication.translate("AITab", "Refresh Model List")
         )
         self.openai_compatible_info_label.setText(
             QCoreApplication.translate(
@@ -518,7 +569,9 @@ class AITab(BaseSettingsTab):
             "test_failed": QCoreApplication.translate("AITab", "Test failed"),
             "success": QCoreApplication.translate("AITab", "Connection successful"),
             "failed": QCoreApplication.translate("AITab", "Connection failed"),
-            "model_list_updated": QCoreApplication.translate("AITab", "Model list updated"),
+            "model_list_updated": QCoreApplication.translate(
+                "AITab", "Model list updated"
+            ),
             "model_refresh_failed": QCoreApplication.translate(
                 "AITab", "Model refresh failed"
             ),
@@ -617,7 +670,7 @@ class AITab(BaseSettingsTab):
         self.openai_compatible_base_url_input.setText(
             openai_compatible_config.get("base_url", "http://localhost:1234/v1")
         )
-        self.openai_compatible_model_input.setText(
+        self.openai_compatible_model_input.setCurrentText(
             openai_compatible_config.get("model_id", "local-model")
         )
 
@@ -712,7 +765,7 @@ class AITab(BaseSettingsTab):
                 "openai_compatible": {
                     "api_key": self.openai_compatible_api_key_input.text().strip(),
                     "base_url": self.openai_compatible_base_url_input.text().strip(),
-                    "model_id": self.openai_compatible_model_input.text().strip(),
+                    "model_id": self.openai_compatible_model_input.currentText().strip(),
                 },
                 "enabled": self.ai_enabled_checkbox.isChecked(),
                 "filter_thinking": self.filter_thinking_checkbox.isChecked(),
@@ -887,7 +940,9 @@ class AITab(BaseSettingsTab):
                     self.api_status_label.setText(
                         QCoreApplication.translate("AITab", "Model list updated")
                     )
-                    self.api_status_label.setProperty("status_key", "model_list_updated")
+                    self.api_status_label.setProperty(
+                        "status_key", "model_list_updated"
+                    )
                     self.api_status_label.setStyleSheet("color: green;")
 
                     QMessageBox.information(
@@ -905,7 +960,9 @@ class AITab(BaseSettingsTab):
                     self.api_status_label.setText(
                         QCoreApplication.translate("AITab", "Model refresh failed")
                     )
-                    self.api_status_label.setProperty("status_key", "model_refresh_failed")
+                    self.api_status_label.setProperty(
+                        "status_key", "model_refresh_failed"
+                    )
                     self.api_status_label.setStyleSheet("color: red;")
                     QMessageBox.critical(
                         self.parent_window,
@@ -918,6 +975,146 @@ class AITab(BaseSettingsTab):
 
                 if self._groq_models_refresh_dialog:
                     self._groq_models_refresh_dialog.hide()
+
+        except Exception as e:
+            self.api_status_label.setText(
+                QCoreApplication.translate("AITab", "Model refresh error")
+            )
+            self.api_status_label.setStyleSheet("color: red;")
+            QMessageBox.critical(
+                self.parent_window,
+                QCoreApplication.translate("AITab", "Model Refresh Error"),
+                QCoreApplication.translate(
+                    "AITab", "Error during model refresh: {error}"
+                ).format(error=e),
+            )
+
+    def _refresh_openai_compatible_models(self) -> None:
+        """Fetch OpenAI Compatible model IDs from provider endpoint."""
+        api_key = self.openai_compatible_api_key_input.text().strip()
+        base_url = self.openai_compatible_base_url_input.text().strip()
+        if not base_url:
+            QMessageBox.warning(
+                self.parent_window,
+                QCoreApplication.translate("AITab", "Model Refresh"),
+                QCoreApplication.translate("AITab", "Please enter the Base URL first."),
+            )
+            return
+
+        progress_dialog = QMessageBox(self.parent_window)
+        progress_dialog.setWindowTitle(
+            QCoreApplication.translate("AITab", "Refreshing OpenAI Compatible Models")
+        )
+        progress_dialog.setText(
+            QCoreApplication.translate(
+                "AITab",
+                "Refreshing OpenAI Compatible model list...\n\nThis may take a few seconds.",
+            )
+        )
+        progress_dialog.setStandardButtons(QMessageBox.StandardButton.Cancel)
+        progress_dialog.show()
+
+        QApplication.processEvents()
+
+        result_container: Dict[str, Any] = {"success": False, "error": "", "models": []}
+
+        def refresh_models_thread() -> None:
+            try:
+                from ...ai.openai_compatible import OpenAICompatibleClient
+
+                client = OpenAICompatibleClient(api_key=api_key, base_url=base_url)
+                models = client.fetch_available_models()
+                result_container["models"] = models
+                result_container["success"] = bool(models)
+                if not models:
+                    result_container["error"] = QCoreApplication.translate(
+                        "AITab", "No OpenAI Compatible models returned from API"
+                    )
+            except Exception as e:
+                result_container["success"] = False
+                result_container["error"] = str(e)
+
+        refresh_thread = threading.Thread(target=refresh_models_thread, daemon=True)
+        refresh_thread.start()
+
+        self._openai_compatible_models_refresh_thread = refresh_thread
+        self._openai_compatible_models_refresh_result = result_container
+        self._openai_compatible_models_refresh_dialog = progress_dialog
+        self._openai_compatible_models_refresh_start_time = time.time()
+
+        self._openai_compatible_models_refresh_timer = QTimer()
+        self._openai_compatible_models_refresh_timer.timeout.connect(
+            self._check_openai_compatible_models_refresh_status
+        )
+        self._openai_compatible_models_refresh_timer.start(100)
+
+    def _check_openai_compatible_models_refresh_status(self) -> None:
+        """Check OpenAI Compatible model refresh status."""
+        try:
+            thread_alive = self._openai_compatible_models_refresh_thread.is_alive()
+            elapsed_time = (
+                time.time() - self._openai_compatible_models_refresh_start_time
+            )
+
+            if not thread_alive or elapsed_time > 20:
+                self._openai_compatible_models_refresh_timer.stop()
+
+                if (
+                    self._openai_compatible_models_refresh_dialog
+                    and self._openai_compatible_models_refresh_dialog.result()
+                    == QMessageBox.StandardButton.Cancel
+                ):
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model refresh cancelled")
+                    )
+                    return
+
+                if self._openai_compatible_models_refresh_result["success"]:
+                    models = self._openai_compatible_models_refresh_result["models"]
+                    self._replace_combo_items(
+                        self.openai_compatible_model_input, models
+                    )
+                    if not self.openai_compatible_model_input.currentText().strip():
+                        self.openai_compatible_model_input.setCurrentText(models[0])
+
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model list updated")
+                    )
+                    self.api_status_label.setProperty(
+                        "status_key", "model_list_updated"
+                    )
+                    self.api_status_label.setStyleSheet("color: green;")
+
+                    QMessageBox.information(
+                        self.parent_window,
+                        QCoreApplication.translate("AITab", "Model List Updated"),
+                        QCoreApplication.translate(
+                            "AITab",
+                            "OpenAI Compatible model list refreshed successfully.\n\nFound {count} models.",
+                        ).format(count=len(models)),
+                    )
+                else:
+                    error_msg = self._openai_compatible_models_refresh_result[
+                        "error"
+                    ] or (QCoreApplication.translate("AITab", "Unknown error"))
+                    self.api_status_label.setText(
+                        QCoreApplication.translate("AITab", "Model refresh failed")
+                    )
+                    self.api_status_label.setProperty(
+                        "status_key", "model_refresh_failed"
+                    )
+                    self.api_status_label.setStyleSheet("color: red;")
+                    QMessageBox.critical(
+                        self.parent_window,
+                        QCoreApplication.translate("AITab", "Model Refresh Failed"),
+                        QCoreApplication.translate(
+                            "AITab",
+                            "Failed to refresh OpenAI Compatible model list.\n\nError: {error}",
+                        ).format(error=error_msg),
+                    )
+
+                if self._openai_compatible_models_refresh_dialog:
+                    self._openai_compatible_models_refresh_dialog.hide()
 
         except Exception as e:
             self.api_status_label.setText(
@@ -1010,7 +1207,9 @@ class AITab(BaseSettingsTab):
                     self.api_status_label.setText(
                         QCoreApplication.translate("AITab", "Model list updated")
                     )
-                    self.api_status_label.setProperty("status_key", "model_list_updated")
+                    self.api_status_label.setProperty(
+                        "status_key", "model_list_updated"
+                    )
                     self.api_status_label.setStyleSheet("color: green;")
 
                     QMessageBox.information(
@@ -1028,7 +1227,9 @@ class AITab(BaseSettingsTab):
                     self.api_status_label.setText(
                         QCoreApplication.translate("AITab", "Model refresh failed")
                     )
-                    self.api_status_label.setProperty("status_key", "model_refresh_failed")
+                    self.api_status_label.setProperty(
+                        "status_key", "model_refresh_failed"
+                    )
                     self.api_status_label.setStyleSheet("color: red;")
                     QMessageBox.critical(
                         self.parent_window,
@@ -1076,7 +1277,7 @@ class AITab(BaseSettingsTab):
             elif current_provider == "openai_compatible":
                 api_key = self.openai_compatible_api_key_input.text().strip()
                 base_url = self.openai_compatible_base_url_input.text().strip()
-                model_id = self.openai_compatible_model_input.text().strip()
+                model_id = self.openai_compatible_model_input.currentText().strip()
 
                 if not base_url:
                     QMessageBox.warning(
