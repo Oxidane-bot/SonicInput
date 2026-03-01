@@ -2,15 +2,28 @@
 
 import ctypes
 import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple, Union
 
 import pyperclip
+import pythoncom
 import win32api
 import win32clipboard
 import win32con
 import win32gui
 
 from ..utils import TextInputError, app_logger
+
+
+RPC_E_CHANGED_MODE_HRESULT = -2147417850  # 0x80010106
+
+
+@dataclass
+class ClipboardOleSnapshot:
+    """基于 OLE IDataObject 的剪贴板快照。"""
+
+    marshaled_data_object: Any
+    fallback_formats: Dict[int, Any] = field(default_factory=dict)
 
 
 class ClipboardInput:
@@ -114,11 +127,11 @@ class ClipboardInput:
                     return False
         return False
 
-    def _backup_all_formats(self) -> Dict[int, bytes]:
+    def _backup_all_formats(self) -> Dict[int, Any]:
         """备份所有格式的剪贴板数据（使用 win32clipboard API）
 
         Returns:
-            字典，键为格式ID，值为该格式的数据（bytes）
+            字典，键为格式ID，值为该格式的数据
         """
         formats = {}
 
@@ -228,6 +241,96 @@ class ClipboardInput:
 
         return formats
 
+    def _extract_hresult(self, exc: Exception) -> Optional[int]:
+        """从 COM 异常中提取 HRESULT。"""
+        if hasattr(exc, "hresult"):
+            return getattr(exc, "hresult")
+        if getattr(exc, "args", None):
+            first_arg = exc.args[0]
+            if isinstance(first_arg, int):
+                return first_arg
+        return None
+
+    def _initialize_ole(self) -> bool:
+        """初始化当前线程 OLE，返回是否需要随后 Uninitialize。"""
+        try:
+            pythoncom.OleInitialize()
+            return True
+        except pythoncom.com_error as exc:
+            hresult = self._extract_hresult(exc)
+            if hresult == RPC_E_CHANGED_MODE_HRESULT:
+                # 线程已经以其它 COM 模式初始化，继续使用当前模式。
+                return False
+            raise
+
+    def _backup_ole_snapshot(
+        self, fallback_formats: Optional[Dict[int, Any]] = None
+    ) -> Optional[ClipboardOleSnapshot]:
+        """备份 OLE IDataObject 快照，用于高保真恢复。"""
+        need_uninitialize = False
+        try:
+            need_uninitialize = self._initialize_ole()
+            data_object = pythoncom.OleGetClipboard()
+            if data_object is None:
+                return None
+
+            stream = pythoncom.CoMarshalInterThreadInterfaceInStream(
+                pythoncom.IID_IDataObject,
+                data_object,
+            )
+            return ClipboardOleSnapshot(
+                marshaled_data_object=stream,
+                fallback_formats=dict(fallback_formats or {}),
+            )
+        except Exception as exc:
+            app_logger.log_audio_event(
+                "OLE clipboard snapshot backup failed",
+                {"error": str(exc), "fallback_available": bool(fallback_formats)},
+            )
+            return None
+        finally:
+            if need_uninitialize:
+                try:
+                    pythoncom.OleUninitialize()
+                except Exception:
+                    pass
+
+    def _restore_ole_snapshot(self, snapshot: ClipboardOleSnapshot) -> bool:
+        """恢复 OLE IDataObject 快照。"""
+        if snapshot.marshaled_data_object is None:
+            return False
+
+        need_uninitialize = False
+        try:
+            need_uninitialize = self._initialize_ole()
+            data_object = pythoncom.CoGetInterfaceAndReleaseStream(
+                snapshot.marshaled_data_object,
+                pythoncom.IID_IDataObject,
+            )
+            snapshot.marshaled_data_object = None
+            pythoncom.OleSetClipboard(data_object)
+            try:
+                pythoncom.OleFlushClipboard()
+            except Exception:
+                # Flush 失败不影响主流程，系统通常仍会持有对象。
+                pass
+            return True
+        except Exception as exc:
+            app_logger.log_audio_event(
+                "OLE clipboard snapshot restore failed",
+                {
+                    "error": str(exc),
+                    "has_fallback_formats": bool(snapshot.fallback_formats),
+                },
+            )
+            return False
+        finally:
+            if need_uninitialize:
+                try:
+                    pythoncom.OleUninitialize()
+                except Exception:
+                    pass
+
     def _get_clipboard_format_name(self, fmt: int) -> str:
         """获取剪贴板格式名称（标准格式或注册格式）。"""
         standard_name = self.STANDARD_FORMAT_NAMES.get(fmt)
@@ -301,15 +404,135 @@ class ClipboardInput:
 
         return True, f"safe_registered:{format_name}"
 
-    def backup_clipboard(self) -> Union[str, Dict[int, bytes]]:
+    def _check_clipboard_access_level(self) -> bool:
+        """检查剪贴板是否可访问（不修改内容）。"""
+        if not self._open_clipboard_with_retry(max_attempts=3, delay=0.03):
+            return False
+        try:
+            return True
+        finally:
+            try:
+                win32clipboard.CloseClipboard()
+            except Exception:
+                pass
+
+    def _copy_text_to_clipboard_with_retry(
+        self, text: str, max_attempts: int = 8, delay: float = 0.03
+    ) -> bool:
+        """以重试策略将文本复制到剪贴板，优先 pyperclip，失败后退回 Win32 API。"""
+        for attempt in range(max_attempts):
+            try:
+                pyperclip.copy(text)
+                return True
+            except Exception as exc:
+                if attempt == max_attempts - 1:
+                    app_logger.log_audio_event(
+                        "pyperclip copy failed after retries",
+                        {"attempts": max_attempts, "error": str(exc)},
+                    )
+                time.sleep(delay)
+
+        for attempt in range(max_attempts):
+            opened = self._open_clipboard_with_retry(max_attempts=1, delay=0)
+            if not opened:
+                time.sleep(delay)
+                continue
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+                return True
+            except Exception as exc:
+                if attempt == max_attempts - 1:
+                    app_logger.log_audio_event(
+                        "win32 clipboard copy failed after retries",
+                        {"attempts": max_attempts, "error": str(exc)},
+                    )
+                time.sleep(delay)
+            finally:
+                try:
+                    win32clipboard.CloseClipboard()
+                except Exception:
+                    pass
+
+        return False
+
+    def _paste_text_from_clipboard_with_retry(
+        self, max_attempts: int = 6, delay: float = 0.03
+    ) -> str:
+        """以重试策略读取剪贴板文本，优先 pyperclip，失败后退回 Win32 API。"""
+        for _attempt in range(max_attempts):
+            try:
+                pasted = pyperclip.paste()
+                return pasted if isinstance(pasted, str) else str(pasted)
+            except Exception:
+                time.sleep(delay)
+
+        for _attempt in range(max_attempts):
+            opened = self._open_clipboard_with_retry(max_attempts=1, delay=0)
+            if not opened:
+                time.sleep(delay)
+                continue
+            try:
+                data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                if data is None:
+                    return ""
+                return data if isinstance(data, str) else str(data)
+            except Exception:
+                time.sleep(delay)
+            finally:
+                try:
+                    win32clipboard.CloseClipboard()
+                except Exception:
+                    pass
+
+        return ""
+
+    def backup_clipboard_text_only(self) -> str:
+        """仅备份文本内容，避免复杂格式/OLE路径在热键线程引发崩溃。"""
+        text_content = self._paste_text_from_clipboard_with_retry()
+        self.original_clipboard = text_content
+        app_logger.log_audio_event(
+            "Clipboard backed up (text only safe mode)",
+            {
+                "has_text": bool(text_content),
+                "text_length": len(text_content),
+                "elevated": self._is_elevated(),
+            },
+        )
+        return text_content
+
+    def backup_clipboard(
+        self, include_ole_snapshot: bool = True
+    ) -> Union[str, Dict[int, Any], ClipboardOleSnapshot]:
         """备份当前剪贴板内容 - 支持所有格式
 
         Returns:
-            如果只有文本，返回字符串；否则返回字典（格式ID -> 数据）
+            优先返回 OLE 快照；失败时返回旧格式（字符串或格式字典）
         """
         try:
             # 使用 win32clipboard 备份所有格式
             all_formats = self._backup_all_formats()
+            ole_snapshot = None
+            if include_ole_snapshot:
+                ole_snapshot = self._backup_ole_snapshot(all_formats)
+
+            if ole_snapshot is not None:
+                self.original_clipboard = ole_snapshot
+
+                # 尝试获取文本内容用于日志
+                text_content = ""
+                text_content = self._paste_text_from_clipboard_with_retry()
+
+                app_logger.log_audio_event(
+                    "Clipboard backed up (OLE snapshot)",
+                    {
+                        "fallback_format_count": len(all_formats),
+                        "has_text": bool(text_content),
+                        "text_length": len(text_content) if text_content else 0,
+                        "elevated": self._is_elevated(),
+                    },
+                )
+                return ole_snapshot
 
             if not all_formats:
                 # 剪贴板为空
@@ -324,10 +547,7 @@ class ClipboardInput:
 
             # 尝试获取文本内容用于日志
             text_content = ""
-            try:
-                text_content = pyperclip.paste()
-            except Exception:
-                pass
+            text_content = self._paste_text_from_clipboard_with_retry()
 
             app_logger.log_audio_event(
                 "Clipboard backed up (all formats)",
@@ -346,9 +566,7 @@ class ClipboardInput:
             self.original_clipboard = ""
             return ""
 
-    def _sort_formats_by_dependency(
-        self, formats: Dict[int, bytes]
-    ) -> Dict[int, bytes]:
+    def _sort_formats_by_dependency(self, formats: Dict[int, Any]) -> Dict[int, Any]:
         """按格式依赖关系排序
 
         某些格式有依赖关系，需要按正确顺序恢复：
@@ -472,7 +690,7 @@ class ClipboardInput:
             )
             return False
 
-    def _restore_all_formats(self, formats: Dict[int, bytes]) -> None:
+    def _restore_all_formats(self, formats: Dict[int, Any]) -> None:
         """恢复所有格式的剪贴板数据（使用 win32clipboard API）
 
         Args:
@@ -633,23 +851,48 @@ class ClipboardInput:
         except Exception as e:
             app_logger.log_error(e, "_restore_all_formats")
 
-    def restore_clipboard(self, content: Union[str, Dict[int, bytes]]) -> None:
+    def restore_clipboard(
+        self, content: Union[str, Dict[int, Any], ClipboardOleSnapshot]
+    ) -> None:
         """恢复剪贴板内容 - 支持所有格式
 
         Args:
-            content: 要恢复的内容，可以是字符串（旧格式兼容）或字典（所有格式）
+            content: 要恢复的内容，可以是字符串、格式字典或 OLE 快照
         """
         try:
+            if isinstance(content, ClipboardOleSnapshot):
+                if self._restore_ole_snapshot(content):
+                    app_logger.log_audio_event(
+                        "Clipboard restored (OLE snapshot)",
+                        {
+                            "fallback_format_count": len(content.fallback_formats),
+                        },
+                    )
+                    return
+
+                if content.fallback_formats:
+                    self._restore_all_formats(content.fallback_formats)
+                    app_logger.log_audio_event(
+                        "Clipboard restored (OLE fallback formats)",
+                        {
+                            "format_count": len(content.fallback_formats),
+                        },
+                    )
+                    return
+
+                app_logger.log_audio_event(
+                    "Clipboard restore failed (OLE snapshot without fallback)",
+                    {},
+                )
+                return
+
             if isinstance(content, dict):
                 # 新格式：恢复所有格式
                 self._restore_all_formats(content)
 
                 # 尝试获取文本内容用于日志
                 text_content = ""
-                try:
-                    text_content = pyperclip.paste()
-                except Exception:
-                    pass
+                text_content = self._paste_text_from_clipboard_with_retry()
 
                 app_logger.log_audio_event(
                     "Clipboard restored (all formats)",
@@ -662,10 +905,13 @@ class ClipboardInput:
 
             else:
                 # 旧格式：仅恢复文本（向后兼容）
-                pyperclip.copy(content)
+                text_to_restore = content if isinstance(content, str) else str(content)
+                if not self._copy_text_to_clipboard_with_retry(text_to_restore):
+                    raise TextInputError("Failed to restore text clipboard content")
 
                 app_logger.log_audio_event(
-                    "Clipboard restored (text only)", {"content_length": len(content)}
+                    "Clipboard restored (text only)",
+                    {"content_length": len(text_to_restore)},
                 )
 
         except Exception as e:
@@ -702,13 +948,14 @@ class ClipboardInput:
             return True
 
         restore_delay = restore_delay or self.restore_delay
-        original_content: Union[str, Dict[int, bytes], None] = None
+        original_content: Union[str, Dict[int, Any], ClipboardOleSnapshot, None] = None
 
         try:
             # 录音模式：跳过backup/restore，避免覆盖外层保存的原始剪贴板
             if self._recording_mode:
                 # 直接复制文本
-                pyperclip.copy(text)
+                if not self._copy_text_to_clipboard_with_retry(text):
+                    raise TextInputError("Failed to copy text in recording mode")
                 time.sleep(0.05)  # 短暂延迟确保复制完成
 
                 # 发送Ctrl+V
@@ -725,7 +972,8 @@ class ClipboardInput:
             original_content = self.backup_clipboard()
 
             # 将文本复制到剪贴板
-            pyperclip.copy(text)
+            if not self._copy_text_to_clipboard_with_retry(text):
+                raise TextInputError("Failed to copy text to clipboard")
             time.sleep(0.05)  # 短暂延迟确保复制完成
 
             # 发送Ctrl+V
@@ -777,7 +1025,8 @@ class ClipboardInput:
     def clear_clipboard(self) -> None:
         """清空剪贴板"""
         try:
-            pyperclip.copy("")
+            if not self._copy_text_to_clipboard_with_retry(""):
+                raise TextInputError("Failed to clear clipboard")
             app_logger.log_audio_event("Clipboard cleared", {})
         except Exception as e:
             app_logger.log_error(e, "clear_clipboard")
@@ -785,7 +1034,7 @@ class ClipboardInput:
     def get_clipboard_content(self) -> str:
         """获取当前剪贴板内容"""
         try:
-            return pyperclip.paste()
+            return self._paste_text_from_clipboard_with_retry()
         except Exception as e:
             app_logger.log_error(e, "get_clipboard_content")
             return ""
@@ -818,11 +1067,12 @@ class ClipboardInput:
         # 测试Unicode内容支持
         try:
             unicode_test = "测试🎵voice input"  # 包含中文和emoji
-            pyperclip.copy(unicode_test)
-            result = pyperclip.paste()
+            if not self._copy_text_to_clipboard_with_retry(unicode_test):
+                return basic_test
+            result = self._paste_text_from_clipboard_with_retry()
 
             # 清理
-            pyperclip.copy("")
+            self._copy_text_to_clipboard_with_retry("")
 
             return result == unicode_test
         except Exception as e:

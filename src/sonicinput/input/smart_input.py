@@ -1,13 +1,14 @@
 """智能文本输入策略选择器"""
 
-from typing import Dict, Optional
+import threading
+from typing import Any, Dict, Optional
 
 from ..core.base.lifecycle_component import LifecycleComponent
 from ..core.interfaces import IInputService
 from ..core.interfaces.config import IConfigService
 from ..core.services.config import ConfigKeys
 from ..utils import TextInputError, app_logger
-from .clipboard_input import ClipboardInput
+from .clipboard_input import ClipboardInput, ClipboardOleSnapshot
 from .sendinput import SendInputMethod
 
 
@@ -35,6 +36,59 @@ class SmartTextInput(LifecycleComponent, IInputService):
         # 录音期间剪贴板管理（避免中途restore覆盖原始剪贴板）
         self._recording_mode = False
         self._original_clipboard = ""
+        self._restore_thread: Optional[threading.Thread] = None
+        self._restore_cancel_event = threading.Event()
+        self._restore_thread_lock = threading.Lock()
+
+    def _describe_clipboard_content(self, content: Any) -> str:
+        """生成日志用的剪贴板内容描述。"""
+        if isinstance(content, dict):
+            return f"{len(content)} formats"
+        if isinstance(content, ClipboardOleSnapshot):
+            fallback_count = len(content.fallback_formats)
+            return f"ole_snapshot (fallback_formats={fallback_count})"
+        if isinstance(content, str):
+            return f"{len(content)} chars"
+        return type(content).__name__
+
+    def _ensure_restore_thread_state(self) -> None:
+        """确保恢复线程管理状态已初始化（兼容测试中的 __new__ 构造）。"""
+        if (
+            not hasattr(self, "_restore_thread_lock")
+            or self._restore_thread_lock is None
+        ):
+            self._restore_thread_lock = threading.Lock()
+        if (
+            not hasattr(self, "_restore_cancel_event")
+            or self._restore_cancel_event is None
+        ):
+            self._restore_cancel_event = threading.Event()
+        if not hasattr(self, "_restore_thread"):
+            self._restore_thread = None
+
+    def _cancel_pending_restore_thread(self, join_timeout: float = 1.5) -> None:
+        """取消并回收已有的剪贴板恢复线程。"""
+        self._ensure_restore_thread_state()
+
+        thread_to_join: Optional[threading.Thread] = None
+        with self._restore_thread_lock:
+            if self._restore_thread is not None:
+                self._restore_cancel_event.set()
+                thread_to_join = self._restore_thread
+                self._restore_thread = None
+
+        if thread_to_join is not None:
+            try:
+                thread_to_join.join(timeout=join_timeout)
+                app_logger.log_audio_event(
+                    "Clipboard restore thread joined",
+                    {
+                        "join_timeout": join_timeout,
+                        "still_alive": thread_to_join.is_alive(),
+                    },
+                )
+            except Exception as e:
+                app_logger.log_error(e, "join_clipboard_restore_thread")
 
     def input_text(self, text: str, force_method: Optional[str] = None) -> bool:
         """智能输入文本"""
@@ -197,16 +251,14 @@ class SmartTextInput(LifecycleComponent, IInputService):
     def start_recording_mode(self) -> None:
         """开始录音模式 - 保存原始剪贴板，禁用中途restore"""
         self._recording_mode = True
-        self._original_clipboard = self.clipboard_input.backup_clipboard()
+        # 热键线程中避免走 OLE/复杂格式快照，降低 COM 崩溃与阻塞风险。
+        self._original_clipboard = self.clipboard_input.backup_clipboard_text_only()
 
         # 通知ClipboardInput进入录音模式（禁用中途restore）
         self.clipboard_input.set_recording_mode(True)
 
-        # 记录剪贴板备份信息（支持新旧格式）
-        if isinstance(self._original_clipboard, dict):
-            clip_info = f"{len(self._original_clipboard)} formats"
-        else:
-            clip_info = f"{len(self._original_clipboard)} chars"
+        # 记录剪贴板备份信息（支持字典/文本/OLE快照）
+        clip_info = self._describe_clipboard_content(self._original_clipboard)
 
         app_logger.log_audio_event(
             "Recording mode started, clipboard saved", {"clipboard_info": clip_info}
@@ -217,12 +269,10 @@ class SmartTextInput(LifecycleComponent, IInputService):
         if not self._recording_mode:
             return
 
+        self._ensure_restore_thread_state()
+
         # 先禁用ClipboardInput的录音模式，恢复正常的backup/restore行为
         self.clipboard_input.set_recording_mode(False)
-
-        # 延迟恢复剪贴板，给文本输入时间完成
-        import threading
-        import time
 
         restore_delay = self.config_service.get_setting(
             ConfigKeys.INPUT_CLIPBOARD_RESTORE_DELAY, 1.0
@@ -232,18 +282,24 @@ class SmartTextInput(LifecycleComponent, IInputService):
         # 避免主线程清空变量后，线程无法恢复
         clipboard_to_restore = self._original_clipboard
 
+        # 若已有旧恢复线程仍在等待，先取消回收，避免残留线程长期存活
+        self._cancel_pending_restore_thread(join_timeout=0.05)
+        self._restore_cancel_event.clear()
+
         def delayed_restore():
-            time.sleep(restore_delay)
+            if self._restore_cancel_event.wait(timeout=restore_delay):
+                app_logger.log_audio_event(
+                    "Clipboard restore cancelled before execution",
+                    {"restore_delay": restore_delay},
+                )
+                return
 
             if clipboard_to_restore:
                 try:
                     self.clipboard_input.restore_clipboard(clipboard_to_restore)
 
-                    # 记录恢复信息（支持新旧格式）
-                    if isinstance(clipboard_to_restore, dict):
-                        clip_info = f"{len(clipboard_to_restore)} formats"
-                    else:
-                        clip_info = f"{len(clipboard_to_restore)} chars"
+                    # 记录恢复信息（支持字典/文本/OLE快照）
+                    clip_info = self._describe_clipboard_content(clipboard_to_restore)
 
                     app_logger.log_audio_event(
                         "Recording mode stopped, clipboard restored successfully",
@@ -252,9 +308,16 @@ class SmartTextInput(LifecycleComponent, IInputService):
                 except Exception as e:
                     app_logger.log_error(e, "delayed_restore_clipboard")
 
+            with self._restore_thread_lock:
+                current = threading.current_thread()
+                if self._restore_thread is current:
+                    self._restore_thread = None
+
         # 使用普通线程（非daemon），确保进程退出前仍有机会完成恢复。
-        # 不在这里 join，避免阻塞输入完成事件链路。
+        # 线程会在 _do_stop 中统一回收，避免进程残留。
         restore_thread = threading.Thread(target=delayed_restore, daemon=False)
+        with self._restore_thread_lock:
+            self._restore_thread = restore_thread
         restore_thread.start()
         app_logger.log_audio_event(
             "Clipboard restore scheduled in background",
@@ -347,6 +410,9 @@ class SmartTextInput(LifecycleComponent, IInputService):
             # Stop recording mode if active
             if self._recording_mode:
                 self.stop_recording_mode()
+
+            # 无论当前是否在录音，都回收可能残留的恢复线程
+            self._cancel_pending_restore_thread()
 
             # Clear failure tracking
             self._method_failures.clear()
