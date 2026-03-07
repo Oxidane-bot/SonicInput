@@ -5,6 +5,7 @@
 """
 
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
@@ -35,6 +36,14 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
     这个类主要负责组件间的协调和对外提供统一的API接口。
     """
+
+    # Chunked 模式边界修复参数：
+    # 1) 为每个后续块补充少量上一块尾部音频，缓解模型在块首丢字
+    # 2) 合并分块文本时做边界去重，减少重叠上下文带来的重复文本
+    _CHUNK_CONTEXT_OVERLAP_SECONDS = 0.6
+    _TEXT_OVERLAP_MAX_CHARS = 60
+    _CHUNK_RESULT_MIN_TIMEOUT_SECONDS = 30.0
+    _CHUNK_WAIT_POLL_INTERVAL_SECONDS = 0.05
 
     def __init__(self, speech_service_factory, event_service=None, config_service=None):
         """初始化重构后的转录服务
@@ -375,6 +384,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             # Chunked 模式：处理待处理的块
             # 获取所有待处理的块
             pending_chunks = self.streaming_coordinator.get_pending_chunks()
+            pending_chunks = sorted(pending_chunks, key=lambda c: c.chunk_id)
 
             app_logger.audio(
                 "Processing pending chunks before stopping",
@@ -383,8 +393,17 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
             # 为每个待处理的块提交转录任务,并保存块的引用
             pending_chunk_refs = []
+            overlap_samples = int(self._CHUNK_CONTEXT_OVERLAP_SECONDS * 16000)
+            prev_tail = np.array([], dtype=np.float32)
             for chunk in pending_chunks:
-                task_data = {"chunk_id": chunk.chunk_id, "audio_data": chunk.audio_data}
+                chunk_audio = chunk.audio_data
+                task_audio = chunk_audio
+
+                # 为当前块补充上一块尾部上下文，缓解块边界丢字问题
+                if overlap_samples > 0 and len(prev_tail) > 0:
+                    task_audio = np.concatenate([prev_tail, chunk_audio], axis=0)
+
+                task_data = {"chunk_id": chunk.chunk_id, "audio_data": task_audio}
 
                 # 提交到任务队列进行转录
                 self.task_queue_manager.submit_task(
@@ -398,28 +417,22 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
                 app_logger.audio(
                     "Submitted pending chunk for transcription",
-                    {"chunk_id": chunk.chunk_id, "audio_length": len(chunk.audio_data)},
+                    {
+                        "chunk_id": chunk.chunk_id,
+                        "audio_length": len(chunk_audio),
+                        "task_audio_length": len(task_audio),
+                        "context_overlap_samples": len(prev_tail),
+                    },
                 )
 
-            # 逐块等待结果，允许每个块使用更合理的超时时间
-            timed_out_chunks: List[int] = []
-            for chunk in pending_chunk_refs:
-                # 根据音频长度动态计算等待时间，至少30秒
-                audio_duration = (
-                    len(chunk.audio_data) / 16000 if len(chunk.audio_data) > 0 else 0.0
-                )
-                per_chunk_timeout = max(30.0, audio_duration * 2.0)
+                if overlap_samples > 0:
+                    if len(chunk_audio) > overlap_samples:
+                        prev_tail = chunk_audio[-overlap_samples:].copy()
+                    else:
+                        prev_tail = chunk_audio.copy()
 
-                if not chunk.result_event.wait(timeout=per_chunk_timeout):
-                    timed_out_chunks.append(chunk.chunk_id)
-                    app_logger.audio(
-                        "Chunk processing timeout",
-                        {
-                            "chunk_id": chunk.chunk_id,
-                            "timeout": per_chunk_timeout,
-                            "audio_duration": audio_duration,
-                        },
-                    )
+            # 使用统一起点等待，避免在异常场景下按“块数 × 超时”线性放大总耗时
+            timed_out_chunks = self._wait_for_chunk_results(pending_chunk_refs)
 
             if timed_out_chunks:
                 app_logger.audio(
@@ -438,9 +451,9 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                     # 转录结果直接存储在顶层的 "text" 字段中
                     text = result.get("text", "")
                     if text:
-                        text_parts.append(text)
+                        text_parts.append(text.strip())
 
-            transcribed_text = " ".join(text_parts).strip()
+            transcribed_text = self._merge_chunk_texts_with_boundary_dedup(text_parts)
 
             app_logger.audio(
                 "Extracted transcription text from chunks",
@@ -458,6 +471,129 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
             # 返回包含文本和统计信息的结果
             return {"text": transcribed_text, "stats": stats}
+
+    def _wait_for_chunk_results(self, pending_chunk_refs: List[Any]) -> List[int]:
+        """等待 chunk 结果并返回超时的 chunk_id 列表。
+
+        以统一起点计算每个块的超时窗口，避免串行 wait 导致总等待时间按块数放大。
+        """
+        if not pending_chunk_refs:
+            return []
+
+        started_at = time.monotonic()
+        timeout_by_chunk: Dict[int, float] = {}
+        audio_duration_by_chunk: Dict[int, float] = {}
+
+        for chunk in pending_chunk_refs:
+            audio_duration = (
+                len(chunk.audio_data) / 16000 if len(chunk.audio_data) > 0 else 0.0
+            )
+            audio_duration_by_chunk[chunk.chunk_id] = audio_duration
+            timeout_by_chunk[chunk.chunk_id] = max(
+                self._CHUNK_RESULT_MIN_TIMEOUT_SECONDS,
+                audio_duration * 2.0,
+            )
+
+        pending: Dict[int, Any] = {
+            chunk.chunk_id: chunk
+            for chunk in pending_chunk_refs
+            if not chunk.result_event.is_set()
+        }
+        timed_out_chunks: List[int] = []
+
+        while pending:
+            now = time.monotonic()
+            elapsed = now - started_at
+
+            expired_ids = [
+                chunk_id
+                for chunk_id in pending
+                if elapsed >= timeout_by_chunk[chunk_id]
+            ]
+            for chunk_id in expired_ids:
+                pending.pop(chunk_id, None)
+                timed_out_chunks.append(chunk_id)
+                app_logger.audio(
+                    "Chunk processing timeout",
+                    {
+                        "chunk_id": chunk_id,
+                        "timeout": timeout_by_chunk[chunk_id],
+                        "audio_duration": audio_duration_by_chunk[chunk_id],
+                    },
+                )
+
+            if not pending:
+                break
+
+            for chunk_id, chunk in list(pending.items()):
+                if chunk.result_event.is_set():
+                    pending.pop(chunk_id, None)
+
+            if not pending:
+                break
+
+            next_remaining = min(
+                max(timeout_by_chunk[chunk_id] - (time.monotonic() - started_at), 0.0)
+                for chunk_id in pending
+            )
+            sleep_seconds = min(self._CHUNK_WAIT_POLL_INTERVAL_SECONDS, next_remaining)
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+
+        return timed_out_chunks
+
+    def _merge_chunk_texts_with_boundary_dedup(self, text_parts: List[str]) -> str:
+        """合并分块文本并进行边界去重。
+
+        通过最长后缀-前缀匹配，尽量消除重叠上下文带来的重复文本。
+        """
+        merged = ""
+        for raw_part in text_parts:
+            part = raw_part.strip()
+            if not part:
+                continue
+
+            if not merged:
+                merged = part
+                continue
+
+            overlap = self._longest_suffix_prefix_overlap(
+                merged, part, max_chars=self._TEXT_OVERLAP_MAX_CHARS
+            )
+            if overlap > 0:
+                merged = merged + part[overlap:]
+            else:
+                merged = self._smart_concat_text(merged, part)
+
+        return merged.strip()
+
+    @staticmethod
+    def _longest_suffix_prefix_overlap(
+        left_text: str, right_text: str, max_chars: int = 60
+    ) -> int:
+        """计算 left 后缀与 right 前缀的最大重叠长度。"""
+        left = left_text.strip()
+        right = right_text.strip()
+        if not left or not right:
+            return 0
+
+        limit = min(len(left), len(right), max_chars)
+        for overlap in range(limit, 0, -1):
+            if left[-overlap:] == right[:overlap]:
+                return overlap
+        return 0
+
+    @staticmethod
+    def _smart_concat_text(left_text: str, right_text: str) -> str:
+        """在无可识别重叠时，按最小规则拼接文本。"""
+        if not left_text:
+            return right_text
+        if not right_text:
+            return left_text
+
+        if left_text[-1].isalnum() and right_text[0].isalnum():
+            return f"{left_text} {right_text}"
+        return f"{left_text}{right_text}"
 
     def add_streaming_chunk(self, audio_data: np.ndarray) -> int:
         """添加流式转录块

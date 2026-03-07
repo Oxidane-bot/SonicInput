@@ -6,7 +6,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, List, Optional
+from typing import Generator, List, Optional, Tuple
 
 from ....utils import app_logger
 from ...base.lifecycle_component import LifecycleComponent
@@ -21,6 +21,8 @@ class HistoryStorageService(LifecycleComponent):
     使用SQLite存储元数据，文件系统存储音频文件
     """
 
+    _FTS_TABLE_NAME = "history_records_fts"
+
     def __init__(self, config_service: IConfigService):
         """初始化历史存储服务
 
@@ -32,6 +34,8 @@ class HistoryStorageService(LifecycleComponent):
         self._db_path: Optional[Path] = None
         self._storage_path: Optional[Path] = None
         self._local = threading.local()  # 线程本地存储，每个线程独立的数据库连接
+        self._fts_enabled = False
+        self._fts_tokenizer = "disabled"
 
     def _do_start(self) -> bool:
         """Start history storage and initialize database"""
@@ -112,6 +116,13 @@ class HistoryStorageService(LifecycleComponent):
                 transcription_text TEXT NOT NULL,
                 transcription_provider TEXT NOT NULL,
                 transcription_status TEXT NOT NULL,
+                streaming_mode TEXT NOT NULL DEFAULT 'unknown',
+                transcription_duration REAL NOT NULL DEFAULT 0,
+                used_fallback INTEGER NOT NULL DEFAULT 0,
+                fallback_type TEXT NOT NULL DEFAULT 'none',
+                fallback_reason TEXT,
+                diagnostics_collected INTEGER NOT NULL DEFAULT 1,
+                reprocess_parent_id TEXT,
                 transcription_error TEXT,
                 ai_optimized_text TEXT,
                 ai_provider TEXT,
@@ -137,13 +148,187 @@ class HistoryStorageService(LifecycleComponent):
             ON history_records(ai_status)
         """)
 
+        # 兼容旧数据库：补齐新增诊断字段
+        self._ensure_history_record_columns(cursor)
+        self._ensure_text_search_index(cursor)
+
         # 启用 WAL 模式以优化并发性能
         cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.fetchone()
 
         conn.commit()
         conn.close()  # 关闭临时连接
 
         app_logger.log_audio_event("History database initialized", {"wal_mode": True})
+
+    def _ensure_history_record_columns(self, cursor: sqlite3.Cursor) -> None:
+        """确保 history_records 表包含最新诊断字段。"""
+        cursor.execute("PRAGMA table_info(history_records)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        required_columns = {
+            "streaming_mode": "TEXT NOT NULL DEFAULT 'unknown'",
+            "transcription_duration": "REAL NOT NULL DEFAULT 0",
+            "used_fallback": "INTEGER NOT NULL DEFAULT 0",
+            "fallback_type": "TEXT NOT NULL DEFAULT 'none'",
+            "fallback_reason": "TEXT",
+            # 旧库升级时默认标记为未采集，避免与真实采集值混淆
+            "diagnostics_collected": "INTEGER NOT NULL DEFAULT 0",
+            "reprocess_parent_id": "TEXT",
+        }
+
+        for column_name, column_ddl in required_columns.items():
+            if column_name not in existing_columns:
+                cursor.execute(
+                    f"ALTER TABLE history_records ADD COLUMN {column_name} {column_ddl}"
+                )
+                app_logger.log_audio_event(
+                    "History database schema upgraded",
+                    {"added_column": column_name},
+                )
+
+    def _ensure_text_search_index(self, cursor: sqlite3.Cursor) -> None:
+        """确保文本搜索索引可用（优先 FTS5，失败时回退 LIKE）。"""
+        self._fts_enabled = False
+        self._fts_tokenizer = "disabled"
+
+        try:
+            cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (self._FTS_TABLE_NAME,),
+            )
+            row = cursor.fetchone()
+            table_sql = row[0] if row and row[0] else ""
+
+            if not row:
+                created_with = "unicode61"
+                try:
+                    # trigram 对子串查询更友好，优先尝试
+                    cursor.execute(
+                        f"""
+                        CREATE VIRTUAL TABLE {self._FTS_TABLE_NAME}
+                        USING fts5(
+                            record_id UNINDEXED,
+                            transcription_text,
+                            ai_optimized_text,
+                            final_text,
+                            tokenize = 'trigram'
+                        )
+                        """
+                    )
+                    created_with = "trigram"
+                except sqlite3.OperationalError:
+                    cursor.execute(
+                        f"""
+                        CREATE VIRTUAL TABLE {self._FTS_TABLE_NAME}
+                        USING fts5(
+                            record_id UNINDEXED,
+                            transcription_text,
+                            ai_optimized_text,
+                            final_text,
+                            tokenize = 'unicode61'
+                        )
+                        """
+                    )
+                table_sql = f"tokenize='{created_with}'"
+
+            self._fts_tokenizer = (
+                "trigram" if "trigram" in table_sql.lower() else "unicode61"
+            )
+
+            cursor.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS trg_history_records_fts_insert
+                AFTER INSERT ON history_records
+                BEGIN
+                    INSERT INTO {self._FTS_TABLE_NAME} (
+                        record_id,
+                        transcription_text,
+                        ai_optimized_text,
+                        final_text
+                    )
+                    VALUES (
+                        new.id,
+                        COALESCE(new.transcription_text, ''),
+                        COALESCE(new.ai_optimized_text, ''),
+                        COALESCE(new.final_text, '')
+                    );
+                END;
+                """
+            )
+
+            cursor.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS trg_history_records_fts_update
+                AFTER UPDATE ON history_records
+                BEGIN
+                    DELETE FROM {self._FTS_TABLE_NAME} WHERE record_id = old.id;
+                    INSERT INTO {self._FTS_TABLE_NAME} (
+                        record_id,
+                        transcription_text,
+                        ai_optimized_text,
+                        final_text
+                    )
+                    VALUES (
+                        new.id,
+                        COALESCE(new.transcription_text, ''),
+                        COALESCE(new.ai_optimized_text, ''),
+                        COALESCE(new.final_text, '')
+                    );
+                END;
+                """
+            )
+
+            cursor.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS trg_history_records_fts_delete
+                AFTER DELETE ON history_records
+                BEGIN
+                    DELETE FROM {self._FTS_TABLE_NAME} WHERE record_id = old.id;
+                END;
+                """
+            )
+
+            cursor.execute("SELECT COUNT(*) FROM history_records")
+            source_count = int(cursor.fetchone()[0] or 0)
+            cursor.execute(f"SELECT COUNT(*) FROM {self._FTS_TABLE_NAME}")
+            fts_count = int(cursor.fetchone()[0] or 0)
+
+            # 行数不一致时重建索引，避免旧库升级后索引缺失
+            if fts_count != source_count:
+                cursor.execute(f"DELETE FROM {self._FTS_TABLE_NAME}")
+                cursor.execute(
+                    f"""
+                    INSERT INTO {self._FTS_TABLE_NAME} (
+                        record_id,
+                        transcription_text,
+                        ai_optimized_text,
+                        final_text
+                    )
+                    SELECT
+                        id,
+                        COALESCE(transcription_text, ''),
+                        COALESCE(ai_optimized_text, ''),
+                        COALESCE(final_text, '')
+                    FROM history_records
+                    """
+                )
+
+            self._fts_enabled = True
+            app_logger.log_audio_event(
+                "History text search index ready",
+                {
+                    "fts_enabled": True,
+                    "tokenizer": self._fts_tokenizer,
+                },
+            )
+        except sqlite3.OperationalError as e:
+            self._fts_enabled = False
+            self._fts_tokenizer = "disabled"
+            app_logger.warning(
+                "FTS5 unavailable, fallback to LIKE text search",
+                context={"error": str(e)},
+            )
 
     def _do_stop(self) -> bool:
         """Stop history storage and clean up resources"""
@@ -256,10 +441,13 @@ class HistoryStorageService(LifecycleComponent):
                     """
                     INSERT INTO history_records (
                         id, timestamp, audio_file_path, duration,
-                        transcription_text, transcription_provider, transcription_status, transcription_error,
+                        transcription_text, transcription_provider, transcription_status,
+                        streaming_mode, transcription_duration, used_fallback,
+                        fallback_type, fallback_reason, diagnostics_collected, reprocess_parent_id,
+                        transcription_error,
                         ai_optimized_text, ai_provider, ai_status, ai_error,
                         final_text
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         record.id,
@@ -269,6 +457,13 @@ class HistoryStorageService(LifecycleComponent):
                         record.transcription_text,
                         record.transcription_provider,
                         record.transcription_status,
+                        record.streaming_mode,
+                        record.transcription_duration,
+                        int(record.used_fallback),
+                        record.fallback_type,
+                        record.fallback_reason,
+                        int(record.diagnostics_collected),
+                        record.reprocess_parent_id,
                         record.transcription_error,
                         record.ai_optimized_text,
                         record.ai_provider,
@@ -311,6 +506,13 @@ class HistoryStorageService(LifecycleComponent):
                     SET transcription_text = ?,
                         transcription_provider = ?,
                         transcription_status = ?,
+                        streaming_mode = ?,
+                        transcription_duration = ?,
+                        used_fallback = ?,
+                        fallback_type = ?,
+                        fallback_reason = ?,
+                        diagnostics_collected = ?,
+                        reprocess_parent_id = ?,
                         transcription_error = ?,
                         ai_optimized_text = ?,
                         ai_provider = ?,
@@ -323,6 +525,13 @@ class HistoryStorageService(LifecycleComponent):
                         record.transcription_text,
                         record.transcription_provider,
                         record.transcription_status,
+                        record.streaming_mode,
+                        record.transcription_duration,
+                        int(record.used_fallback),
+                        record.fallback_type,
+                        record.fallback_reason,
+                        int(record.diagnostics_collected),
+                        record.reprocess_parent_id,
                         record.transcription_error,
                         record.ai_optimized_text,
                         record.ai_provider,
@@ -376,10 +585,12 @@ class HistoryStorageService(LifecycleComponent):
                         INSERT INTO history_records (
                             id, timestamp, audio_file_path, duration,
                             transcription_text, transcription_provider,
-                            transcription_status, transcription_error,
+                            transcription_status, streaming_mode, transcription_duration,
+                            used_fallback, fallback_type, fallback_reason,
+                            diagnostics_collected, reprocess_parent_id, transcription_error,
                             ai_optimized_text, ai_provider, ai_status, ai_error,
                             final_text
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         (
                             record.id,
@@ -389,6 +600,13 @@ class HistoryStorageService(LifecycleComponent):
                             record.transcription_text,
                             record.transcription_provider,
                             record.transcription_status,
+                            record.streaming_mode,
+                            record.transcription_duration,
+                            int(record.used_fallback),
+                            record.fallback_type,
+                            record.fallback_reason,
+                            int(record.diagnostics_collected),
+                            record.reprocess_parent_id,
                             record.transcription_error,
                             record.ai_optimized_text,
                             record.ai_provider,
@@ -474,11 +692,11 @@ class HistoryStorageService(LifecycleComponent):
             query_by_order = {
                 "timestamp ASC": (
                     "SELECT * FROM history_records "
-                    "ORDER BY timestamp ASC LIMIT ? OFFSET ?"
+                    "ORDER BY timestamp ASC, id ASC LIMIT ? OFFSET ?"
                 ),
                 "timestamp DESC": (
                     "SELECT * FROM history_records "
-                    "ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+                    "ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?"
                 ),
                 "duration ASC": (
                     "SELECT * FROM history_records "
@@ -518,10 +736,155 @@ class HistoryStorageService(LifecycleComponent):
             app_logger.log_error(e, "get_records")
             return []
 
+    def get_records_keyset(
+        self,
+        limit: int = 50,
+        cursor_timestamp: Optional[datetime] = None,
+        cursor_id: Optional[str] = None,
+        order: str = "DESC",
+    ) -> List[HistoryRecord]:
+        """按 timestamp + id 使用 keyset 分页获取记录列表。"""
+        if not self._db_path:
+            app_logger.log_audio_event(
+                "HistoryStorageService not initialized (get_records_keyset)",
+                {"_db_path": None, "message": "Service _do_start() may have failed"},
+            )
+            return []
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            conditions: List[str] = []
+            params: List[object] = []
+            direction = order.strip().upper()
+            if direction not in {"ASC", "DESC"}:
+                direction = "DESC"
+
+            self._append_keyset_cursor_condition(
+                conditions=conditions,
+                params=params,
+                cursor_timestamp=cursor_timestamp,
+                cursor_id=cursor_id,
+                direction=direction,
+            )
+
+            sql = "SELECT * FROM history_records"
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+            if direction == "ASC":
+                sql += " ORDER BY timestamp ASC, id ASC LIMIT ?"
+            else:
+                sql += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            return [self._row_to_record(row) for row in rows]
+        except Exception as e:
+            app_logger.log_error(e, "get_records_keyset")
+            return []
+
     @staticmethod
     def _escape_like_pattern(value: str) -> str:
         """Escape LIKE wildcards so user queries behave like literal substring search."""
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    def _build_fts_match_query(self, normalized_query: str) -> Optional[str]:
+        """构建 FTS MATCH 表达式。"""
+        if not normalized_query:
+            return None
+
+        if self._fts_tokenizer == "trigram":
+            escaped = normalized_query.replace('"', '""')
+            return f'"{escaped}"'
+
+        tokens = [token for token in normalized_query.split() if token]
+        if not tokens:
+            return None
+
+        match_terms = []
+        for token in tokens:
+            escaped_token = token.replace('"', '""')
+            match_terms.append(f'"{escaped_token}"*')
+        return " AND ".join(match_terms)
+
+    def _build_search_conditions(
+        self,
+        query: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        transcription_status: Optional[str] = None,
+        ai_status: Optional[str] = None,
+    ) -> Tuple[List[str], List[object]]:
+        """统一构建历史记录检索条件。"""
+        conditions: List[str] = []
+        params: List[object] = []
+
+        normalized_query = (query or "").strip().lower()
+        if normalized_query:
+            fts_match = (
+                self._build_fts_match_query(normalized_query)
+                if self._fts_enabled
+                else None
+            )
+
+            if fts_match:
+                conditions.append(
+                    "id IN ("
+                    f"SELECT record_id FROM {self._FTS_TABLE_NAME} "
+                    f"WHERE {self._FTS_TABLE_NAME} MATCH ?"
+                    ")"
+                )
+                params.append(fts_match)
+            else:
+                escaped_query = self._escape_like_pattern(normalized_query)
+                search_term = f"%{escaped_query}%"
+                conditions.append(
+                    "("
+                    "LOWER(transcription_text) LIKE ? ESCAPE '\\' OR "
+                    "LOWER(ai_optimized_text) LIKE ? ESCAPE '\\' OR "
+                    "LOWER(final_text) LIKE ? ESCAPE '\\'"
+                    ")"
+                )
+                params.extend([search_term, search_term, search_term])
+
+        if start_date:
+            conditions.append("timestamp >= ?")
+            params.append(start_date.isoformat())
+
+        if end_date:
+            conditions.append("timestamp <= ?")
+            params.append(end_date.isoformat())
+
+        if transcription_status:
+            conditions.append("transcription_status = ?")
+            params.append(transcription_status)
+
+        if ai_status:
+            conditions.append("ai_status = ?")
+            params.append(ai_status)
+
+        return conditions, params
+
+    @staticmethod
+    def _append_keyset_cursor_condition(
+        conditions: List[str],
+        params: List[object],
+        cursor_timestamp: Optional[datetime],
+        cursor_id: Optional[str],
+        direction: str,
+    ) -> None:
+        """向条件列表追加 keyset 游标条件。"""
+        if cursor_timestamp is None or not cursor_id:
+            return
+
+        ts = cursor_timestamp.isoformat()
+        if direction == "ASC":
+            conditions.append("(timestamp > ? OR (timestamp = ? AND id > ?))")
+        else:
+            conditions.append("(timestamp < ? OR (timestamp = ? AND id < ?))")
+        params.extend((ts, ts, cursor_id))
 
     def search_records(
         self,
@@ -545,45 +908,19 @@ class HistoryStorageService(LifecycleComponent):
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # 构建查询条件
-            conditions = []
-            params = []
-
-            if query:
-                normalized_query = query.strip().lower()
-                if normalized_query:
-                    escaped_query = self._escape_like_pattern(normalized_query)
-                    search_term = f"%{escaped_query}%"
-                    conditions.append(
-                        "("
-                        "LOWER(transcription_text) LIKE ? ESCAPE '\\' OR "
-                        "LOWER(ai_optimized_text) LIKE ? ESCAPE '\\' OR "
-                        "LOWER(final_text) LIKE ? ESCAPE '\\'"
-                        ")"
-                    )
-                    params.extend([search_term, search_term, search_term])
-
-            if start_date:
-                conditions.append("timestamp >= ?")
-                params.append(start_date.isoformat())
-
-            if end_date:
-                conditions.append("timestamp <= ?")
-                params.append(end_date.isoformat())
-
-            if transcription_status:
-                conditions.append("transcription_status = ?")
-                params.append(transcription_status)
-
-            if ai_status:
-                conditions.append("ai_status = ?")
-                params.append(ai_status)
+            conditions, params = self._build_search_conditions(
+                query=query,
+                start_date=start_date,
+                end_date=end_date,
+                transcription_status=transcription_status,
+                ai_status=ai_status,
+            )
 
             # 构建完整查询
             sql = "SELECT * FROM history_records"
             if conditions:
                 sql += " WHERE " + " AND ".join(conditions)
-            sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            sql += " ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?"
 
             params.extend([limit, offset])
 
@@ -594,6 +931,58 @@ class HistoryStorageService(LifecycleComponent):
 
         except Exception as e:
             app_logger.log_error(e, "search_records")
+            return []
+
+    def search_records_keyset(
+        self,
+        query: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        transcription_status: Optional[str] = None,
+        ai_status: Optional[str] = None,
+        limit: int = 50,
+        cursor_timestamp: Optional[datetime] = None,
+        cursor_id: Optional[str] = None,
+    ) -> List[HistoryRecord]:
+        """按 timestamp DESC, id DESC 使用 keyset 分页搜索记录。"""
+        if not self._db_path:
+            app_logger.log_audio_event(
+                "HistoryStorageService not initialized (search_records_keyset)",
+                {"_db_path": None, "message": "Service _do_start() may have failed"},
+            )
+            return []
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            conditions, params = self._build_search_conditions(
+                query=query,
+                start_date=start_date,
+                end_date=end_date,
+                transcription_status=transcription_status,
+                ai_status=ai_status,
+            )
+
+            self._append_keyset_cursor_condition(
+                conditions=conditions,
+                params=params,
+                cursor_timestamp=cursor_timestamp,
+                cursor_id=cursor_id,
+                direction="DESC",
+            )
+
+            sql = "SELECT * FROM history_records"
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+            sql += " ORDER BY timestamp DESC, id DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            return [self._row_to_record(row) for row in rows]
+        except Exception as e:
+            app_logger.log_error(e, "search_records_keyset")
             return []
 
     def delete_record(self, record_id: str) -> bool:
@@ -662,39 +1051,13 @@ class HistoryStorageService(LifecycleComponent):
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # 构建查询条件（与search_records相同）
-            conditions = []
-            params = []
-
-            if query:
-                normalized_query = query.strip().lower()
-                if normalized_query:
-                    escaped_query = self._escape_like_pattern(normalized_query)
-                    search_term = f"%{escaped_query}%"
-                    conditions.append(
-                        "("
-                        "LOWER(transcription_text) LIKE ? ESCAPE '\\' OR "
-                        "LOWER(ai_optimized_text) LIKE ? ESCAPE '\\' OR "
-                        "LOWER(final_text) LIKE ? ESCAPE '\\'"
-                        ")"
-                    )
-                    params.extend([search_term, search_term, search_term])
-
-            if start_date:
-                conditions.append("timestamp >= ?")
-                params.append(start_date.isoformat())
-
-            if end_date:
-                conditions.append("timestamp <= ?")
-                params.append(end_date.isoformat())
-
-            if transcription_status:
-                conditions.append("transcription_status = ?")
-                params.append(transcription_status)
-
-            if ai_status:
-                conditions.append("ai_status = ?")
-                params.append(ai_status)
+            conditions, params = self._build_search_conditions(
+                query=query,
+                start_date=start_date,
+                end_date=end_date,
+                transcription_status=transcription_status,
+                ai_status=ai_status,
+            )
 
             # 构建完整查询
             sql = "SELECT COUNT(*) FROM history_records"
@@ -734,38 +1097,13 @@ class HistoryStorageService(LifecycleComponent):
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            conditions = []
-            params = []
-
-            if query:
-                normalized_query = query.strip().lower()
-                if normalized_query:
-                    escaped_query = self._escape_like_pattern(normalized_query)
-                    search_term = f"%{escaped_query}%"
-                    conditions.append(
-                        "("
-                        "LOWER(transcription_text) LIKE ? ESCAPE '\\' OR "
-                        "LOWER(ai_optimized_text) LIKE ? ESCAPE '\\' OR "
-                        "LOWER(final_text) LIKE ? ESCAPE '\\'"
-                        ")"
-                    )
-                    params.extend([search_term, search_term, search_term])
-
-            if start_date:
-                conditions.append("timestamp >= ?")
-                params.append(start_date.isoformat())
-
-            if end_date:
-                conditions.append("timestamp <= ?")
-                params.append(end_date.isoformat())
-
-            if transcription_status:
-                conditions.append("transcription_status = ?")
-                params.append(transcription_status)
-
-            if ai_status:
-                conditions.append("ai_status = ?")
-                params.append(ai_status)
+            conditions, params = self._build_search_conditions(
+                query=query,
+                start_date=start_date,
+                end_date=end_date,
+                transcription_status=transcription_status,
+                ai_status=ai_status,
+            )
 
             sql = """
                 SELECT
@@ -867,6 +1205,35 @@ class HistoryStorageService(LifecycleComponent):
 
     def _row_to_record(self, row: sqlite3.Row) -> HistoryRecord:
         """将数据库行转换为HistoryRecord对象"""
+        row_keys = set(row.keys())
+        streaming_mode = (
+            row["streaming_mode"] if "streaming_mode" in row_keys else "unknown"
+        )
+        transcription_duration = (
+            float(row["transcription_duration"])
+            if "transcription_duration" in row_keys
+            and row["transcription_duration"] is not None
+            else 0.0
+        )
+        used_fallback = (
+            bool(row["used_fallback"])
+            if "used_fallback" in row_keys and row["used_fallback"] is not None
+            else False
+        )
+        fallback_type = row["fallback_type"] if "fallback_type" in row_keys else "none"
+        fallback_reason = (
+            row["fallback_reason"] if "fallback_reason" in row_keys else None
+        )
+        diagnostics_collected = (
+            bool(row["diagnostics_collected"])
+            if "diagnostics_collected" in row_keys
+            and row["diagnostics_collected"] is not None
+            else False
+        )
+        reprocess_parent_id = (
+            row["reprocess_parent_id"] if "reprocess_parent_id" in row_keys else None
+        )
+
         return HistoryRecord(
             id=row["id"],
             timestamp=datetime.fromisoformat(row["timestamp"]),
@@ -875,6 +1242,13 @@ class HistoryStorageService(LifecycleComponent):
             transcription_text=row["transcription_text"],
             transcription_provider=row["transcription_provider"],
             transcription_status=row["transcription_status"],
+            streaming_mode=streaming_mode,
+            transcription_duration=transcription_duration,
+            used_fallback=used_fallback,
+            fallback_type=fallback_type,
+            fallback_reason=fallback_reason,
+            diagnostics_collected=diagnostics_collected,
+            reprocess_parent_id=reprocess_parent_id,
             transcription_error=row["transcription_error"],
             ai_optimized_text=row["ai_optimized_text"],
             ai_provider=row["ai_provider"],

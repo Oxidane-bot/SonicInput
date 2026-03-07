@@ -159,6 +159,11 @@ class TranscriptionController(
 
     def process_streaming_transcription(self) -> None:
         """处理流式转录（使用新的TranscriptionService API）"""
+        streaming_mode = "unknown"
+        fallback_used = False
+        fallback_type = "none"
+        fallback_reason = None
+        transcribe_start = time.time()
         try:
             ControllerLogging.log_state_change(
                 "app",
@@ -232,12 +237,18 @@ class TranscriptionController(
                         {"streaming_mode": streaming_mode, "fallback": "local_sync"},
                     )
                     text = self._sync_transcribe_last_audio()
+                    fallback_used = True
+                    fallback_type = "local_sync"
+                    fallback_reason = "empty_chunked_result"
                 else:
                     app_logger.log_audio_event(
                         "No text from chunked streaming, falling back to file transcription",
                         {"streaming_mode": streaming_mode, "fallback": "cloud_file"},
                     )
                     text = self._transcribe_from_file_for_cloud()
+                    fallback_used = True
+                    fallback_type = "cloud_file"
+                    fallback_reason = "empty_chunked_result"
 
             transcribe_duration = time.time() - transcribe_start
 
@@ -253,7 +264,16 @@ class TranscriptionController(
 
             # 保存历史记录（转录阶段）
             if self._current_record_id and self._current_audio_file_path:
-                self._save_transcription_record(text=text, status="success", error=None)
+                self._save_transcription_record(
+                    text=text,
+                    status="success",
+                    error=None,
+                    streaming_mode=streaming_mode,
+                    transcription_duration=transcribe_duration,
+                    used_fallback=fallback_used,
+                    fallback_type=fallback_type,
+                    fallback_reason=fallback_reason,
+                )
 
             # 发送转录完成事件（包含 streaming_mode）
             self._events.emit(
@@ -279,10 +299,20 @@ class TranscriptionController(
 
         except Exception as e:
             app_logger.log_error(e, "process_streaming_transcription")
+            transcribe_duration = max(0.0, time.time() - transcribe_start)
 
             # 保存失败的历史记录
             if self._current_record_id and self._current_audio_file_path:
-                self._save_transcription_record(text="", status="failed", error=str(e))
+                self._save_transcription_record(
+                    text="",
+                    status="failed",
+                    error=str(e),
+                    streaming_mode=streaming_mode,
+                    transcription_duration=transcribe_duration,
+                    used_fallback=fallback_used,
+                    fallback_type=fallback_type,
+                    fallback_reason=fallback_reason,
+                )
 
             # 转换为用户友好消息
             error_info = ErrorMessageTranslator.translate(e, "transcription")
@@ -381,7 +411,16 @@ class TranscriptionController(
             app_logger.log_audio_event("Streaming mode started", {})
 
     def _save_transcription_record(
-        self, text: str, status: str, error: Optional[str]
+        self,
+        text: str,
+        status: str,
+        error: Optional[str],
+        streaming_mode: str = "unknown",
+        transcription_duration: float = 0.0,
+        used_fallback: bool = False,
+        fallback_type: str = "none",
+        fallback_reason: Optional[str] = None,
+        diagnostics_collected: bool = True,
     ) -> None:
         """保存转录记录到历史数据库
 
@@ -405,6 +444,12 @@ class TranscriptionController(
                 transcription_text=text,
                 transcription_provider=provider,
                 transcription_status=status,
+                streaming_mode=streaming_mode,
+                transcription_duration=transcription_duration,
+                used_fallback=used_fallback,
+                fallback_type=fallback_type,
+                fallback_reason=fallback_reason,
+                diagnostics_collected=diagnostics_collected,
                 transcription_error=error,
                 ai_optimized_text=None,
                 ai_provider=None,
@@ -423,6 +468,11 @@ class TranscriptionController(
                         "record_id": self._current_record_id,
                         "status": status,
                         "text_length": len(text),
+                        "streaming_mode": streaming_mode,
+                        "transcription_duration": transcription_duration,
+                        "used_fallback": used_fallback,
+                        "fallback_type": fallback_type,
+                        "fallback_reason": fallback_reason,
                     },
                 )
             else:

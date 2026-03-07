@@ -48,6 +48,13 @@ class HistoryRecord:
     transcription_text: str
     transcription_provider: str
     transcription_status: str
+    streaming_mode: str = "unknown"
+    transcription_duration: float = 0.0
+    used_fallback: bool = False
+    fallback_type: str = "none"
+    fallback_reason: Optional[str] = None
+    diagnostics_collected: bool = True
+    reprocess_parent_id: Optional[str] = None
     transcription_error: Optional[str] = None
     ai_optimized_text: Optional[str] = None
     ai_provider: Optional[str] = None

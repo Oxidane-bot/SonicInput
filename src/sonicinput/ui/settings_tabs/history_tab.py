@@ -1,5 +1,8 @@
 """历史记录标签页"""
 
+import time
+import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QCoreApplication, Qt, QThread, Signal, QTimer
@@ -20,7 +23,46 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ...core.interfaces import HistoryRecord
 from .base_tab import BaseSettingsTab
+
+
+def _build_reprocessed_record(
+    source_record: HistoryRecord,
+    transcription_text: str,
+    transcription_provider: str,
+    transcription_status: str,
+    transcription_duration: float,
+    ai_optimized_text: Optional[str],
+    ai_provider: Optional[str],
+    ai_status: str,
+    ai_error: Optional[str],
+    final_text: str,
+    transcription_error: Optional[str] = None,
+) -> HistoryRecord:
+    """Create a new history record for a reprocessing attempt."""
+    return HistoryRecord(
+        id=str(uuid.uuid4()),
+        timestamp=datetime.now(),
+        audio_file_path=source_record.audio_file_path,
+        duration=source_record.duration,
+        transcription_text=transcription_text,
+        transcription_provider=transcription_provider,
+        transcription_status=transcription_status,
+        streaming_mode="disabled",
+        transcription_duration=max(0.0, float(transcription_duration)),
+        used_fallback=False,
+        fallback_type="none",
+        fallback_reason=None,
+        diagnostics_collected=True,
+        reprocess_parent_id=source_record.id,
+        transcription_error=transcription_error,
+        ai_optimized_text=ai_optimized_text,
+        ai_provider=ai_provider,
+        ai_status=ai_status,
+        ai_error=ai_error,
+        final_text=final_text,
+    )
 
 
 class ReprocessingWorker(QThread):
@@ -116,11 +158,13 @@ class ReprocessingWorker(QThread):
                 temperature = 0.0
 
                 # 调用转录服务
+                transcribe_start = time.time()
                 transcription_result = self.transcription_service.transcribe_sync(
                     audio_data=audio_data,
                     language=language if language != "auto" else None,
                     temperature=temperature,
                 )
+                transcription_duration = time.time() - transcribe_start
 
                 if not transcription_result.get("success", True):
                     error_msg = transcription_result.get(
@@ -134,15 +178,6 @@ class ReprocessingWorker(QThread):
                             "HistoryTab", "Transcription failed: {error}"
                         ).format(error=error_msg)
                     )
-
-                    # 更新历史记录为失败状态
-                    # 从数据库获取最新的 record 并更新
-                    record = self.history_service.get_record_by_id(self.record_id)
-                    if record:
-                        record.transcription_status = "failed"
-                        record.transcription_error = error_msg
-                        record.transcription_provider = transcription_provider
-                        self.history_service.update_record(record)
                     return
 
                 transcription_text = transcription_result.get("text", "")
@@ -196,7 +231,7 @@ class ReprocessingWorker(QThread):
                         ai_optimized_text = (
                             self.ai_processing_controller.process_with_ai(
                                 transcription_text,
-                                record_id=self.record_id,  # 使用不可变的 ID
+                                record_id="",  # 手动重处理不覆盖原记录
                             )
                         )
 
@@ -224,7 +259,7 @@ class ReprocessingWorker(QThread):
 
             # 4. 更新历史记录
             self.progress_updated.emit(
-                QCoreApplication.translate("HistoryTab", "Updating history record...")
+                QCoreApplication.translate("HistoryTab", "Saving reprocessed record...")
             )
 
             # 确定最终文本
@@ -233,10 +268,8 @@ class ReprocessingWorker(QThread):
             else:
                 final_text = transcription_text
 
-            # 从数据库获取最新的 record 并更新
-            # 这确保我们更新的是正确的记录，避免对象引用问题
-            record = self.history_service.get_record_by_id(self.record_id)
-            if not record:
+            source_record = self.history_service.get_record_by_id(self.record_id)
+            if not source_record:
                 self.reprocessing_failed.emit(
                     QCoreApplication.translate(
                         "HistoryTab", "Record not found: {record_id}"
@@ -244,25 +277,36 @@ class ReprocessingWorker(QThread):
                 )
                 return
 
-            record.transcription_text = transcription_text
-            record.transcription_provider = transcription_provider
-            record.transcription_status = "success"
-            record.transcription_error = None
-            record.ai_optimized_text = ai_optimized_text
-            record.ai_provider = ai_provider
-            record.ai_status = ai_status
-            record.ai_error = ai_error
-            record.final_text = final_text
+            new_record = _build_reprocessed_record(
+                source_record=source_record,
+                transcription_text=transcription_text,
+                transcription_provider=transcription_provider,
+                transcription_status="success",
+                transcription_duration=transcription_duration,
+                ai_optimized_text=ai_optimized_text,
+                ai_provider=ai_provider,
+                ai_status=ai_status,
+                ai_error=ai_error,
+                final_text=final_text,
+                transcription_error=None,
+            )
 
             # 保存到数据库
             try:
-                self.history_service.update_record(record)
+                if not self.history_service.save_record(new_record):
+                    self.reprocessing_failed.emit(
+                        QCoreApplication.translate(
+                            "HistoryTab",
+                            "Failed to save reprocessed record to history database",
+                        )
+                    )
+                    return
             except Exception as e:
                 app_logger.log_error(e, "reprocessing_update_record")
                 self.reprocessing_failed.emit(
                     QCoreApplication.translate(
                         "HistoryTab",
-                        "Failed to update history record: {error}",
+                        "Failed to save reprocessed history record: {error}",
                     ).format(error=str(e))
                 )
                 return
@@ -274,6 +318,13 @@ class ReprocessingWorker(QThread):
                 "final_text": final_text,
                 "ai_status": ai_status,
                 "transcription_provider": transcription_provider,
+                "streaming_mode": "disabled",
+                "transcription_duration": transcription_duration,
+                "used_fallback": False,
+                "fallback_type": "none",
+                "fallback_reason": None,
+                "diagnostics_collected": True,
+                "new_record_id": new_record.id,
             }
 
             self.reprocessing_completed.emit(result)
@@ -324,42 +375,62 @@ class BatchReprocessingWorker(QThread):
 
     def run(self):
         """后台线程执行批量重处理流程"""
-        import time
-
         from ...utils import app_logger
 
         total_records = max(int(self.total_records or 0), 0)
         self.stats["total"] = total_records
 
         processed = 0
-        offset = 0
         page_size = max(int(self.page_size or 0), 1)
+        page_cursor_timestamp: Optional[datetime] = None
+        page_cursor_id: Optional[str] = None
+        pending_records: List[HistoryRecord] = []
+        pending_source_ids: List[str] = []
 
         while not self.should_stop and processed < total_records:
-            records = self.history_service.get_records(limit=page_size, offset=offset)
+            records = self.history_service.get_records_keyset(
+                limit=page_size,
+                cursor_timestamp=page_cursor_timestamp,
+                cursor_id=page_cursor_id,
+                order="ASC",
+            )
             if not records:
                 break
+
+            last_seen_timestamp: Optional[datetime] = None
+            last_seen_id: Optional[str] = None
 
             for record in records:
                 if self.should_stop or processed >= total_records:
                     break
 
                 processed += 1
+                last_seen_timestamp = record.timestamp
+                last_seen_id = record.id
 
                 # 发送进度更新
                 self.progress_updated.emit(processed, total_records, record.id)
 
                 # 处理单条记录
-                success = self._process_single_record(record)
-
-                # 发送单条记录完成信号
-                self.record_processed.emit(record.id, success)
+                new_record = self._process_single_record(record)
+                if new_record is None:
+                    self.record_processed.emit(record.id, False)
+                else:
+                    pending_records.append(new_record)
+                    pending_source_ids.append(record.id)
+                    if len(pending_records) >= page_size:
+                        self._flush_pending_records(pending_records, pending_source_ids)
 
                 # CD间隔（除了最后一条记录）
                 if processed < total_records and self.cd_seconds > 0:
                     time.sleep(self.cd_seconds)
 
-            offset += len(records)
+            if last_seen_timestamp is None or last_seen_id is None:
+                break
+            page_cursor_timestamp = last_seen_timestamp
+            page_cursor_id = last_seen_id
+
+        self._flush_pending_records(pending_records, pending_source_ids)
 
         if self.should_stop:
             app_logger.log_audio_event(
@@ -370,14 +441,54 @@ class BatchReprocessingWorker(QThread):
         # 发送批处理完成信号
         self.batch_completed.emit(self.stats)
 
-    def _process_single_record(self, record) -> bool:
+    def _flush_pending_records(
+        self, pending_records: List[HistoryRecord], pending_source_ids: List[str]
+    ) -> None:
+        """将暂存成功记录批量写入数据库。"""
+        if not pending_records:
+            return
+
+        from ...utils import app_logger
+
+        try:
+            saved_count = self.history_service.save_records_batch(pending_records)
+            if saved_count == len(pending_records):
+                self.stats["success"] += saved_count
+                for source_id in pending_source_ids:
+                    self.record_processed.emit(source_id, True)
+            else:
+                for source_id in pending_source_ids:
+                    self.stats["failed"] += 1
+                    self.stats["errors"].append(
+                        QCoreApplication.translate(
+                            "HistoryTab",
+                            "[FAIL] {record_id}: Failed to save reprocessed record",
+                        ).format(record_id=source_id)
+                    )
+                    self.record_processed.emit(source_id, False)
+        except Exception as e:
+            app_logger.log_error(e, "batch_reprocessing_batch_save")
+            for source_id in pending_source_ids:
+                self.stats["failed"] += 1
+                self.stats["errors"].append(
+                    QCoreApplication.translate(
+                        "HistoryTab",
+                        "[FAIL] {record_id}: Database save failed - {error}",
+                    ).format(record_id=source_id, error=str(e))
+                )
+                self.record_processed.emit(source_id, False)
+        finally:
+            pending_records.clear()
+            pending_source_ids.clear()
+
+    def _process_single_record(self, record) -> Optional[HistoryRecord]:
         """处理单条记录
 
         Args:
             record: 历史记录对象
 
         Returns:
-            bool: 是否成功
+            Optional[HistoryRecord]: 成功时返回新记录，失败时返回 None
         """
         from ...audio.recorder import AudioRecorder
         from ...utils import app_logger
@@ -393,7 +504,7 @@ class BatchReprocessingWorker(QThread):
                         "HistoryTab", "[SKIP] {record_id}: No audio file path"
                     ).format(record_id=record.id)
                 )
-                return False
+                return None
 
             try:
                 audio_data = AudioRecorder.load_audio_from_file(audio_file_path)
@@ -404,7 +515,7 @@ class BatchReprocessingWorker(QThread):
                             "HistoryTab", "[SKIP] {record_id}: Failed to load audio"
                         ).format(record_id=record.id)
                     )
-                    return False
+                    return None
             except FileNotFoundError:
                 self.stats["skipped"] += 1
                 self.stats["errors"].append(
@@ -412,7 +523,7 @@ class BatchReprocessingWorker(QThread):
                         "HistoryTab", "[SKIP] {record_id}: Audio file not found"
                     ).format(record_id=record.id)
                 )
-                return False
+                return None
             except Exception as e:
                 self.stats["skipped"] += 1
                 self.stats["errors"].append(
@@ -421,7 +532,7 @@ class BatchReprocessingWorker(QThread):
                         "[SKIP] {record_id}: Error loading audio - {error}",
                     ).format(record_id=record.id, error=str(e))
                 )
-                return False
+                return None
 
             # 2. 重新转录
             try:
@@ -437,11 +548,13 @@ class BatchReprocessingWorker(QThread):
 
                 temperature = 0.0
 
+                transcribe_start = time.time()
                 transcription_result = self.transcription_service.transcribe_sync(
                     audio_data=audio_data,
                     language=language if language != "auto" else None,
                     temperature=temperature,
                 )
+                transcription_duration = time.time() - transcribe_start
 
                 if not transcription_result.get("success", True):
                     error_msg = transcription_result.get(
@@ -455,7 +568,7 @@ class BatchReprocessingWorker(QThread):
                             "[FAIL] {record_id}: Transcription failed - {error}",
                         ).format(record_id=record.id, error=error_msg)
                     )
-                    return False
+                    return None
 
                 transcription_text = transcription_result.get("text", "")
 
@@ -466,7 +579,7 @@ class BatchReprocessingWorker(QThread):
                             "HistoryTab", "[FAIL] {record_id}: Empty transcription"
                         ).format(record_id=record.id)
                     )
-                    return False
+                    return None
 
             except Exception as e:
                 app_logger.log_error(e, "batch_reprocessing_transcription")
@@ -477,7 +590,7 @@ class BatchReprocessingWorker(QThread):
                         "[FAIL] {record_id}: Transcription error - {error}",
                     ).format(record_id=record.id, error=str(e))
                 )
-                return False
+                return None
 
             # 3. 重新AI优化（如果启用）
             ai_enabled = self.config_service.get_setting("ai.enabled", False)
@@ -496,7 +609,7 @@ class BatchReprocessingWorker(QThread):
                     try:
                         ai_optimized_text = (
                             self.ai_processing_controller.process_with_ai(
-                                transcription_text, record_id=record.id
+                                transcription_text, record_id=""
                             )
                         )
                         ai_provider = self.config_service.get_setting(
@@ -523,42 +636,20 @@ class BatchReprocessingWorker(QThread):
                 else transcription_text
             )
 
-            # 从数据库重新获取记录以确保最新状态
-            fresh_record = self.history_service.get_record_by_id(record.id)
-            if not fresh_record:
-                self.stats["failed"] += 1
-                self.stats["errors"].append(
-                    QCoreApplication.translate(
-                        "HistoryTab",
-                        "[FAIL] {record_id}: Record not found in database",
-                    ).format(record_id=record.id)
-                )
-                return False
-
-            fresh_record.transcription_text = transcription_text
-            fresh_record.transcription_provider = transcription_provider
-            fresh_record.transcription_status = "success"
-            fresh_record.transcription_error = None
-            fresh_record.ai_optimized_text = ai_optimized_text
-            fresh_record.ai_provider = ai_provider
-            fresh_record.ai_status = ai_status
-            fresh_record.ai_error = ai_error
-            fresh_record.final_text = final_text
-
-            try:
-                self.history_service.update_record(fresh_record)
-                self.stats["success"] += 1
-                return True
-            except Exception as e:
-                app_logger.log_error(e, "batch_reprocessing_update")
-                self.stats["failed"] += 1
-                self.stats["errors"].append(
-                    QCoreApplication.translate(
-                        "HistoryTab",
-                        "[FAIL] {record_id}: Database update failed - {error}",
-                    ).format(record_id=record.id, error=str(e))
-                )
-                return False
+            new_record = _build_reprocessed_record(
+                source_record=record,
+                transcription_text=transcription_text,
+                transcription_provider=transcription_provider,
+                transcription_status="success",
+                transcription_duration=transcription_duration,
+                ai_optimized_text=ai_optimized_text,
+                ai_provider=ai_provider,
+                ai_status=ai_status,
+                ai_error=ai_error,
+                final_text=final_text,
+                transcription_error=None,
+            )
+            return new_record
 
         except Exception as e:
             from ...utils import app_logger
@@ -571,11 +662,49 @@ class BatchReprocessingWorker(QThread):
                     "[FAIL] {record_id}: Unexpected error - {error}",
                 ).format(record_id=record.id, error=str(e))
             )
-            return False
+            return None
 
     def stop(self):
         """请求停止处理"""
         self.should_stop = True
+
+
+class HistoryStatsWorker(QThread):
+    """历史统计异步查询线程，避免阻塞 UI 主线程。"""
+
+    stats_ready = Signal(dict)
+    stats_failed = Signal(dict)
+
+    def __init__(self, history_service, query: Optional[str], request_id: int):
+        super().__init__()
+        self.history_service = history_service
+        self.query = query
+        self.request_id = request_id
+
+    def run(self):
+        try:
+            if self.isInterruptionRequested():
+                return
+
+            total_count, total_duration, success_count = (
+                self.history_service.get_aggregate_stats(query=self.query)
+            )
+
+            if self.isInterruptionRequested():
+                return
+
+            self.stats_ready.emit(
+                {
+                    "request_id": self.request_id,
+                    "total_count": int(total_count),
+                    "total_duration": float(total_duration),
+                    "success_count": int(success_count),
+                }
+            )
+        except Exception as e:
+            if self.isInterruptionRequested():
+                return
+            self.stats_failed.emit({"request_id": self.request_id, "error": str(e)})
 
 
 class HistoryDetailDialog(QDialog):
@@ -638,10 +767,14 @@ class HistoryDetailDialog(QDialog):
             f"<b>Audio File:</b> {self.record.audio_file_path or 'N/A'}"
         )
         self.audio_path_label.setWordWrap(True)
+        self.reprocess_parent_label = QLabel(
+            f"<b>Reprocess Of:</b> {getattr(self.record, 'reprocess_parent_id', None) or 'N/A'}"
+        )
 
         basic_layout.addWidget(self.time_label)
         basic_layout.addWidget(self.duration_label)
         basic_layout.addWidget(self.audio_path_label)
+        basic_layout.addWidget(self.reprocess_parent_label)
         info_layout.addWidget(self.basic_info_group)
 
         # 原始转录信息
@@ -657,6 +790,28 @@ class HistoryDetailDialog(QDialog):
             f"<b>Provider:</b> {self.record.transcription_provider or 'N/A'}"
         )
         trans_layout.addWidget(self.trans_provider_label)
+        self.trans_diagnostics_label = QLabel(
+            f"<b>Diagnostics:</b> {self._format_diagnostics_status()}"
+        )
+        trans_layout.addWidget(self.trans_diagnostics_label)
+        self.trans_mode_label = QLabel(f"<b>Mode:</b> {self._display_mode()}")
+        trans_layout.addWidget(self.trans_mode_label)
+        self.trans_duration_label = QLabel(
+            f"<b>Transcribe Time:</b> {self._display_transcribe_duration()}"
+        )
+        trans_layout.addWidget(self.trans_duration_label)
+        self.trans_fallback_label = QLabel(
+            f"<b>Fallback Used:</b> {self._display_fallback_used()}"
+        )
+        trans_layout.addWidget(self.trans_fallback_label)
+        self.trans_fallback_type_label = QLabel(
+            f"<b>Fallback Type:</b> {self._display_fallback_type()}"
+        )
+        trans_layout.addWidget(self.trans_fallback_type_label)
+        self.trans_fallback_reason_label = QLabel(
+            f"<b>Fallback Reason:</b> {self._display_fallback_reason()}"
+        )
+        trans_layout.addWidget(self.trans_fallback_reason_label)
 
         if self.record.transcription_error:
             self.trans_error_label = QLabel(
@@ -769,6 +924,62 @@ class HistoryDetailDialog(QDialog):
             status, QCoreApplication.translate("HistoryDetailDialog", "Unknown")
         )
 
+    @staticmethod
+    def _format_streaming_mode(mode: Optional[str]) -> str:
+        """Format streaming mode for display."""
+        if not mode:
+            return "unknown"
+        return str(mode)
+
+    @staticmethod
+    def _format_yes_no(value: bool) -> str:
+        """Format boolean as localized yes/no."""
+        return (
+            QCoreApplication.translate("HistoryDetailDialog", "Yes")
+            if value
+            else QCoreApplication.translate("HistoryDetailDialog", "No")
+        )
+
+    def _diagnostics_collected(self) -> bool:
+        return bool(getattr(self.record, "diagnostics_collected", False))
+
+    def _format_diagnostics_status(self) -> str:
+        return (
+            QCoreApplication.translate("HistoryDetailDialog", "Captured")
+            if self._diagnostics_collected()
+            else QCoreApplication.translate("HistoryDetailDialog", "Legacy Defaults")
+        )
+
+    def _display_mode(self) -> str:
+        if not self._diagnostics_collected():
+            return QCoreApplication.translate("HistoryDetailDialog", "N/A (legacy)")
+        return self._format_streaming_mode(self.record.streaming_mode)
+
+    def _display_transcribe_duration(self) -> str:
+        if not self._diagnostics_collected():
+            return QCoreApplication.translate("HistoryDetailDialog", "N/A (legacy)")
+        return f"{self.record.transcription_duration:.2f}s"
+
+    def _display_fallback_used(self) -> str:
+        if not self._diagnostics_collected():
+            return QCoreApplication.translate("HistoryDetailDialog", "N/A (legacy)")
+        return self._format_yes_no(self.record.used_fallback)
+
+    def _display_fallback_type(self) -> str:
+        if not self._diagnostics_collected():
+            return QCoreApplication.translate("HistoryDetailDialog", "N/A (legacy)")
+        if not self.record.used_fallback:
+            return QCoreApplication.translate("HistoryDetailDialog", "None")
+        return getattr(self.record, "fallback_type", "unknown") or "unknown"
+
+    def _display_fallback_reason(self) -> str:
+        if not self._diagnostics_collected():
+            return QCoreApplication.translate("HistoryDetailDialog", "N/A (legacy)")
+        reason = getattr(self.record, "fallback_reason", None)
+        if not reason:
+            return QCoreApplication.translate("HistoryDetailDialog", "None")
+        return str(reason)
+
     def _on_language_changed(self, data: object = None) -> None:
         """Handle runtime UI language change."""
         self.retranslate_ui()
@@ -801,6 +1012,14 @@ class HistoryDetailDialog(QDialog):
                 "HistoryDetailDialog", "<b>Audio File:</b> {path}"
             ).format(path=audio_path)
         )
+        self.reprocess_parent_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Reprocess Of:</b> {record_id}"
+            ).format(
+                record_id=getattr(self.record, "reprocess_parent_id", None)
+                or QCoreApplication.translate("HistoryDetailDialog", "N/A")
+            )
+        )
 
         transcription_status = self._status_display(self.record.transcription_status)
         self.trans_group.setTitle(
@@ -815,6 +1034,36 @@ class HistoryDetailDialog(QDialog):
                 provider=self.record.transcription_provider
                 or QCoreApplication.translate("HistoryDetailDialog", "N/A")
             )
+        )
+        self.trans_diagnostics_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Diagnostics:</b> {value}"
+            ).format(value=self._format_diagnostics_status())
+        )
+        self.trans_mode_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Mode:</b> {mode}"
+            ).format(mode=self._display_mode())
+        )
+        self.trans_duration_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Transcribe Time:</b> {value}"
+            ).format(value=self._display_transcribe_duration())
+        )
+        self.trans_fallback_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Fallback Used:</b> {value}"
+            ).format(value=self._display_fallback_used())
+        )
+        self.trans_fallback_type_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Fallback Type:</b> {value}"
+            ).format(value=self._display_fallback_type())
+        )
+        self.trans_fallback_reason_label.setText(
+            QCoreApplication.translate(
+                "HistoryDetailDialog", "<b>Fallback Reason:</b> {value}"
+            ).format(value=self._display_fallback_reason())
         )
         if self.trans_error_label:
             self.trans_error_label.setText(
@@ -943,7 +1192,8 @@ class HistoryDetailDialog(QDialog):
                 "This will reprocess the recording using current configuration.\n\n"
                 "- Transcription will use current provider/model\n"
                 "- AI optimization will use current settings\n\n"
-                "The original record will be updated with new results.\n\n"
+                "A new history record will be created.\n"
+                "The original record will be kept for comparison.\n\n"
                 "Continue?",
             ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1030,26 +1280,13 @@ class HistoryDetailDialog(QDialog):
             ai_optimized_text = result.get("ai_optimized_text", "")
             final_text = result.get("final_text", "")
             ai_status = result.get("ai_status", "skipped")
+            new_record_id = result.get("new_record_id")
 
-            # 更新转录文本框
-            self.trans_text_edit.setPlainText(
-                transcription_text
-                or QCoreApplication.translate("HistoryDetailDialog", "(empty)")
-            )
-
-            # 更新优化后的文本框
-            if ai_status == "success" and ai_optimized_text:
-                display_text = ai_optimized_text
-            else:
-                display_text = QCoreApplication.translate(
-                    "HistoryDetailDialog",
-                    "{text}\n\n(Using original transcription - AI {status})",
-                ).format(text=transcription_text, status=ai_status)
-
-            self.optimized_text_edit.setPlainText(
-                display_text
-                or QCoreApplication.translate("HistoryDetailDialog", "(empty)")
-            )
+            # 切换到新建的重处理记录（保留旧记录用于复盘）
+            if new_record_id:
+                fresh_record = self.history_service.get_record_by_id(new_record_id)
+                if fresh_record:
+                    self.record = fresh_record
 
             # 清理worker (安全清理，等待线程结束)
             if self.reprocessing_worker:
@@ -1057,13 +1294,34 @@ class HistoryDetailDialog(QDialog):
                     self.reprocessing_worker.wait(1000)
                 self.reprocessing_worker = None
 
-            self.record.transcription_text = transcription_text
-            self.record.ai_optimized_text = ai_optimized_text
-            self.record.final_text = final_text
-            self.record.ai_status = ai_status
-            self.record.transcription_provider = result.get(
-                "transcription_provider", self.record.transcription_provider
-            )
+            # 兜底：如果读取不到新记录，仍按结果刷新当前展示
+            if not new_record_id or self.record.id != new_record_id:
+                self.record.transcription_text = transcription_text
+                self.record.ai_optimized_text = ai_optimized_text
+                self.record.final_text = final_text
+                self.record.ai_status = ai_status
+                self.record.transcription_provider = result.get(
+                    "transcription_provider", self.record.transcription_provider
+                )
+                self.record.streaming_mode = result.get(
+                    "streaming_mode", self.record.streaming_mode
+                )
+                self.record.transcription_duration = result.get(
+                    "transcription_duration", self.record.transcription_duration
+                )
+                self.record.used_fallback = result.get(
+                    "used_fallback", self.record.used_fallback
+                )
+                self.record.fallback_type = result.get(
+                    "fallback_type", self.record.fallback_type
+                )
+                self.record.fallback_reason = result.get(
+                    "fallback_reason", self.record.fallback_reason
+                )
+                self.record.diagnostics_collected = result.get(
+                    "diagnostics_collected", self.record.diagnostics_collected
+                )
+            self.retranslate_ui()
 
             # 显示成功消息
             QMessageBox.information(
@@ -1074,10 +1332,12 @@ class HistoryDetailDialog(QDialog):
                 QCoreApplication.translate(
                     "HistoryDetailDialog",
                     "Recording has been successfully reprocessed!\n\n"
+                    "New Record ID: {record_id}\n"
                     "Transcription Provider: {provider}\n"
                     "AI Status: {status}\n\n"
-                    "The record has been updated in the history.",
+                    "Original record was preserved for diagnostics.",
                 ).format(
+                    record_id=(new_record_id or self.record.id)[:12],
                     provider=result.get(
                         "transcription_provider",
                         QCoreApplication.translate("HistoryDetailDialog", "N/A"),
@@ -1230,10 +1490,13 @@ class HistoryTab(BaseSettingsTab):
         self.batch_worker = None  # 批量处理Worker
         self.batch_progress_dialog = None  # 批量处理进度对话框
         self._search_debounce_timer: Optional[QTimer] = None
+        self._stats_worker: Optional[HistoryStatsWorker] = None
+        self._stats_request_id = 0
 
         # History pagination (keeps UI responsive for large history)
         self._page_size = 200
-        self._page_offset = 0
+        self._page_cursor_timestamp: Optional[datetime] = None
+        self._page_cursor_id: Optional[str] = None
         self._has_more_pages = True
         self._is_loading_page = False
         self._active_query = ""
@@ -1289,7 +1552,12 @@ class HistoryTab(BaseSettingsTab):
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(4)
         self.history_table.setHorizontalHeaderLabels(
-            ["Time", "LEN", "Transcription", "Status"]
+            [
+                "Time",
+                "LEN",
+                "Transcription",
+                "Status",
+            ]
         )
 
         # 表格设置
@@ -1310,21 +1578,15 @@ class HistoryTab(BaseSettingsTab):
 
         # 列宽设置
         header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # Time - 固定宽度
-        header.setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Fixed
-        )  # Length - 固定宽度
-        header.setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch
-        )  # Transcription - 自动拉伸
-        header.setSectionResizeMode(
-            3, QHeaderView.ResizeMode.Fixed
-        )  # AI Status - 固定宽度
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # Time
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # Length
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Transcription
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # AI Status
 
         # 设置固定列宽
         self.history_table.setColumnWidth(0, 110)  # Time: MM-DD HH:MM 格式
-        self.history_table.setColumnWidth(1, 80)  # Length: "0.5s" 格式
-        self.history_table.setColumnWidth(3, 100)  # AI Status: 固定100px，内容居中
+        self.history_table.setColumnWidth(1, 70)  # Length
+        self.history_table.setColumnWidth(3, 90)  # Status
 
         layout.addWidget(self.history_table)
 
@@ -1448,7 +1710,8 @@ class HistoryTab(BaseSettingsTab):
 
     def _reset_pagination(self) -> None:
         """重置分页状态并清空表格"""
-        self._page_offset = 0
+        self._page_cursor_timestamp = None
+        self._page_cursor_id = None
         self._has_more_pages = True
         self._is_loading_page = False
         self._active_query = self.search_input.text().strip()
@@ -1470,12 +1733,17 @@ class HistoryTab(BaseSettingsTab):
         try:
             query = self._active_query
             if query:
-                page_records = service.search_records(
-                    query=query, limit=self._page_size, offset=self._page_offset
+                page_records = service.search_records_keyset(
+                    query=query,
+                    limit=self._page_size,
+                    cursor_timestamp=self._page_cursor_timestamp,
+                    cursor_id=self._page_cursor_id,
                 )
             else:
-                page_records = service.get_records(
-                    limit=self._page_size, offset=self._page_offset
+                page_records = service.get_records_keyset(
+                    limit=self._page_size,
+                    cursor_timestamp=self._page_cursor_timestamp,
+                    cursor_id=self._page_cursor_id,
                 )
 
             if not page_records:
@@ -1485,7 +1753,9 @@ class HistoryTab(BaseSettingsTab):
             self.current_records.extend(page_records)
             self._append_rows(page_records)
 
-            self._page_offset += len(page_records)
+            last_record = page_records[-1]
+            self._page_cursor_timestamp = last_record.timestamp
+            self._page_cursor_id = last_record.id
             self._has_more_pages = len(page_records) >= self._page_size
 
         finally:
@@ -1526,9 +1796,7 @@ class HistoryTab(BaseSettingsTab):
                 # Time - 短格式：MM-DD HH:MM
                 time_str = record.timestamp.strftime("%m-%d %H:%M")
                 time_item = QTableWidgetItem(time_str)
-                time_item.setToolTip(
-                    record.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-                )  # 完整时间作为tooltip
+                time_item.setToolTip(self._build_diagnostic_tooltip(record))
                 self.history_table.setItem(row, 0, time_item)
 
                 # Duration
@@ -1635,34 +1903,39 @@ class HistoryTab(BaseSettingsTab):
         self._search_debounce_timer.start()
 
     def _update_statistics(self) -> None:
-        """更新统计信息"""
+        """异步更新统计信息，避免阻塞 UI 主线程。"""
         service = self._get_history_service()
         if not service:
-            self.total_records_label.setText(
-                QCoreApplication.translate(
-                    "HistoryTab", "Total Records: {count}"
-                ).format(count=0)
-            )
-            self.total_duration_label.setText(
-                QCoreApplication.translate(
-                    "HistoryTab", "Total Duration: {seconds:.1f}s"
-                ).format(seconds=0.0)
-            )
-            self.success_rate_label.setText(
-                QCoreApplication.translate(
-                    "HistoryTab", "Success Rate: {rate:.1f}%"
-                ).format(rate=0.0)
-            )
+            self._set_statistics_labels(0, 0.0, 0.0)
             return
 
         query = self._active_query or self.search_input.text().strip()
         query = query if query else None
 
-        total_count, total_duration, success_count = service.get_aggregate_stats(
-            query=query
-        )
-        success_rate = (success_count / total_count * 100) if total_count > 0 else 0
+        self._stats_request_id += 1
+        request_id = self._stats_request_id
 
+        if self._stats_worker and self._stats_worker.isRunning():
+            self._stats_worker.requestInterruption()
+
+        worker = HistoryStatsWorker(
+            history_service=service,
+            query=query,
+            request_id=request_id,
+        )
+        worker.stats_ready.connect(self._on_statistics_ready)
+        worker.stats_failed.connect(self._on_statistics_failed)
+        worker.finished.connect(
+            lambda _=None, finished_worker=worker: self._on_statistics_worker_finished(
+                finished_worker
+            )
+        )
+        self._stats_worker = worker
+        worker.start()
+
+    def _set_statistics_labels(
+        self, total_count: int, total_duration: float, success_rate: float
+    ) -> None:
         self.total_records_label.setText(
             QCoreApplication.translate("HistoryTab", "Total Records: {count}").format(
                 count=total_count
@@ -1679,6 +1952,29 @@ class HistoryTab(BaseSettingsTab):
             ).format(rate=success_rate)
         )
 
+    def _on_statistics_ready(self, payload: dict) -> None:
+        request_id = int(payload.get("request_id", -1))
+        if request_id != self._stats_request_id:
+            return
+
+        total_count = int(payload.get("total_count", 0))
+        total_duration = float(payload.get("total_duration", 0.0))
+        success_count = int(payload.get("success_count", 0))
+        success_rate = (success_count / total_count * 100) if total_count > 0 else 0
+
+        self._set_statistics_labels(total_count, total_duration, success_rate)
+
+    def _on_statistics_failed(self, payload: dict) -> None:
+        request_id = int(payload.get("request_id", -1))
+        if request_id != self._stats_request_id:
+            return
+        self._set_statistics_labels(0, 0.0, 0.0)
+
+    def _on_statistics_worker_finished(self, worker: QThread) -> None:
+        if worker is self._stats_worker:
+            self._stats_worker = None
+        worker.deleteLater()
+
     @staticmethod
     def _truncate_text(text: str, max_length: int) -> str:
         """截断文本"""
@@ -1687,6 +1983,55 @@ class HistoryTab(BaseSettingsTab):
         if len(text) <= max_length:
             return text
         return text[:max_length] + "..."
+
+    @staticmethod
+    def _diagnostics_collected(record: Any) -> bool:
+        return bool(getattr(record, "diagnostics_collected", False))
+
+    @classmethod
+    def _format_mode_for_table(cls, record: Any) -> str:
+        if not cls._diagnostics_collected(record):
+            return QCoreApplication.translate("HistoryTab", "Legacy")
+        return str(getattr(record, "streaming_mode", "unknown") or "unknown")
+
+    @classmethod
+    def _format_transcribe_for_table(cls, record: Any) -> str:
+        if not cls._diagnostics_collected(record):
+            return QCoreApplication.translate("HistoryTab", "Legacy")
+        seconds = float(getattr(record, "transcription_duration", 0.0) or 0.0)
+        return f"{seconds:.2f}s"
+
+    @classmethod
+    def _format_fallback_for_table(cls, record: Any) -> str:
+        if not cls._diagnostics_collected(record):
+            return QCoreApplication.translate("HistoryTab", "Legacy")
+        used_fallback = bool(getattr(record, "used_fallback", False))
+        if not used_fallback:
+            return QCoreApplication.translate("HistoryTab", "No")
+        fallback_type = str(getattr(record, "fallback_type", "unknown") or "unknown")
+        return QCoreApplication.translate("HistoryTab", "Yes ({type})").format(
+            type=fallback_type
+        )
+
+    @classmethod
+    def _build_diagnostic_tooltip(cls, record: Any) -> str:
+        diagnostics_label = (
+            QCoreApplication.translate("HistoryTab", "Captured")
+            if cls._diagnostics_collected(record)
+            else QCoreApplication.translate("HistoryTab", "Legacy defaults")
+        )
+        fallback_reason = getattr(
+            record, "fallback_reason", None
+        ) or QCoreApplication.translate("HistoryTab", "None")
+        return (
+            f"{record.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Provider: {record.transcription_provider or 'N/A'}\n"
+            f"Diagnostics: {diagnostics_label}\n"
+            f"Mode: {cls._format_mode_for_table(record)}\n"
+            f"Transcribe: {cls._format_transcribe_for_table(record)}\n"
+            f"Fallback: {cls._format_fallback_for_table(record)}\n"
+            f"Fallback Reason: {fallback_reason}"
+        )
 
     @staticmethod
     def _get_ai_status_display(record) -> str:
@@ -1761,6 +2106,8 @@ class HistoryTab(BaseSettingsTab):
                     "HistoryTab",
                     "You are about to re-transcribe {total} records.\n\n"
                     "Cooldown: {cooldown} seconds between records\n"
+                    "Each successful retry will create a new history record.\n"
+                    "Original records will be preserved.\n"
                     "This operation may take a long time and consume API quota.\n\n"
                     "Are you sure you want to continue?",
                 ).format(total=total_records, cooldown=cd_seconds),
