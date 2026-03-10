@@ -3,7 +3,9 @@ from datetime import datetime
 from pathlib import Path
 
 from sonicinput.core.interfaces import HistoryRecord
-from sonicinput.core.services.storage.history_storage_service import HistoryStorageService
+from sonicinput.core.services.storage.history_storage_service import (
+    HistoryStorageService,
+)
 
 
 class _DummyConfigService:

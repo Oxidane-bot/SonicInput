@@ -53,11 +53,15 @@ def test_stop_streaming_chunked_adds_context_overlap_and_dedupes_text() -> None:
     )
 
 
-def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat() -> None:
+def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat() -> (
+    None
+):
     service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
     service._TEXT_OVERLAP_MAX_CHARS = 60
 
-    merged_overlap = service._merge_chunk_texts_with_boundary_dedup(["abc123", "123xyz"])
+    merged_overlap = service._merge_chunk_texts_with_boundary_dedup(
+        ["abc123", "123xyz"]
+    )
     assert merged_overlap == "abc123xyz"
 
     merged_plain = service._merge_chunk_texts_with_boundary_dedup(["hello", "world"])

@@ -77,7 +77,10 @@ def test_batch_reprocessing_worker_uses_keyset_and_batch_save():
     ]
     history_service = _FakeHistoryService(records)
     transcription_service = Mock()
-    transcription_service.transcribe_sync.return_value = {"success": True, "text": "new"}
+    transcription_service.transcribe_sync.return_value = {
+        "success": True,
+        "text": "new",
+    }
 
     worker = BatchReprocessingWorker(
         total_records=2,

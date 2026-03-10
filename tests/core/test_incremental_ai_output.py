@@ -100,12 +100,17 @@ def test_ai_processing_emits_incremental_updates_for_multiple_groups(monkeypatch
     )
 
     incremental_events = [
-        data for event_name, data in events.emitted if event_name == Events.AI_INCREMENTAL_TEXT_UPDATED
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_INCREMENTAL_TEXT_UPDATED
     ]
 
     assert len(incremental_events) == 2
     assert incremental_events[0]["text"] == "<第一句。第二句。第三句。>"
-    assert incremental_events[1]["text"] == "<第一句。第二句。第三句。><第四句。第五句。第六句。>"
+    assert (
+        incremental_events[1]["text"]
+        == "<第一句。第二句。第三句。><第四句。第五句。第六句。>"
+    )
     assert final_text == incremental_events[-1]["text"]
 
 
@@ -193,7 +198,9 @@ def test_first_chunk_output_emits_incremental_text_before_final(monkeypatch):
     )
 
     final_events = [
-        data for event_name, data in events.emitted if event_name == Events.AI_PROCESSED_TEXT
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_PROCESSED_TEXT
     ]
     assert final_events[-1]["incremental_output_used"] is True
     assert final_events[-1]["text"] == "<第一句。第二句。><第三句。第四句。>"
