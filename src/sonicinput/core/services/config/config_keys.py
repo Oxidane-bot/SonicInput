@@ -99,6 +99,12 @@ class ConfigKeys:
     AI_PROMPT = "ai.prompt"
     """AI系统提示词 (str)"""
 
+    AI_SENTENCE_SPLIT_ENABLED = "ai.sentence_split.enabled"
+    """AI分句与分组开关 (bool): 启用3-5句分组的分句处理"""
+
+    AI_FIRST_CHUNK_OUTPUT_ENABLED = "ai.first_chunk_output.enabled"
+    """首块ASR完成即触发AI输出 (bool): chunked模式下按分块尽早启动AI"""
+
     AI_TIMEOUT = "ai.timeout"
     """AI请求超时 (int): 秒"""
 
@@ -401,6 +407,8 @@ class ConfigKeyGroups:
         ConfigKeys.AI_ENABLED,
         ConfigKeys.AI_FILTER_THINKING,
         ConfigKeys.AI_PROMPT,
+        ConfigKeys.AI_SENTENCE_SPLIT_ENABLED,
+        ConfigKeys.AI_FIRST_CHUNK_OUTPUT_ENABLED,
     ]
 
     AUDIO = [

@@ -7,6 +7,7 @@
 
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 
@@ -60,10 +61,13 @@ class StreamingCoordinator(LifecycleComponent):
         self._streaming_mode_type: StreamingMode = streaming_mode
         self._streaming_active = False
         self._streaming_lock = threading.RLock()
+        self._streaming_condition = threading.Condition(self._streaming_lock)
 
         # chunked 模式：流式块管理
         with self._streaming_lock:
-            self._streaming_chunks: List[StreamingChunk] = []
+            self._streaming_chunks_by_id: Dict[int, StreamingChunk] = {}
+            self._pending_chunk_ids: "OrderedDict[int, None]" = OrderedDict()
+            self._completed_chunks_by_id: Dict[int, StreamingChunk] = {}
             self._next_chunk_id = 0
 
         # realtime 模式：流式会话管理
@@ -100,6 +104,7 @@ class StreamingCoordinator(LifecycleComponent):
         with self._streaming_lock:
             # 重置统计数据
             self._reset_stats()
+            self._clear_chunk_state()
 
             app_logger.log_audio_event(
                 "StreamingCoordinator lifecycle started",
@@ -123,8 +128,9 @@ class StreamingCoordinator(LifecycleComponent):
 
             # 清理所有资源
             with self._streaming_lock:
-                self._streaming_chunks.clear()
+                self._clear_chunk_state()
                 self._realtime_session = None
+                self._streaming_condition.notify_all()
 
             app_logger.log_audio_event(
                 "StreamingCoordinator lifecycle stopped",
@@ -149,6 +155,7 @@ class StreamingCoordinator(LifecycleComponent):
 
             self._streaming_active = True
             self._reset_stats()
+            self._clear_chunk_state()
 
             # realtime 模式初始化
             if self._streaming_mode_type == "realtime":
@@ -179,14 +186,14 @@ class StreamingCoordinator(LifecycleComponent):
 
             # chunked 模式：处理剩余的块
             if self._streaming_mode_type == "chunked":
-                pending_chunks = len(self._streaming_chunks)
+                pending_chunks = len(self._streaming_chunks_by_id)
                 if pending_chunks > 0:
                     app_logger.log_audio_event(
                         "Cleaning up pending chunks", {"pending_count": pending_chunks}
                     )
 
                     # 标记剩余块为失败
-                    for chunk in self._streaming_chunks:
+                    for chunk in self._streaming_chunks_by_id.values():
                         chunk.result_container.update(
                             {
                                 "success": False,
@@ -196,7 +203,8 @@ class StreamingCoordinator(LifecycleComponent):
                         )
                         chunk.result_event.set()
 
-                    self._streaming_chunks.clear()
+                    self._streaming_chunks_by_id.clear()
+                    self._pending_chunk_ids.clear()
 
             # realtime 模式：仅清理session，不获取最终结果
             # 重要：realtime 模式文本已在录音过程中逐字输入，
@@ -228,6 +236,7 @@ class StreamingCoordinator(LifecycleComponent):
 
                     self._realtime_session = None
 
+            self._streaming_condition.notify_all()
             stats = self._get_stats()
 
             app_logger.log_audio_event(
@@ -284,7 +293,8 @@ class StreamingCoordinator(LifecycleComponent):
                 result_container=result_container,
             )
 
-            self._streaming_chunks.append(chunk)
+            self._streaming_chunks_by_id[chunk_id] = chunk
+            self._pending_chunk_ids[chunk_id] = None
             self._streaming_stats["total_chunks"] += 1
             self._streaming_stats["total_audio_duration"] += (
                 len(audio_data) / 16000
@@ -295,9 +305,10 @@ class StreamingCoordinator(LifecycleComponent):
                 {
                     "chunk_id": chunk_id,
                     "audio_length": len(audio_data),
-                    "queue_size": len(self._streaming_chunks),
+                    "queue_size": len(self._pending_chunk_ids),
                 },
             )
+            self._streaming_condition.notify()
 
             return chunk_id
 
@@ -401,7 +412,9 @@ class StreamingCoordinator(LifecycleComponent):
         """
         with self._streaming_lock:
             # 返回所有待处理块的副本
-            return list(self._streaming_chunks)
+            return sorted(
+                self._streaming_chunks_by_id.values(), key=lambda chunk: chunk.chunk_id
+            )
 
     def get_next_chunk(
         self, timeout: Optional[float] = None
@@ -414,24 +427,28 @@ class StreamingCoordinator(LifecycleComponent):
         Returns:
             流式块对象，如果没有块则返回None
         """
-        start_time = time.time()
+        deadline = None if timeout is None else (time.monotonic() + timeout)
 
-        while True:
-            with self._streaming_lock:
-                if self._streaming_chunks:
-                    chunk = self._streaming_chunks.pop(0)
-                    return chunk
-
-                # 检查超时
-                if timeout and (time.time() - start_time) > timeout:
-                    return None
+        with self._streaming_condition:
+            while True:
+                if self._pending_chunk_ids:
+                    chunk_id, _ = self._pending_chunk_ids.popitem(last=False)
+                    chunk = self._streaming_chunks_by_id.get(chunk_id)
+                    if chunk and not chunk.result_event.is_set():
+                        return chunk
 
                 # 检查是否仍在流式模式
                 if not self._streaming_active:
                     return None
 
-            # 短暂等待
-            time.sleep(0.01)
+                if deadline is None:
+                    self._streaming_condition.wait()
+                    continue
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._streaming_condition.wait(timeout=remaining)
 
     def complete_chunk(self, chunk_id: int, result: Dict[str, Any]) -> None:
         """标记流式块处理完成
@@ -441,48 +458,44 @@ class StreamingCoordinator(LifecycleComponent):
             result: 处理结果
         """
         with self._streaming_lock:
-            # 查找对应的块
-            chunk = None
-            for c in self._streaming_chunks:
-                if c.chunk_id == chunk_id:
-                    chunk = c
-                    break
+            chunk = self._streaming_chunks_by_id.pop(chunk_id, None)
+            if not chunk:
+                return
 
-            if chunk:
-                # 更新结果容器
-                chunk.result_container.update(result)
-                chunk.result_container["chunk_id"] = chunk_id
-                chunk.result_container["completed_at"] = time.time()
+            # 更新结果容器
+            chunk.result_container.update(result)
+            chunk.result_container["chunk_id"] = chunk_id
+            chunk.result_container["completed_at"] = time.time()
 
-                # 计算处理时间
-                processing_time = time.time() - chunk.timestamp
-                chunk.result_container["processing_time"] = processing_time
+            # 计算处理时间
+            processing_time = time.time() - chunk.timestamp
+            chunk.result_container["processing_time"] = processing_time
 
-                # 更新统计
-                self._update_stats(processing_time, result.get("success", False))
+            # 更新统计
+            self._update_stats(processing_time, result.get("success", False))
 
-                # 设置事件标志
-                chunk.result_event.set()
+            # 设置事件标志
+            chunk.result_event.set()
+            self._pending_chunk_ids.pop(chunk_id, None)
+            self._completed_chunks_by_id[chunk_id] = chunk
+            self._streaming_condition.notify_all()
 
-                # 从队列中移除
-                self._streaming_chunks.remove(chunk)
+            app_logger.log_audio_event(
+                "Streaming chunk completed",
+                {
+                    "chunk_id": chunk_id,
+                    "success": result.get("success", False),
+                    "processing_time": processing_time,
+                    "text_length": len(result.get("text", "")),
+                    "queue_size": len(self._pending_chunk_ids),
+                },
+            )
 
-                app_logger.log_audio_event(
-                    "Streaming chunk completed",
-                    {
-                        "chunk_id": chunk_id,
-                        "success": result.get("success", False),
-                        "processing_time": processing_time,
-                        "text_length": len(result.get("text", "")),
-                        "queue_size": len(self._streaming_chunks),
-                    },
-                )
-
-                # 发送块完成事件
-                self._emit_streaming_event(
-                    Events.STREAMING_CHUNK_COMPLETED,
-                    {"chunk_id": chunk_id, "result": result},
-                )
+            # 发送块完成事件
+            self._emit_streaming_event(
+                Events.STREAMING_CHUNK_COMPLETED,
+                {"chunk_id": chunk_id, "result": result},
+            )
 
     def get_chunk_result(
         self, chunk_id: int, timeout: Optional[float] = None
@@ -497,12 +510,9 @@ class StreamingCoordinator(LifecycleComponent):
             处理结果，如果超时则返回None
         """
         with self._streaming_lock:
-            # 查找对应的块
-            chunk = None
-            for c in self._streaming_chunks:
-                if c.chunk_id == chunk_id:
-                    chunk = c
-                    break
+            chunk = self._streaming_chunks_by_id.get(chunk_id)
+            if not chunk:
+                chunk = self._completed_chunks_by_id.get(chunk_id)
 
         if not chunk:
             return None
@@ -520,7 +530,7 @@ class StreamingCoordinator(LifecycleComponent):
             待处理块数量
         """
         with self._streaming_lock:
-            return len(self._streaming_chunks)
+            return len(self._pending_chunk_ids)
 
     def is_streaming(self) -> bool:
         """检查是否在流式模式
@@ -584,14 +594,7 @@ class StreamingCoordinator(LifecycleComponent):
             已完成的转录块列表
         """
         with self._streaming_lock:
-            completed_chunks = []
-
-            # 遍历所有块，找到已完成的
-            for chunk in self._streaming_chunks:
-                if chunk.result_event.is_set():
-                    completed_chunks.append(chunk)
-
-            return completed_chunks
+            return list(self._completed_chunks_by_id.values())
 
     def _get_stats(self) -> Dict[str, Any]:
         """获取统计信息（内部方法，需要持有锁）"""
@@ -600,7 +603,7 @@ class StreamingCoordinator(LifecycleComponent):
             {
                 "is_streaming": self._streaming_active,
                 "mode": self._streaming_mode_type,
-                "pending_chunks": len(self._streaming_chunks),
+                "pending_chunks": len(self._pending_chunk_ids),
                 "next_chunk_id": self._next_chunk_id,
                 "success_rate": (
                     stats["completed_chunks"] / max(stats["total_chunks"], 1) * 100
@@ -640,6 +643,12 @@ class StreamingCoordinator(LifecycleComponent):
         if self._streaming_mode_type == "realtime":
             self._realtime_partial_text = ""
             self._realtime_last_update = time.time()
+
+    def _clear_chunk_state(self) -> None:
+        """清理分块状态（需在持锁状态下调用）。"""
+        self._streaming_chunks_by_id.clear()
+        self._pending_chunk_ids.clear()
+        self._completed_chunks_by_id.clear()
 
     def _update_stats(self, processing_time: float, success: bool) -> None:
         """更新统计信息

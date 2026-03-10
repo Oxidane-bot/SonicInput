@@ -40,6 +40,7 @@ class Events:
     AI_PROCESSING_STARTED = "ai_processing_started"
     AI_PROCESSING_COMPLETED = "ai_processing_completed"
     AI_PROCESSING_ERROR = "ai_processing_error"
+    AI_INCREMENTAL_TEXT_UPDATED = "ai_incremental_text_updated"
     AI_PROCESSED_TEXT = "ai_processed_text"
 
     # Text input
@@ -238,6 +239,11 @@ EVENT_METADATA: Dict[str, Dict[str, object]] = {
         "description": "AI processing error",
         "namespace": "ai",
         "tags": ["ai", "processing", "error"],
+    },
+    Events.AI_INCREMENTAL_TEXT_UPDATED: {
+        "description": "AI incremental text updated",
+        "namespace": "ai",
+        "tags": ["ai", "processing", "incremental"],
     },
     Events.AI_PROCESSED_TEXT: {
         "description": "AI processed text",

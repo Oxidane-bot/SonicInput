@@ -48,6 +48,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
 
         # Realtime 模式状态追踪（用于实时文本差量更新）
         self._last_realtime_text: str = ""  # 上一次输入的实时文本
+        self._last_incremental_ai_text: str = ""
 
         # NOTE: Event listener registration moved to _do_start() for hot reload support
         # NOTE: Initialization logging moved to _do_start() for hot reload support
@@ -60,6 +61,10 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         """
         # AI 处理完成的文本（chunked 模式）
         self._track_listener(Events.AI_PROCESSED_TEXT, self._on_text_ready_for_input)
+        self._track_listener(
+            Events.AI_INCREMENTAL_TEXT_UPDATED,
+            self._on_ai_incremental_text_updated,
+        )
 
         # 实时文本更新（realtime 模式）
         self._track_listener(
@@ -109,7 +114,18 @@ class InputController(LifecycleComponent, BaseController, IInputController):
             return
 
         text = data.get("text", "")
-        if text.strip():
+        incremental_output_used = data.get("incremental_output_used", False)
+
+        if incremental_output_used:
+            self._apply_live_text_update(
+                new_text=text,
+                previous_text=self._last_incremental_ai_text,
+                update_state_attr="_last_incremental_ai_text",
+                shrink_guard_ratio=None,
+                log_context="AI final text",
+            )
+            self._finish_text_input(text, data)
+        elif text.strip():
             self.input_text(text)
 
             # 记录整体性能日志
@@ -131,6 +147,70 @@ class InputController(LifecycleComponent, BaseController, IInputController):
             self._state_manager.set_app_state(AppState.IDLE)
             # 记录性能日志
             self._log_performance(data)
+
+    def _finish_text_input(self, text: str, data: dict) -> None:
+        if hasattr(self._input_service, "stop_recording_mode"):
+            self._input_service.stop_recording_mode()
+
+        self._events.emit(Events.TEXT_INPUT_COMPLETED, text)
+        self._state_manager.set_app_state(AppState.IDLE)
+        self._log_performance(data)
+
+    def _apply_live_text_update(
+        self,
+        new_text: str,
+        previous_text: str,
+        update_state_attr: str,
+        log_context: str,
+        shrink_guard_ratio: float | None,
+    ) -> None:
+        if not new_text or new_text == previous_text:
+            return
+
+        app_logger.log_audio_event(
+            f"{log_context} update received",
+            {
+                "old_text": previous_text[:30] + "..."
+                if len(previous_text) > 30
+                else previous_text,
+                "new_text": new_text[:30] + "..." if len(new_text) > 30 else new_text,
+            },
+        )
+
+        if (
+            shrink_guard_ratio is not None
+            and previous_text
+            and len(new_text) < len(previous_text) * shrink_guard_ratio
+        ):
+            app_logger.log_audio_event(
+                f"{log_context} shrank unexpectedly, skipping diff",
+                {
+                    "old_length": len(previous_text),
+                    "new_length": len(new_text),
+                    "shrink_guard_ratio": shrink_guard_ratio,
+                },
+            )
+            return
+
+        backspace_count, text_to_append = calculate_text_diff(previous_text, new_text)
+
+        app_logger.log_audio_event(
+            f"{log_context} diff calculated",
+            {
+                "backspace_count": backspace_count,
+                "append_text": text_to_append[:30] + "..."
+                if len(text_to_append) > 30
+                else text_to_append,
+            },
+        )
+
+        if backspace_count > 0:
+            self._input_service.input_text("\b" * backspace_count)
+
+        if text_to_append:
+            self._input_service.input_text(text_to_append)
+
+        setattr(self, update_state_attr, new_text)
 
     def input_text(self, text: str) -> bool:
         """输入文本
@@ -250,6 +330,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         """
         # 重置 realtime 文本追踪（用于实时文本差量更新）
         self._last_realtime_text = ""
+        self._last_incremental_ai_text = ""
 
         # 启动录音模式：SmartTextInput会保存原始剪贴板，并在录音期间禁用中途restore
         try:
@@ -285,78 +366,29 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         """
         try:
             new_text = data.get("text", "")
-
-            # 空文本或无变化则跳过
-            if not new_text or new_text == self._last_realtime_text:
-                return
-
-            app_logger.log_audio_event(
-                "Realtime text update received",
-                {
-                    "old_text": self._last_realtime_text[:30] + "..."
-                    if len(self._last_realtime_text) > 30
-                    else self._last_realtime_text,
-                    "new_text": new_text[:30] + "..."
-                    if len(new_text) > 30
-                    else new_text,
-                },
+            self._apply_live_text_update(
+                new_text=new_text,
+                previous_text=self._last_realtime_text,
+                update_state_attr="_last_realtime_text",
+                shrink_guard_ratio=0.5,
+                log_context="Realtime text",
             )
-
-            # 关键修复：如果新文本为空或显著变短，可能是sherpa reset导致的异常
-            # 不应该删除已输入的文本
-            if not new_text or len(new_text) < len(self._last_realtime_text) * 0.5:
-                app_logger.log_audio_event(
-                    "New text is empty or significantly shorter, likely due to stream reset",
-                    {
-                        "old_length": len(self._last_realtime_text),
-                        "new_length": len(new_text),
-                        "skipping_diff": True,
-                    },
-                )
-                # 不执行差量更新，保持当前已输入的文本
-                return
-
-            # 计算文本差异（差量算法）
-            backspace_count, text_to_append = calculate_text_diff(
-                self._last_realtime_text, new_text
-            )
-
-            app_logger.log_audio_event(
-                "Calculated text diff",
-                {
-                    "backspace_count": backspace_count,
-                    "append_text": text_to_append[:30] + "..."
-                    if len(text_to_append) > 30
-                    else text_to_append,
-                },
-            )
-
-            # 如果需要退格，先删除旧的部分
-            if backspace_count > 0:
-                # 使用退格键删除
-                backspace_text = "\b" * backspace_count
-                self._input_service.input_text(backspace_text)
-                app_logger.log_audio_event(
-                    "Sent backspace keys", {"count": backspace_count}
-                )
-
-            # 输入新的文本
-            if text_to_append:
-                self._input_service.input_text(text_to_append)
-                app_logger.log_audio_event(
-                    "Sent new text",
-                    {
-                        "text": text_to_append[:50] + "..."
-                        if len(text_to_append) > 50
-                        else text_to_append
-                    },
-                )
-
-            # 更新追踪的文本
-            self._last_realtime_text = new_text
 
         except Exception as e:
             app_logger.log_error(e, "_on_realtime_text_updated")
+
+    def _on_ai_incremental_text_updated(self, data: dict) -> None:
+        """处理 AI 分组完成后的增量文本更新。"""
+        try:
+            self._apply_live_text_update(
+                new_text=data.get("text", ""),
+                previous_text=self._last_incremental_ai_text,
+                update_state_attr="_last_incremental_ai_text",
+                shrink_guard_ratio=None,
+                log_context="AI incremental text",
+            )
+        except Exception as e:
+            app_logger.log_error(e, "_on_ai_incremental_text_updated")
 
     def _on_transcription_error_restore_clipboard(self, error_msg: str) -> None:
         """处理转录错误事件 - 恢复剪贴板
@@ -415,6 +447,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
 
             # 重置 realtime 文本追踪
             self._last_realtime_text = ""
+            self._last_incremental_ai_text = ""
 
             # 确保剪贴板恢复（防止资源泄漏）
             if hasattr(self._input_service, "stop_recording_mode"):

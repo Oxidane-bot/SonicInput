@@ -123,31 +123,14 @@ class AudioCallbackRouter(LifecycleComponent):
             def realtime_audio_callback(audio_data):
                 """实时音频流回调"""
                 try:
-                    # [DEBUG] 记录回调被调用
-                    app_logger.log_audio_event(
-                        "Realtime audio callback invoked",
-                        {
-                            "audio_length": len(audio_data),
-                            "dtype": str(audio_data.dtype),
-                        },
-                    )
-
                     # 发送到 streaming coordinator 的 realtime 处理
-                    partial_text = (
-                        self._speech_service.streaming_coordinator.add_realtime_audio(
-                            audio_data
-                        )
+                    self._speech_service.streaming_coordinator.add_realtime_audio(
+                        audio_data
                     )
-
-                    # [DEBUG] 记录返回结果
-                    if partial_text:
-                        app_logger.log_audio_event(
-                            "Realtime partial text received", {"text": partial_text}
-                        )
 
                     # 同时更新音频电平（用于波形显示）
                     if len(audio_data) > 0:
-                        level = float(np.sqrt(np.mean(audio_data**2)))
+                        level = self._compute_audio_level(audio_data)
                         self._events.emit(Events.AUDIO_LEVEL_UPDATE, level)
 
                 except Exception as e:
@@ -210,9 +193,23 @@ class AudioCallbackRouter(LifecycleComponent):
         try:
             if len(audio_data) > 0:
                 # 计算音频电平
-                level = float(np.sqrt(np.mean(audio_data**2)))
+                level = self._compute_audio_level(audio_data)
                 # 发送音频电平更新事件（UI可以监听此事件更新波形）
                 self._events.emit(Events.AUDIO_LEVEL_UPDATE, level)
 
         except Exception as e:
             app_logger.log_error(e, "_on_audio_data")
+
+    @staticmethod
+    def _compute_audio_level(audio_data: np.ndarray) -> float:
+        """计算音频RMS电平。
+
+        使用点积避免 ``audio_data**2`` 的额外临时数组分配。
+        """
+        samples = np.asarray(audio_data, dtype=np.float32)
+        sample_count = samples.size
+        if sample_count == 0:
+            return 0.0
+
+        mean_square = float(np.dot(samples, samples)) / sample_count
+        return float(np.sqrt(mean_square))

@@ -6,7 +6,7 @@ to avoid rate limits on long recordings by sending audio in periodic chunks duri
 """
 
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import numpy as np
@@ -216,19 +216,28 @@ class CloudChunkAccumulator:
         results: List[Tuple[int, str]] = []
         failed_chunks: List[int] = []
         timed_out_chunks: List[int] = []
+        started_at = time.monotonic()
+        future_to_meta: Dict[Future, Tuple[int, float, float]] = {}
+        deadlines: Dict[Future, float] = {}
 
         for chunk_id, future, audio_length in self._chunks:
-            # Calculate dynamic timeout based on audio length (at least 30 seconds)
             audio_duration = (
                 audio_length / self._sample_rate if audio_length > 0 else 0.0
             )
             per_chunk_timeout = max(timeout, audio_duration * 2.0)
+            future_to_meta[future] = (chunk_id, audio_duration, per_chunk_timeout)
+            deadlines[future] = started_at + per_chunk_timeout
 
-            try:
-                chunk_result = future.result(timeout=per_chunk_timeout)
-                results.append(chunk_result)
-            except TimeoutError:
+        pending = set(future_to_meta.keys())
+        while pending:
+            now = time.monotonic()
+
+            expired_futures = [future for future in pending if now >= deadlines[future]]
+            for future in expired_futures:
+                pending.remove(future)
+                chunk_id, audio_duration, per_chunk_timeout = future_to_meta[future]
                 timed_out_chunks.append(chunk_id)
+                failed_chunks.append(chunk_id)
                 app_logger.log_audio_event(
                     "Cloud chunk transcription timeout",
                     {
@@ -237,13 +246,30 @@ class CloudChunkAccumulator:
                         "audio_duration": audio_duration,
                     },
                 )
-                failed_chunks.append(chunk_id)
-            except Exception as e:
-                app_logger.log_error(
-                    e,
-                    f"cloud_chunk_{chunk_id}_transcription_failed",
-                )
-                failed_chunks.append(chunk_id)
+
+            if not pending:
+                break
+
+            wait_timeout = min(
+                max(deadlines[future] - time.monotonic(), 0.0) for future in pending
+            )
+            done, _ = wait(pending, timeout=wait_timeout, return_when=FIRST_COMPLETED)
+
+            if not done:
+                continue
+
+            for future in done:
+                pending.remove(future)
+                chunk_id, _, _ = future_to_meta[future]
+                try:
+                    chunk_result = future.result()
+                    results.append(chunk_result)
+                except Exception as e:
+                    app_logger.log_error(
+                        e,
+                        f"cloud_chunk_{chunk_id}_transcription_failed",
+                    )
+                    failed_chunks.append(chunk_id)
 
         if timed_out_chunks:
             app_logger.log_audio_event(

@@ -569,7 +569,8 @@ class UnifiedLogger:
                 self._rotate_logs()
                 with open(self._log_file, "a", encoding="utf-8") as f:
                     f.write(file_msg + "\n")
-                    f.flush()
+                    if level.value >= LogLevel.WARNING.value:
+                        f.flush()
             except Exception as e:
                 print(f"[LOG ERROR] Failed to write to log file: {e}", file=sys.stderr)
 

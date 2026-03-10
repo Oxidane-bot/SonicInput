@@ -1,4 +1,5 @@
 from concurrent.futures import Future
+import time
 from unittest.mock import Mock
 
 import numpy as np
@@ -50,4 +51,27 @@ def test_get_results_filters_whitespace_only_chunk_text(monkeypatch):
     assert result["stats"]["successful_chunks"] == 4
     assert result["stats"]["non_empty_chunks"] == 2
     assert result["stats"]["empty_chunks"] == 2
+    accumulator.shutdown()
+
+
+def test_get_results_uses_shared_deadline_for_parallel_futures(monkeypatch):
+    accumulator = CloudChunkAccumulator(Mock(), sample_rate=16000)
+    monkeypatch.setattr(accumulator, "_flush_chunk", lambda: None)
+
+    future_a = Future()
+    future_b = Future()
+    accumulator._chunks = [
+        (0, future_a, 1600),
+        (1, future_b, 1600),
+    ]
+    accumulator._chunk_counter = len(accumulator._chunks)
+
+    started = time.perf_counter()
+    result = accumulator.get_results(timeout=0.05)
+    elapsed = time.perf_counter() - started
+
+    assert result["text"] == ""
+    assert sorted(result["stats"]["failed_chunk_ids"]) == [0, 1]
+    # 单块动态超时约 0.20s，若串行等待两块应接近 0.40s
+    assert elapsed < 0.32
     accumulator.shutdown()

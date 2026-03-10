@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sonicinput"
-version = "0.6.4"
+version = "0.7.0"
 description = "Lightweight voice input tool powered by sherpa-onnx and cloud ASR"
 requires-python = ">=3.10"
 
@@ -28,6 +28,9 @@ dependencies = [
     "cryptography>=46.0.3",
     # 云转录支持
     "groq>=0.9.0",
+    "wtpsplit-lite==0.2.0",
+    "onnxruntime==1.23.2",
+    "socksio==1.0.0",
 ]
 
 [project.optional-dependencies]

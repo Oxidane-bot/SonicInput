@@ -314,6 +314,20 @@ class AITab(BaseSettingsTab):
         )
         common_layout.addRow("", self.filter_thinking_checkbox)
 
+        self.sentence_split_checkbox = QCheckBox(
+            "Enable sentence split (3-5 sentence batches)"
+        )
+        self.sentence_split_checkbox.setToolTip(
+            "Split text and send 3-5 sentence batches to reduce perceived latency"
+        )
+        common_layout.addRow("", self.sentence_split_checkbox)
+
+        self.first_chunk_output_checkbox = QCheckBox("Start AI after first ASR chunk")
+        self.first_chunk_output_checkbox.setToolTip(
+            "Requires sentence split. Start AI on the first completed ASR chunk and keep writing incrementally"
+        )
+        common_layout.addRow("", self.first_chunk_output_checkbox)
+
         self.api_timeout_spinbox = QSpinBox()
         self.api_timeout_spinbox.setRange(5, 120)
         self.api_timeout_spinbox.setSuffix(" seconds")
@@ -393,6 +407,8 @@ class AITab(BaseSettingsTab):
             "openai_compatible_model": self.openai_compatible_model_input,
             "refresh_openai_compatible_models_btn": self.refresh_openai_compatible_models_button,
             "ai_enabled": self.ai_enabled_checkbox,
+            "sentence_split": self.sentence_split_checkbox,
+            "first_chunk_output": self.first_chunk_output_checkbox,
             "api_timeout": self.api_timeout_spinbox,
             "api_retries": self.api_retries_spinbox,
             "prompt": self.prompt_text_edit,
@@ -549,6 +565,26 @@ class AITab(BaseSettingsTab):
                 "AITab", "Remove AI's internal thinking process from the output"
             )
         )
+        self.sentence_split_checkbox.setText(
+            QCoreApplication.translate(
+                "AITab", "Enable sentence split (3-5 sentence batches)"
+            )
+        )
+        self.sentence_split_checkbox.setToolTip(
+            QCoreApplication.translate(
+                "AITab",
+                "Split text and send 3-5 sentence batches to reduce perceived latency",
+            )
+        )
+        self.first_chunk_output_checkbox.setText(
+            QCoreApplication.translate("AITab", "Start AI after first ASR chunk")
+        )
+        self.first_chunk_output_checkbox.setToolTip(
+            QCoreApplication.translate(
+                "AITab",
+                "Requires sentence split. Start AI on the first completed ASR chunk and keep writing incrementally",
+            )
+        )
         self.common_timeout_label.setText(
             QCoreApplication.translate("AITab", "Timeout:")
         )
@@ -677,6 +713,12 @@ class AITab(BaseSettingsTab):
         # Common AI settings
         self.ai_enabled_checkbox.setChecked(ai_config.get("enabled", True))
         self.filter_thinking_checkbox.setChecked(ai_config.get("filter_thinking", True))
+        self.sentence_split_checkbox.setChecked(
+            ai_config.get("sentence_split", {}).get("enabled", False)
+        )
+        self.first_chunk_output_checkbox.setChecked(
+            ai_config.get("first_chunk_output", {}).get("enabled", False)
+        )
         default_system_prompt = (
             "You are an advanced ASR (Automatic Speech Recognition) Correction Engine with expertise in technical terminology.\n"
             "Your goal is to restore the **intended meaning** of the speaker by fixing phonetic errors while strictly maintaining the original language and role.\n\n"
@@ -769,6 +811,12 @@ class AITab(BaseSettingsTab):
                 },
                 "enabled": self.ai_enabled_checkbox.isChecked(),
                 "filter_thinking": self.filter_thinking_checkbox.isChecked(),
+                "sentence_split": {
+                    "enabled": self.sentence_split_checkbox.isChecked(),
+                },
+                "first_chunk_output": {
+                    "enabled": self.first_chunk_output_checkbox.isChecked(),
+                },
                 "prompt": self.prompt_text_edit.toPlainText().strip(),
                 "timeout": self.api_timeout_spinbox.value(),
                 "retries": self.api_retries_spinbox.value(),
