@@ -206,6 +206,72 @@ def test_first_chunk_output_emits_incremental_text_before_final(monkeypatch):
     assert final_events[-1]["text"] == "<第一句。第二句。><第三句。第四句。>"
 
 
+def test_first_chunk_output_can_emit_before_transcription_request(monkeypatch):
+    config = DummyConfigService(
+        {
+            "ai.enabled": True,
+            "ai.provider": "openrouter",
+            "ai.openrouter.model_id": "demo-model",
+            "ai.prompt": "prompt {text}",
+            "ai.sentence_split.enabled": True,
+            "ai.first_chunk_output.enabled": True,
+        }
+    )
+    events = DummyEventService()
+    controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=DummyStateManager(),
+        history_service=DummyHistoryService(),
+    )
+    monkeypatch.setattr(controller, "_get_current_ai_service", lambda: FakeAIService())
+
+    controller._on_recording_started()
+    controller._on_streaming_chunk_completed(
+        {
+            "chunk_id": 0,
+            "result": {
+                "success": True,
+                "text": "第一句。第二句。第三",
+            },
+        }
+    )
+
+    incremental_events = [
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_INCREMENTAL_TEXT_UPDATED
+    ]
+    assert len(incremental_events) == 1
+    assert incremental_events[0]["text"] == "<第一句。第二句。>"
+    assert incremental_events[0]["streaming_mode"] == "chunked"
+
+    controller._on_transcription_request(
+        {
+            "record_id": "r-prestop",
+            "audio_duration": 12.0,
+            "recording_stop_time": time.time(),
+        }
+    )
+    controller._on_transcription_completed(
+        {
+            "record_id": "r-prestop",
+            "text": "第一句。第二句。第三句。",
+            "streaming_mode": "chunked",
+            "audio_duration": 12.0,
+            "recording_stop_time": time.time(),
+        }
+    )
+
+    final_events = [
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_PROCESSED_TEXT
+    ]
+    assert final_events[-1]["incremental_output_used"] is True
+    assert final_events[-1]["text"] == "<第一句。第二句。><第三句。>"
+
+
 def test_first_chunk_output_waits_for_contiguous_chunks(monkeypatch):
     config = DummyConfigService(
         {

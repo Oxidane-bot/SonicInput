@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import numpy as np
 
+from sonicinput.core.base.lifecycle_component import ComponentState
 from sonicinput.core.services.transcription_service_refactored import (
     RefactoredTranscriptionService,
 )
@@ -33,6 +34,7 @@ def test_stop_streaming_chunked_adds_context_overlap_and_dedupes_text() -> None:
 
     service.streaming_coordinator.get_streaming_mode.return_value = "chunked"
     service.streaming_coordinator.get_pending_chunks.return_value = [chunk1, chunk2]
+    service.streaming_coordinator.get_completed_chunks.return_value = []
     service.streaming_coordinator.stop_streaming.return_value = {"mode": "chunked"}
 
     result = service.stop_streaming()
@@ -91,3 +93,28 @@ def test_wait_for_chunk_results_uses_shared_timeout_budget() -> None:
     assert sorted(timed_out) == [0, 1]
     # 若按串行超时，耗时会接近 0.10s；共享预算应明显低于该值
     assert elapsed < 0.085
+
+
+def test_add_streaming_chunk_submits_immediate_transcription_task() -> None:
+    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service._state = ComponentState.RUNNING
+    service._CHUNK_CONTEXT_OVERLAP_SECONDS = 0.6
+    service._streaming_chunk_prev_tail = np.array([8.0, 9.0], dtype=np.float32)
+    service.task_queue_manager = Mock()
+    service.streaming_coordinator = Mock()
+    service.streaming_coordinator.add_streaming_chunk.return_value = 7
+
+    audio = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+
+    chunk_id = service.add_streaming_chunk(audio)
+
+    assert chunk_id == 7
+    submitted = service.task_queue_manager.submit_task.call_args.kwargs
+    assert submitted["task_type"] == "process_streaming_chunk"
+    assert submitted["priority"].name == "HIGH"
+    assert submitted["data"]["chunk_id"] == 7
+    assert np.array_equal(
+        submitted["data"]["audio_data"],
+        np.array([8.0, 9.0, 1.0, 2.0, 3.0], dtype=np.float32),
+    )
+    assert np.array_equal(service._streaming_chunk_prev_tail, audio)

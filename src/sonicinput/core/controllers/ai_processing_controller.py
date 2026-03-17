@@ -170,16 +170,16 @@ class AIProcessingController(
         self._current_record_id = None
         self._last_incremental_output_used = False
         self._reset_chunk_ai_state()
+        self._chunk_ai_base_event_data = {"streaming_mode": "chunked"}
 
     def _on_transcription_error(self, data: Any = None) -> None:
         self._reset_chunk_ai_state()
 
     def _on_transcription_request(self, data: dict) -> None:
         self._current_record_id = data.get("record_id")
-        self._last_incremental_output_used = False
-        self._reset_chunk_ai_state()
         self._chunk_ai_base_event_data = {
-            "streaming_mode": "chunked",
+            **({"streaming_mode": "chunked"}),
+            **self._chunk_ai_base_event_data,
             "record_id": self._current_record_id,
             "audio_duration": data.get("audio_duration", 0.0),
             "recording_stop_time": data.get("recording_stop_time"),

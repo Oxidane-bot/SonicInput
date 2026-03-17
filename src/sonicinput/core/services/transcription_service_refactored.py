@@ -97,6 +97,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
         # 状态管理（LifecycleComponent 提供 _state，不需要 _is_started）
         self._service_lock = threading.RLock()
+        self._streaming_chunk_prev_tail = np.array([], dtype=np.float32)
 
         # 注册任务处理器
         self._register_task_handlers()
@@ -353,6 +354,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         if not self.is_running:
             raise RuntimeError("Transcription service is not started")
 
+        self._streaming_chunk_prev_tail = np.array([], dtype=np.float32)
         self.streaming_coordinator.start_streaming()
 
         app_logger.audio("Streaming transcription started", {})
@@ -385,6 +387,8 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             # 获取所有待处理的块
             pending_chunks = self.streaming_coordinator.get_pending_chunks()
             pending_chunks = sorted(pending_chunks, key=lambda c: c.chunk_id)
+            completed_chunks = self.streaming_coordinator.get_completed_chunks()
+            completed_chunks = sorted(completed_chunks, key=lambda c: c.chunk_id)
 
             app_logger.audio(
                 "Processing pending chunks before stopping",
@@ -393,43 +397,41 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
             # 为每个待处理的块提交转录任务,并保存块的引用
             pending_chunk_refs = []
-            overlap_samples = int(self._CHUNK_CONTEXT_OVERLAP_SECONDS * 16000)
+            overlap_samples = self._get_chunk_overlap_samples()
             prev_tail = np.array([], dtype=np.float32)
-            for chunk in pending_chunks:
+            pending_chunk_ids = {chunk.chunk_id for chunk in pending_chunks}
+            ordered_chunks = sorted(
+                [*completed_chunks, *pending_chunks], key=lambda chunk: chunk.chunk_id
+            )
+            for chunk in ordered_chunks:
                 chunk_audio = chunk.audio_data
-                task_audio = chunk_audio
+                if chunk.chunk_id in pending_chunk_ids:
+                    task_audio = self._build_streaming_task_audio(
+                        chunk_audio, prev_tail
+                    )
+                    task_data = {"chunk_id": chunk.chunk_id, "audio_data": task_audio}
 
-                # 为当前块补充上一块尾部上下文，缓解块边界丢字问题
-                if overlap_samples > 0 and len(prev_tail) > 0:
-                    task_audio = np.concatenate([prev_tail, chunk_audio], axis=0)
+                    # 提交到任务队列进行转录
+                    self.task_queue_manager.submit_task(
+                        task_type="process_streaming_chunk",
+                        data=task_data,
+                        priority=TaskPriority.HIGH,
+                    )
 
-                task_data = {"chunk_id": chunk.chunk_id, "audio_data": task_audio}
+                    # 保存块的完整引用(包括result_event和result_container)
+                    pending_chunk_refs.append(chunk)
 
-                # 提交到任务队列进行转录
-                self.task_queue_manager.submit_task(
-                    task_type="process_streaming_chunk",
-                    data=task_data,
-                    priority=TaskPriority.HIGH,
-                )
+                    app_logger.audio(
+                        "Submitted pending chunk for transcription",
+                        {
+                            "chunk_id": chunk.chunk_id,
+                            "audio_length": len(chunk_audio),
+                            "task_audio_length": len(task_audio),
+                            "context_overlap_samples": len(prev_tail),
+                        },
+                    )
 
-                # 保存块的完整引用(包括result_event和result_container)
-                pending_chunk_refs.append(chunk)
-
-                app_logger.audio(
-                    "Submitted pending chunk for transcription",
-                    {
-                        "chunk_id": chunk.chunk_id,
-                        "audio_length": len(chunk_audio),
-                        "task_audio_length": len(task_audio),
-                        "context_overlap_samples": len(prev_tail),
-                    },
-                )
-
-                if overlap_samples > 0:
-                    if len(chunk_audio) > overlap_samples:
-                        prev_tail = chunk_audio[-overlap_samples:].copy()
-                    else:
-                        prev_tail = chunk_audio.copy()
+                prev_tail = self._extract_chunk_tail(chunk_audio, overlap_samples)
 
             # 使用统一起点等待，避免在异常场景下按“块数 × 超时”线性放大总耗时
             timed_out_chunks = self._wait_for_chunk_results(pending_chunk_refs)
@@ -466,6 +468,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
             # 停止流式模式
             stats = self.streaming_coordinator.stop_streaming()
+            self._streaming_chunk_prev_tail = np.array([], dtype=np.float32)
 
             app_logger.audio("Streaming transcription stopped", stats)
 
@@ -607,7 +610,53 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         if not self.is_running:
             raise RuntimeError("Transcription service is not started")
 
-        return self.streaming_coordinator.add_streaming_chunk(audio_data)
+        chunk_id = self.streaming_coordinator.add_streaming_chunk(audio_data)
+        if chunk_id < 0:
+            return chunk_id
+
+        task_audio = self._build_streaming_task_audio(
+            audio_data, self._streaming_chunk_prev_tail
+        )
+        self.task_queue_manager.submit_task(
+            task_type="process_streaming_chunk",
+            data={"chunk_id": chunk_id, "audio_data": task_audio},
+            priority=TaskPriority.HIGH,
+            max_retries=0,
+        )
+        self._streaming_chunk_prev_tail = self._extract_chunk_tail(
+            audio_data, self._get_chunk_overlap_samples()
+        )
+
+        app_logger.audio(
+            "Streaming chunk submitted for immediate transcription",
+            {
+                "chunk_id": chunk_id,
+                "audio_length": len(audio_data),
+                "task_audio_length": len(task_audio),
+            },
+        )
+
+        return chunk_id
+
+    def _get_chunk_overlap_samples(self) -> int:
+        return int(self._CHUNK_CONTEXT_OVERLAP_SECONDS * 16000)
+
+    def _extract_chunk_tail(
+        self, audio_data: np.ndarray, overlap_samples: int
+    ) -> np.ndarray:
+        if overlap_samples <= 0 or len(audio_data) == 0:
+            return np.array([], dtype=np.float32)
+        if len(audio_data) > overlap_samples:
+            return audio_data[-overlap_samples:].copy()
+        return audio_data.copy()
+
+    def _build_streaming_task_audio(
+        self, audio_data: np.ndarray, prev_tail: Optional[np.ndarray]
+    ) -> np.ndarray:
+        overlap_samples = self._get_chunk_overlap_samples()
+        if overlap_samples <= 0 or prev_tail is None or len(prev_tail) == 0:
+            return audio_data
+        return np.concatenate([prev_tail, audio_data], axis=0)
 
     def load_model_async(
         self,
