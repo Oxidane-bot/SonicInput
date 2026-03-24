@@ -1,9 +1,12 @@
 from unittest.mock import Mock
 
 from sonicinput.core.controllers.transcription_controller import TranscriptionController
+from sonicinput.core.services.events import Events
 
 
-def _build_controller(streaming_text: str) -> tuple[TranscriptionController, Mock]:
+def _build_controller(
+    streaming_text: str, streaming_mode: str = "chunked"
+) -> tuple[TranscriptionController, Mock, Mock]:
     speech_service = Mock()
     speech_service.stop_streaming.return_value = {"text": streaming_text, "stats": {}}
 
@@ -18,7 +21,7 @@ def _build_controller(streaming_text: str) -> tuple[TranscriptionController, Moc
     history_service = Mock()
     history_service.save_record.return_value = True
     streaming_manager = Mock()
-    streaming_manager.get_current_mode.return_value = "chunked"
+    streaming_manager.get_current_mode.return_value = streaming_mode
 
     controller = TranscriptionController(
         speech_service=speech_service,
@@ -33,11 +36,11 @@ def _build_controller(streaming_text: str) -> tuple[TranscriptionController, Moc
     controller._current_audio_file_path = "C:/audio.wav"
     controller._audio_duration = 42.0
     controller._recording_stop_time = 1700000000.0
-    return controller, history_service
+    return controller, history_service, event_service
 
 
 def test_history_record_persists_diagnostics_with_fallback_flag() -> None:
-    controller, history_service = _build_controller(streaming_text="   ")
+    controller, history_service, _ = _build_controller(streaming_text="   ")
     controller._sync_transcribe_last_audio = Mock(return_value="fallback result")
 
     controller.process_streaming_transcription()
@@ -53,7 +56,7 @@ def test_history_record_persists_diagnostics_with_fallback_flag() -> None:
 
 
 def test_history_record_persists_diagnostics_without_fallback() -> None:
-    controller, history_service = _build_controller(streaming_text="direct text")
+    controller, history_service, _ = _build_controller(streaming_text="direct text")
     controller._sync_transcribe_last_audio = Mock(return_value="unused")
 
     controller.process_streaming_transcription()
@@ -65,3 +68,25 @@ def test_history_record_persists_diagnostics_without_fallback() -> None:
     assert saved_record.fallback_reason is None
     assert saved_record.diagnostics_collected is True
     assert saved_record.transcription_duration >= 0.0
+
+
+def test_realtime_transcription_keeps_final_text_for_history_and_events() -> None:
+    controller, history_service, event_service = _build_controller(
+        streaming_text="live final text",
+        streaming_mode="realtime",
+    )
+
+    controller.process_streaming_transcription()
+
+    saved_record = history_service.save_record.call_args.args[0]
+    assert saved_record.streaming_mode == "realtime"
+    assert saved_record.transcription_text == "live final text"
+    assert saved_record.final_text == "live final text"
+
+    completed_calls = [
+        call
+        for call in event_service.emit.call_args_list
+        if call.args and call.args[0] == Events.TRANSCRIPTION_COMPLETED
+    ]
+    assert completed_calls
+    assert completed_calls[-1].args[1]["text"] == "live final text"

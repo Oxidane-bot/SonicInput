@@ -1,5 +1,6 @@
 """历史记录存储服务实现"""
 
+import re
 import sqlite3
 import threading
 import uuid
@@ -10,8 +11,11 @@ from typing import Generator, List, Optional, Tuple
 
 from ....utils import app_logger
 from ...base.lifecycle_component import LifecycleComponent
-from ...interfaces import HistoryRecord, IConfigService
+from ...interfaces import HistoryRecord, ICacheService, IConfigService
 from ...services.config import ConfigKeys
+
+# 默认统计缓存 TTL（秒）
+_STATS_CACHE_TTL = 30
 
 
 class HistoryStorageService(LifecycleComponent):
@@ -22,20 +26,69 @@ class HistoryStorageService(LifecycleComponent):
     """
 
     _FTS_TABLE_NAME = "history_records_fts"
+    _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-    def __init__(self, config_service: IConfigService):
+    def __init__(
+        self,
+        config_service: IConfigService,
+        cache_service: Optional[ICacheService] = None,
+    ):
         """初始化历史存储服务
 
         Args:
             config_service: 配置服务
+            cache_service: 缓存服务（可选），用于统计查询缓存
         """
         super().__init__("HistoryStorageService")
         self._config_service = config_service
+        self._cache_service = cache_service
         self._db_path: Optional[Path] = None
         self._storage_path: Optional[Path] = None
         self._local = threading.local()  # 线程本地存储，每个线程独立的数据库连接
         self._fts_enabled = False
         self._fts_tokenizer = "disabled"
+
+    # ------------------------------------------------------------------
+    # 统计缓存方法
+    # ------------------------------------------------------------------
+
+    def _sql_identifier(self, identifier: str) -> str:
+        """返回经过校验的 SQL identifier。
+
+        SQLite 不能对表名/列名使用参数绑定，因此这里只允许受控标识符。
+        """
+        if not self._SQL_IDENTIFIER_RE.match(identifier):
+            raise ValueError(f"Invalid SQL identifier: {identifier!r}")
+        return identifier
+
+    def _make_stats_cache_key(
+        self,
+        query: Optional[str],
+        start_date: Optional[datetime],
+        end_date: Optional[datetime],
+        transcription_status: Optional[str],
+        ai_status: Optional[str],
+        stat_type: str,
+    ) -> str:
+        """生成统计缓存键"""
+        parts = [
+            stat_type,
+            query or "",
+            start_date.isoformat() if start_date else "",
+            end_date.isoformat() if end_date else "",
+            transcription_status or "",
+            ai_status or "",
+        ]
+        return "|".join(parts)
+
+    def _invalidate_stats_cache(self) -> None:
+        """使所有统计缓存失效"""
+        if self._cache_service:
+            self._cache_service.clear()
+
+    # ------------------------------------------------------------------
+    # 生命周期方法
+    # ------------------------------------------------------------------
 
     def _do_start(self) -> bool:
         """Start history storage and initialize database"""
@@ -191,6 +244,7 @@ class HistoryStorageService(LifecycleComponent):
         """确保文本搜索索引可用（优先 FTS5，失败时回退 LIKE）。"""
         self._fts_enabled = False
         self._fts_tokenizer = "disabled"
+        fts_table = self._sql_identifier(self._FTS_TABLE_NAME)
 
         try:
             cursor.execute(
@@ -206,7 +260,7 @@ class HistoryStorageService(LifecycleComponent):
                     # trigram 对子串查询更友好，优先尝试
                     cursor.execute(
                         f"""
-                        CREATE VIRTUAL TABLE {self._FTS_TABLE_NAME}
+                        CREATE VIRTUAL TABLE {fts_table}
                         USING fts5(
                             record_id UNINDEXED,
                             transcription_text,
@@ -215,12 +269,13 @@ class HistoryStorageService(LifecycleComponent):
                             tokenize = 'trigram'
                         )
                         """
+                        # nosec B608
                     )
                     created_with = "trigram"
                 except sqlite3.OperationalError:
                     cursor.execute(
                         f"""
-                        CREATE VIRTUAL TABLE {self._FTS_TABLE_NAME}
+                        CREATE VIRTUAL TABLE {fts_table}
                         USING fts5(
                             record_id UNINDEXED,
                             transcription_text,
@@ -229,6 +284,7 @@ class HistoryStorageService(LifecycleComponent):
                             tokenize = 'unicode61'
                         )
                         """
+                        # nosec B608
                     )
                 table_sql = f"tokenize='{created_with}'"
 
@@ -236,12 +292,11 @@ class HistoryStorageService(LifecycleComponent):
                 "trigram" if "trigram" in table_sql.lower() else "unicode61"
             )
 
-            cursor.execute(
-                f"""
+            trigger_insert_sql = f"""
                 CREATE TRIGGER IF NOT EXISTS trg_history_records_fts_insert
                 AFTER INSERT ON history_records
                 BEGIN
-                    INSERT INTO {self._FTS_TABLE_NAME} (
+                    INSERT INTO {fts_table} (
                         record_id,
                         transcription_text,
                         ai_optimized_text,
@@ -255,15 +310,15 @@ class HistoryStorageService(LifecycleComponent):
                     );
                 END;
                 """
-            )
+            # nosec B608
+            cursor.execute(trigger_insert_sql)
 
-            cursor.execute(
-                f"""
+            trigger_update_sql = f"""
                 CREATE TRIGGER IF NOT EXISTS trg_history_records_fts_update
                 AFTER UPDATE ON history_records
                 BEGIN
-                    DELETE FROM {self._FTS_TABLE_NAME} WHERE record_id = old.id;
-                    INSERT INTO {self._FTS_TABLE_NAME} (
+                    DELETE FROM {fts_table} WHERE record_id = old.id;
+                    INSERT INTO {fts_table} (
                         record_id,
                         transcription_text,
                         ai_optimized_text,
@@ -277,29 +332,29 @@ class HistoryStorageService(LifecycleComponent):
                     );
                 END;
                 """
-            )
+            # nosec B608
+            cursor.execute(trigger_update_sql)
 
-            cursor.execute(
-                f"""
+            trigger_delete_sql = f"""
                 CREATE TRIGGER IF NOT EXISTS trg_history_records_fts_delete
                 AFTER DELETE ON history_records
                 BEGIN
-                    DELETE FROM {self._FTS_TABLE_NAME} WHERE record_id = old.id;
+                    DELETE FROM {fts_table} WHERE record_id = old.id;
                 END;
                 """
-            )
+            # nosec B608
+            cursor.execute(trigger_delete_sql)
 
             cursor.execute("SELECT COUNT(*) FROM history_records")
             source_count = int(cursor.fetchone()[0] or 0)
-            cursor.execute(f"SELECT COUNT(*) FROM {self._FTS_TABLE_NAME}")
+            cursor.execute(f"SELECT COUNT(*) FROM {fts_table}")  # nosec B608
             fts_count = int(cursor.fetchone()[0] or 0)
 
             # 行数不一致时重建索引，避免旧库升级后索引缺失
             if fts_count != source_count:
-                cursor.execute(f"DELETE FROM {self._FTS_TABLE_NAME}")
-                cursor.execute(
-                    f"""
-                    INSERT INTO {self._FTS_TABLE_NAME} (
+                cursor.execute(f"DELETE FROM {fts_table}")  # nosec B608
+                rebuild_index_sql = f"""
+                    INSERT INTO {fts_table} (
                         record_id,
                         transcription_text,
                         ai_optimized_text,
@@ -312,7 +367,8 @@ class HistoryStorageService(LifecycleComponent):
                         COALESCE(final_text, '')
                     FROM history_records
                     """
-                )
+                # nosec B608
+                cursor.execute(rebuild_index_sql)
 
             self._fts_enabled = True
             app_logger.log_audio_event(
@@ -477,6 +533,7 @@ class HistoryStorageService(LifecycleComponent):
                 "History record saved",
                 {"record_id": record.id, "thread_id": threading.get_ident()},
             )
+            self._invalidate_stats_cache()
             return True
 
         except sqlite3.IntegrityError as e:
@@ -554,6 +611,7 @@ class HistoryStorageService(LifecycleComponent):
                 "History record updated",
                 {"record_id": record.id, "thread_id": threading.get_ident()},
             )
+            self._invalidate_stats_cache()
             return True
 
         except Exception as e:
@@ -625,6 +683,7 @@ class HistoryStorageService(LifecycleComponent):
                     "thread_id": threading.get_ident(),
                 },
             )
+            self._invalidate_stats_cache()
             return saved_count
 
         except Exception as e:
@@ -828,12 +887,13 @@ class HistoryStorageService(LifecycleComponent):
                 if self._fts_enabled
                 else None
             )
+            fts_table = self._sql_identifier(self._FTS_TABLE_NAME)
 
             if fts_match:
                 conditions.append(
                     "id IN ("
-                    f"SELECT record_id FROM {self._FTS_TABLE_NAME} "
-                    f"WHERE {self._FTS_TABLE_NAME} MATCH ?"
+                    f"SELECT record_id FROM {fts_table} "
+                    f"WHERE {fts_table} MATCH ?"
                     ")"
                 )
                 params.append(fts_match)
@@ -1014,6 +1074,7 @@ class HistoryStorageService(LifecycleComponent):
             app_logger.log_audio_event(
                 "History record deleted", {"record_id": record_id}
             )
+            self._invalidate_stats_cache()
 
             return True
 
@@ -1039,13 +1100,22 @@ class HistoryStorageService(LifecycleComponent):
         transcription_status: Optional[str] = None,
         ai_status: Optional[str] = None,
     ) -> int:
-        """获取记录总数（用于分页，线程安全）"""
+        """获取记录总数（用于分页，线程安全，带缓存）"""
         if not self._db_path:
             app_logger.log_audio_event(
                 "HistoryStorageService not initialized (get_total_count)",
                 {"_db_path": None, "message": "Service _do_start() may have failed"},
             )
             return 0
+
+        # 尝试从缓存获取
+        cache_key = self._make_stats_cache_key(
+            query, start_date, end_date, transcription_status, ai_status, "total_count"
+        )
+        if self._cache_service:
+            cached = self._cache_service.get(cache_key)
+            if cached is not None:
+                return cached  # type: ignore[return-value]
 
         try:
             conn = self._get_connection()
@@ -1066,8 +1136,14 @@ class HistoryStorageService(LifecycleComponent):
 
             cursor.execute(sql, params)
 
-            result = cursor.fetchone()
-            return result[0] if result else 0
+            result_row = cursor.fetchone()
+            result = result_row[0] if result_row else 0
+
+            # 写入缓存
+            if self._cache_service:
+                self._cache_service.set(cache_key, result, ttl=_STATS_CACHE_TTL)
+
+            return result
 
         except Exception as e:
             app_logger.log_error(e, "get_total_count")
@@ -1081,7 +1157,7 @@ class HistoryStorageService(LifecycleComponent):
         transcription_status: Optional[str] = None,
         ai_status: Optional[str] = None,
     ) -> tuple[int, float, int]:
-        """获取聚合统计信息（线程安全）
+        """获取聚合统计信息（线程安全，带缓存）
 
         Returns:
             (total_count, total_duration, success_count)
@@ -1092,6 +1168,20 @@ class HistoryStorageService(LifecycleComponent):
                 {"_db_path": None, "message": "Service _do_start() may have failed"},
             )
             return (0, 0.0, 0)
+
+        # 尝试从缓存获取
+        cache_key = self._make_stats_cache_key(
+            query,
+            start_date,
+            end_date,
+            transcription_status,
+            ai_status,
+            "aggregate_stats",
+        )
+        if self._cache_service:
+            cached = self._cache_service.get(cache_key)
+            if cached is not None:
+                return cached  # type: ignore[return-value]
 
         try:
             conn = self._get_connection()
@@ -1129,12 +1219,19 @@ class HistoryStorageService(LifecycleComponent):
             cursor.execute(sql, params)
             row = cursor.fetchone()
             if not row:
-                return (0, 0.0, 0)
+                result = (0, 0.0, 0)
+            else:
+                result = (
+                    int(row[0] or 0),
+                    float(row[1] or 0.0),
+                    int(row[2] or 0),
+                )
 
-            total_count = int(row[0] or 0)
-            total_duration = float(row[1] or 0.0)
-            success_count = int(row[2] or 0)
-            return (total_count, total_duration, success_count)
+            # 写入缓存
+            if self._cache_service:
+                self._cache_service.set(cache_key, result, ttl=_STATS_CACHE_TTL)
+
+            return result
 
         except Exception as e:
             app_logger.log_error(e, "get_aggregate_stats")

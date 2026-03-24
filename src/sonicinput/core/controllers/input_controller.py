@@ -49,6 +49,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         # Realtime 模式状态追踪（用于实时文本差量更新）
         self._last_realtime_text: str = ""  # 上一次输入的实时文本
         self._last_incremental_ai_text: str = ""
+        self._last_streaming_ai_text: str = ""
 
         # NOTE: Event listener registration moved to _do_start() for hot reload support
         # NOTE: Initialization logging moved to _do_start() for hot reload support
@@ -64,6 +65,9 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         self._track_listener(
             Events.AI_INCREMENTAL_TEXT_UPDATED,
             self._on_ai_incremental_text_updated,
+        )
+        self._track_listener(
+            Events.AI_STREAMING_TOKEN_RECEIVED, self._on_ai_streaming_token
         )
 
         # 实时文本更新（realtime 模式）
@@ -88,6 +92,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         """
         # 从事件数据中获取实际的 streaming_mode，而不是依赖本地标志
         streaming_mode = data.get("streaming_mode", "chunked")
+        streaming_output_used = data.get("streaming_output_used", False)
 
         # 关键修复：realtime模式下，文本已经在录音过程中实时输入了
         # 不应该在录音结束后再输入一遍
@@ -116,7 +121,16 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         text = data.get("text", "")
         incremental_output_used = data.get("incremental_output_used", False)
 
-        if incremental_output_used:
+        if streaming_output_used:
+            self._apply_live_text_update(
+                new_text=text,
+                previous_text=self._last_streaming_ai_text,
+                update_state_attr="_last_streaming_ai_text",
+                shrink_guard_ratio=None,
+                log_context="AI streaming final text",
+            )
+            self._finish_text_input(text, data)
+        elif incremental_output_used:
             self._apply_live_text_update(
                 new_text=text,
                 previous_text=self._last_incremental_ai_text,
@@ -164,7 +178,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         log_context: str,
         shrink_guard_ratio: float | None,
     ) -> None:
-        if not new_text or new_text == previous_text:
+        if new_text == previous_text or (not new_text and not previous_text):
             return
 
         app_logger.log_audio_event(
@@ -331,6 +345,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         # 重置 realtime 文本追踪（用于实时文本差量更新）
         self._last_realtime_text = ""
         self._last_incremental_ai_text = ""
+        self._last_streaming_ai_text = ""
 
         # 启动录音模式：SmartTextInput会保存原始剪贴板，并在录音期间禁用中途restore
         try:
@@ -380,6 +395,8 @@ class InputController(LifecycleComponent, BaseController, IInputController):
     def _on_ai_incremental_text_updated(self, data: dict) -> None:
         """处理 AI 分组完成后的增量文本更新。"""
         try:
+            if data.get("streaming_output_used", False):
+                return
             self._apply_live_text_update(
                 new_text=data.get("text", ""),
                 previous_text=self._last_incremental_ai_text,
@@ -389,6 +406,22 @@ class InputController(LifecycleComponent, BaseController, IInputController):
             )
         except Exception as e:
             app_logger.log_error(e, "_on_ai_incremental_text_updated")
+
+    def _on_ai_streaming_token(self, data: dict) -> None:
+        """处理 AI 流式事件，使用累计文本做差量更新。"""
+        try:
+            streaming_text = data.get("streaming_text", "")
+            if not streaming_text and not self._last_streaming_ai_text:
+                return
+            self._apply_live_text_update(
+                new_text=streaming_text,
+                previous_text=self._last_streaming_ai_text,
+                update_state_attr="_last_streaming_ai_text",
+                shrink_guard_ratio=None,
+                log_context="AI streaming text",
+            )
+        except Exception as e:
+            app_logger.log_error(e, "_on_ai_streaming_token")
 
     def _on_transcription_error_restore_clipboard(self, error_msg: str) -> None:
         """处理转录错误事件 - 恢复剪贴板

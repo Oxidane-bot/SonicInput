@@ -71,6 +71,7 @@ class ApplicationOrchestrator:
         self._current_phase = InitializationPhase.NOT_STARTED
         self._startup_complete = False
         self._initialization_error: Optional[Exception] = None
+        self._lazy_model_load_state = "idle"
 
         # 回调管理
         self._startup_callbacks: Dict[str, List[Callable]] = {}
@@ -124,9 +125,9 @@ class ApplicationOrchestrator:
             )
             self._execute_phase(InitializationPhase.CONTROLLERS, self._init_controllers)
             self._execute_phase(InitializationPhase.HOTKEY_SETUP, self._init_hotkeys)
-            self._execute_phase(
-                InitializationPhase.MODEL_LOADING, self._init_model_loading
-            )
+            # 懒加载模型：首次录制时才加载，跳过启动时的 MODEL_LOADING 阶段
+            # 首次 RECORDING_STARTED 事件会触发 _load_model_async()
+            self._init_model_loading()
 
             # 标记启动完成
             self._current_phase = InitializationPhase.COMPLETED
@@ -193,6 +194,7 @@ class ApplicationOrchestrator:
 
             self._current_phase = InitializationPhase.NOT_STARTED
             self._startup_complete = False
+            self._lazy_model_load_state = "idle"
 
             app_logger.log_audio_event("Application shutdown completed", {})
 
@@ -298,54 +300,93 @@ class ApplicationOrchestrator:
         )
 
     def _init_model_loading(self) -> None:
-        """初始化模型加载阶段"""
-        if self._should_enable_auto_load():
-            provider = self.config.get_setting(
-                ConfigKeys.TRANSCRIPTION_PROVIDER, "local"
-            )
-            if not self._speech_service:
-                app_logger.log_audio_event(
-                    "Skipping model loading: speech service not available", {}
-                )
-                return
-            if (
-                hasattr(self._speech_service, "is_running")
-                and not self._speech_service.is_running
-            ):
-                app_logger.log_audio_event(
-                    "Skipping model loading: speech service not running",
-                    {"provider": provider},
-                )
-                return
-            if not hasattr(self._speech_service, "load_model_async"):
-                app_logger.log_audio_event(
-                    "Skipping model loading: async load not supported",
-                    {"provider": provider},
-                )
-                return
-            if provider == "local":
-                model_name = self.config.get_setting(
-                    ConfigKeys.TRANSCRIPTION_LOCAL_MODEL, "paraformer"
-                )
-                from sonicinput.speech.sherpa_models import SherpaModelManager
+        """初始化模型加载阶段（懒加载模式）
 
-                cache_checker = SherpaModelManager()
-                if cache_checker.is_model_cached(model_name):
-                    app_logger.log_audio_event(
-                        "Auto-loading model on startup", {"model_name": model_name}
-                    )
-                    self._load_model_async(model_name, download_if_missing=False)
-                else:
-                    app_logger.log_audio_event(
-                        "Skipping auto-load: local model not cached",
-                        {"model_name": model_name},
-                    )
-            else:
-                # 云端模式不需要预加载模型
+        不在启动时加载模型，而是订阅 RECORDING_STARTED 事件，
+        在用户首次按下热键开始录制时才触发模型加载。
+        """
+        if not self._should_enable_auto_load():
+            return
+        provider = self.config.get_setting(ConfigKeys.TRANSCRIPTION_PROVIDER, "local")
+        if provider != "local":
+            app_logger.log_audio_event(
+                "Lazy model loading: cloud provider, skipping preload",
+                {"provider": provider},
+            )
+            return
+
+        if self._is_speech_model_loaded():
+            self._lazy_model_load_state = "loaded"
+            return
+
+        model_name = self.config.get_setting(
+            ConfigKeys.TRANSCRIPTION_LOCAL_MODEL, "paraformer"
+        )
+        from sonicinput.speech.sherpa_models import SherpaModelManager
+
+        cache_checker = SherpaModelManager()
+        if not cache_checker.is_model_cached(model_name):
+            app_logger.log_audio_event(
+                "Lazy model loading: model not cached, will load on first recording",
+                {"model_name": model_name},
+            )
+            # 模型未缓存时仍订阅事件，首次录制时触发下载+加载
+            self._register_lazy_model_load(model_name)
+            return
+
+        app_logger.log_audio_event(
+            "Lazy model loading: model cached, will load on first recording",
+            {"model_name": model_name},
+        )
+        self._register_lazy_model_load(model_name)
+
+    def _register_lazy_model_load(self, model_name: str) -> None:
+        """注册懒加载回调：首次 RECORDING_STARTED 时触发模型加载"""
+        if self._lazy_model_load_state != "idle":
+            return
+
+        def on_first_recording(_data: Any = None) -> None:
+            if self._lazy_model_load_state != "idle":
+                return
+            # 保险检查：模型可能已在其他地方加载
+            if self._is_speech_model_loaded():
+                self._lazy_model_load_state = "loaded"
                 app_logger.log_audio_event(
-                    "Skipping model loading for cloud provider", {"provider": provider}
+                    "Lazy load: model already loaded, skipping", {}
                 )
                 return
+            try:
+                self._lazy_model_load_state = "loading"
+                app_logger.log_audio_event(
+                    "Lazy load: first recording detected, loading model",
+                    {"model_name": model_name},
+                )
+                if not self._load_model_async(model_name, download_if_missing=True):
+                    self._handle_lazy_model_load_failure(
+                        model_name,
+                        "Unable to start lazy model loading",
+                    )
+            except Exception as e:
+                self._handle_lazy_model_load_failure(model_name, str(e))
+
+        self.events.once(Events.RECORDING_STARTED, on_first_recording)
+
+    def _is_speech_model_loaded(self) -> bool:
+        return bool(
+            self._speech_service is not None
+            and hasattr(self._speech_service, "is_model_loaded")
+            and self._speech_service.is_model_loaded
+        )
+
+    def _handle_lazy_model_load_failure(self, model_name: str, error_msg: str) -> None:
+        self._lazy_model_load_state = "idle"
+        app_logger.log_error(Exception(error_msg), "load_model_async")
+        self.events.emit(
+            Events.MODEL_LOADING_FAILED,
+            {"model_name": model_name, "error": error_msg},
+        )
+        self.events.emit(Events.MODEL_LOADING_ERROR, error_msg)
+        self._register_lazy_model_load(model_name)
 
     def _should_enable_auto_load(self) -> bool:
         """判断是否应该启用自动加载"""
@@ -361,14 +402,14 @@ class ApplicationOrchestrator:
 
     def _load_model_async(
         self, model_name: str, download_if_missing: bool = False
-    ) -> None:
+    ) -> bool:
         """异步加载语音模型"""
         if not self._speech_service:
             app_logger.log_audio_event(
                 "Model loading skipped: speech service not available",
                 {"model_name": model_name},
             )
-            return
+            return False
         if (
             hasattr(self._speech_service, "is_running")
             and not self._speech_service.is_running
@@ -377,13 +418,13 @@ class ApplicationOrchestrator:
                 "Model loading skipped: speech service not running",
                 {"model_name": model_name},
             )
-            return
+            return False
         if not hasattr(self._speech_service, "load_model_async"):
             app_logger.log_audio_event(
                 "Model loading skipped: async load not supported",
                 {"model_name": model_name},
             )
-            return
+            return False
         self.events.emit(Events.MODEL_LOADING_STARTED)
 
         def on_success(result: Dict[str, Any]):
@@ -398,6 +439,13 @@ class ApplicationOrchestrator:
             success = result.get("success", False)
             result_model_name = result.get("model_name", model_name)
             model_info = result.get("model_info", {})
+
+            if not success:
+                self._handle_lazy_model_load_failure(
+                    result_model_name,
+                    result.get("error", "Model load task returned success=False"),
+                )
+                return
 
             app_logger.log_audio_event(
                 "Model loaded successfully", {"model": result_model_name}
@@ -414,15 +462,20 @@ class ApplicationOrchestrator:
                         "device": getattr(self._speech_service, "device", "Unknown"),
                     }
 
+            self._lazy_model_load_state = "loaded"
             self.events.emit(Events.MODEL_LOADING_COMPLETED, model_info)
+            self.events.emit(Events.MODEL_LOADED, model_info)
 
         def on_error(error_msg: str):
-            app_logger.log_error(Exception(error_msg), "load_model_async")
-            self.events.emit(Events.MODEL_LOADING_ERROR, error_msg)
+            self._handle_lazy_model_load_failure(model_name, error_msg)
 
         self._speech_service.load_model_async(
-            model_name=model_name, callback=on_success, error_callback=on_error
+            model_name=model_name,
+            callback=on_success,
+            error_callback=on_error,
+            download_if_missing=download_if_missing,
         )
+        return True
 
     def _register_hot_reload_services(self) -> None:
         """注册支持热重载的服务到HotReloadManager"""

@@ -85,6 +85,7 @@ class AIProcessingController(
         self._sentence_splitter = None
         self._sentence_splitter_error: Optional[str] = None
         self._last_incremental_output_used = False
+        self._last_streaming_output_used = False
         self._chunk_text_by_id: Dict[int, str] = {}
         self._chunk_ai_refined_parts: List[str] = []
         self._chunk_ai_pending_sentences: List[str] = []
@@ -132,6 +133,7 @@ class AIProcessingController(
             self._sentence_splitter = None
             self._sentence_splitter_error = None
             self._last_incremental_output_used = False
+            self._last_streaming_output_used = False
             self._reset_chunk_ai_state()
 
             app_logger.log_audio_event("AI processing controller stopped", {})
@@ -169,6 +171,7 @@ class AIProcessingController(
     def _on_recording_started(self, data: Any = None) -> None:
         self._current_record_id = None
         self._last_incremental_output_used = False
+        self._last_streaming_output_used = False
         self._reset_chunk_ai_state()
         self._chunk_ai_base_event_data = {"streaming_mode": "chunked"}
 
@@ -187,6 +190,9 @@ class AIProcessingController(
 
     def _is_first_chunk_output_enabled(self) -> bool:
         return self._config.get_setting(ConfigKeys.AI_FIRST_CHUNK_OUTPUT_ENABLED, False)
+
+    def _is_streaming_enabled(self) -> bool:
+        return self._config.get_setting(ConfigKeys.AI_STREAMING_ENABLED, False)
 
     def _should_use_ai(self, streaming_mode: str, text: str) -> bool:
         if streaming_mode == "realtime":
@@ -305,6 +311,7 @@ class AIProcessingController(
                     **self._chunk_ai_base_event_data,
                     "original_text": text,
                 },
+                streaming_output_used=self._last_streaming_output_used,
             )
 
     def _on_streaming_chunk_completed(self, data: dict) -> None:
@@ -448,6 +455,7 @@ class AIProcessingController(
                     "ai_tps": self._last_ai_tps,
                     "streaming_mode": streaming_mode,
                     "incremental_output_used": self._last_incremental_output_used,
+                    "streaming_output_used": self._last_streaming_output_used,
                     **data_copy,  # 保留原始数据（audio_duration等）
                 },
             )
@@ -482,6 +490,8 @@ class AIProcessingController(
                     "original_text": text,
                     "streaming_mode": streaming_mode,
                     "skip_reason": skip_reason,
+                    "incremental_output_used": False,
+                    "streaming_output_used": False,
                     **data_copy,
                 },
             )
@@ -635,6 +645,7 @@ class AIProcessingController(
         self,
         text: str,
         incremental_event_data: Optional[Dict[str, Any]],
+        streaming_output_used: bool = False,
     ) -> None:
         if not incremental_event_data or not text.strip():
             return
@@ -643,6 +654,7 @@ class AIProcessingController(
         payload["text"] = text
         payload["incremental"] = True
         payload["incremental_output_used"] = True
+        payload["streaming_output_used"] = streaming_output_used
         payload["ai_tps"] = self._last_ai_tps
         self._events.emit(Events.AI_INCREMENTAL_TEXT_UPDATED, payload)
 
@@ -666,6 +678,7 @@ class AIProcessingController(
         actual_record_id = (
             record_id if record_id is not None else self._current_record_id
         )
+        streaming_output_used = False
 
         try:
             self._events.emit(Events.AI_PROCESSING_STARTED)
@@ -702,19 +715,53 @@ class AIProcessingController(
 
                 if group_count > 1:
                     refined_parts: List[str] = []
-                    for group in groups:
+
+                    def make_streaming_callback(group_idx: int) -> Any:
+                        """为每个分组创建 token 回调"""
+                        accumulated: List[str] = []
+
+                        def on_token(token: str) -> None:
+                            accumulated.append(token)
+                            streaming_text = self._join_refined_groups(
+                                [*refined_parts, "".join(accumulated)]
+                            )
+                            self._events.emit(
+                                Events.AI_STREAMING_TOKEN_RECEIVED,
+                                {
+                                    "token": token,
+                                    "group_index": group_idx,
+                                    "accumulated": "".join(accumulated),
+                                    "streaming_text": streaming_text,
+                                },
+                            )
+
+                        return on_token
+
+                    use_streaming = self._is_streaming_enabled()
+                    streaming_output_used = use_streaming
+
+                    for idx, group in enumerate(groups):
                         group_text = "".join(group).strip()
                         if not group_text:
                             continue
-                        refined_part = ai_service.refine_text(
-                            group_text, prompt_template, model
-                        )
+                        if use_streaming:
+                            refined_part = ai_service.refine_text_streaming(
+                                group_text,
+                                prompt_template,
+                                model,
+                                on_token=make_streaming_callback(idx),
+                            )
+                        else:
+                            refined_part = ai_service.refine_text(
+                                group_text, prompt_template, model
+                            )
                         refined_parts.append(refined_part)
                         self._last_ai_tps = getattr(ai_service, "_last_tps", 0.0)
                         cumulative_text = self._join_refined_groups(refined_parts)
                         self._emit_incremental_ai_text(
                             cumulative_text,
                             incremental_event_data,
+                            streaming_output_used=use_streaming,
                         )
                         incremental_output_used = True
                     refined_text = (
@@ -723,9 +770,51 @@ class AIProcessingController(
                         else text
                     )
                 else:
-                    refined_text = ai_service.refine_text(text, prompt_template, model)
+                    if self._is_streaming_enabled():
+                        streaming_output_used = True
+                        accumulated_tokens: List[str] = []
+
+                        def single_token_callback(token: str) -> None:
+                            accumulated_tokens.append(token)
+                            self._events.emit(
+                                Events.AI_STREAMING_TOKEN_RECEIVED,
+                                {
+                                    "token": token,
+                                    "group_index": 0,
+                                    "accumulated": "".join(accumulated_tokens),
+                                    "streaming_text": "".join(accumulated_tokens),
+                                },
+                            )
+
+                        refined_text = ai_service.refine_text_streaming(
+                            text, prompt_template, model, on_token=single_token_callback
+                        )
+                    else:
+                        refined_text = ai_service.refine_text(
+                            text, prompt_template, model
+                        )
             else:
-                refined_text = ai_service.refine_text(text, prompt_template, model)
+                if self._is_streaming_enabled():
+                    streaming_output_used = True
+                    accumulated_tokens: List[str] = []
+
+                    def plain_token_callback(token: str) -> None:
+                        accumulated_tokens.append(token)
+                        self._events.emit(
+                            Events.AI_STREAMING_TOKEN_RECEIVED,
+                            {
+                                "token": token,
+                                "group_index": -1,
+                                "accumulated": "".join(accumulated_tokens),
+                                "streaming_text": "".join(accumulated_tokens),
+                            },
+                        )
+
+                    refined_text = ai_service.refine_text_streaming(
+                        text, prompt_template, model, on_token=plain_token_callback
+                    )
+                else:
+                    refined_text = ai_service.refine_text(text, prompt_template, model)
 
             app_logger.log_audio_event(
                 "AI sentence split status",
@@ -740,6 +829,7 @@ class AIProcessingController(
             self._last_incremental_output_used = (
                 self._last_incremental_output_used or incremental_output_used
             )
+            self._last_streaming_output_used = streaming_output_used
 
             # 保存TPS到实例变量
             self._last_ai_tps = getattr(ai_service, "_last_tps", 0.0)
@@ -864,6 +954,8 @@ class AIProcessingController(
 
             self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text
+        finally:
+            self._last_streaming_output_used = streaming_output_used
 
     def is_ai_enabled(self) -> bool:
         """AI是否启用"""

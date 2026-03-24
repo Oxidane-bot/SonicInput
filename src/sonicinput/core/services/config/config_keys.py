@@ -105,6 +105,9 @@ class ConfigKeys:
     AI_FIRST_CHUNK_OUTPUT_ENABLED = "ai.first_chunk_output.enabled"
     """首块ASR完成即触发AI输出 (bool): chunked模式下按分块尽早启动AI"""
 
+    AI_STREAMING_ENABLED = "ai.streaming_enabled"
+    """AI流式输出开关 (bool): 启用后AI响应以token级实时显示（默认关闭）"""
+
     AI_TIMEOUT = "ai.timeout"
     """AI请求超时 (int): 秒"""
 
@@ -409,6 +412,7 @@ class ConfigKeyGroups:
         ConfigKeys.AI_PROMPT,
         ConfigKeys.AI_SENTENCE_SPLIT_ENABLED,
         ConfigKeys.AI_FIRST_CHUNK_OUTPUT_ENABLED,
+        ConfigKeys.AI_STREAMING_ENABLED,
     ]
 
     AUDIO = [

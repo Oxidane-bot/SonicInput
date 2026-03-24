@@ -1891,9 +1891,9 @@ class SettingsWindow(QMainWindow):
         """重置AI设置标签页"""
         ai_config = default_config.get("ai", {})
         openrouter_config = ai_config.get("openrouter", {})
-
-        # 重置API密钥为空（安全起见）
-        self.api_key_input.clear()
+        groq_config = ai_config.get("groq", {})
+        nvidia_config = ai_config.get("nvidia", {})
+        openai_compatible_config = ai_config.get("openai_compatible", {})
 
         # 重置模型ID和提示词（使用新路径）
         model_id = openrouter_config.get("model_id", "anthropic/claude-3-sonnet")
@@ -1951,12 +1951,61 @@ class SettingsWindow(QMainWindow):
         )
         prompt = ai_config.get("prompt", default_system_prompt)
 
-        self.ai_model_input.setText(model_id)
-        self.prompt_text_edit.setPlainText(prompt)
-
         # 保存到配置（新路径）
+        self.ui_settings_service.set_setting(
+            "ai.provider", ai_config.get("provider", "openrouter")
+        )
+        self.ui_settings_service.set_setting(
+            "ai.enabled", ai_config.get("enabled", True)
+        )
+        self.ui_settings_service.set_setting(
+            "ai.filter_thinking", ai_config.get("filter_thinking", True)
+        )
+        self.ui_settings_service.set_setting(
+            "ai.sentence_split.enabled",
+            ai_config.get("sentence_split", {}).get("enabled", False),
+        )
+        self.ui_settings_service.set_setting(
+            "ai.first_chunk_output.enabled",
+            ai_config.get("first_chunk_output", {}).get("enabled", False),
+        )
+        self.ui_settings_service.set_setting(
+            "ai.streaming_enabled", ai_config.get("streaming_enabled", False)
+        )
+        self.ui_settings_service.set_setting("ai.timeout", ai_config.get("timeout", 30))
+        self.ui_settings_service.set_setting("ai.retries", ai_config.get("retries", 3))
+        self.ui_settings_service.set_setting(
+            "ai.openrouter.api_key", openrouter_config.get("api_key", "")
+        )
         self.ui_settings_service.set_setting("ai.openrouter.model_id", model_id)
+        self.ui_settings_service.set_setting(
+            "ai.groq.api_key", groq_config.get("api_key", "")
+        )
+        self.ui_settings_service.set_setting(
+            "ai.groq.model_id",
+            groq_config.get("model_id", "llama-3.3-70b-versatile"),
+        )
+        self.ui_settings_service.set_setting(
+            "ai.nvidia.api_key", nvidia_config.get("api_key", "")
+        )
+        self.ui_settings_service.set_setting(
+            "ai.nvidia.model_id",
+            nvidia_config.get("model_id", "meta/llama-3.1-8b-instruct"),
+        )
+        self.ui_settings_service.set_setting(
+            "ai.openai_compatible.api_key",
+            openai_compatible_config.get("api_key", ""),
+        )
+        self.ui_settings_service.set_setting(
+            "ai.openai_compatible.base_url",
+            openai_compatible_config.get("base_url", "http://localhost:1234/v1"),
+        )
+        self.ui_settings_service.set_setting(
+            "ai.openai_compatible.model_id",
+            openai_compatible_config.get("model_id", "local-model"),
+        )
         self.ui_settings_service.set_setting("ai.prompt", prompt)
+        self.update_ui_from_config()
 
     def _reset_audio_input_tab(self, default_config) -> None:
         """重置音频和输入设置标签页 (Audio and Input Tab - merged Audio + Input)"""

@@ -795,3 +795,19 @@ class TestLaunchAtLoginSetting:
         assert captured["changes"] is not None
         assert captured["changes"]["ui.launch_at_login"] is True
         assert captured["changes"]["ui.start_minimized"] is True
+
+
+@pytest.mark.gui
+class TestAIStreamingSetting:
+    def test_ai_tab_exposes_streaming_checkbox(self, qtbot, settings_window):
+        assert hasattr(settings_window.ai_tab, "ai_streaming_checkbox")
+        assert settings_window.ai_tab.ai_streaming_checkbox is not None
+
+    def test_ai_tab_save_includes_streaming_enabled(self, qtbot, settings_window):
+        settings_window.ai_tab.ai_streaming_checkbox.setChecked(True)
+        saved = settings_window.ai_tab.save_config()
+        assert saved["ai"]["streaming_enabled"] is True
+
+    def test_ai_tab_load_reads_streaming_enabled(self, qtbot, settings_window):
+        settings_window.ai_tab.load_config({"ai": {"streaming_enabled": True}})
+        assert settings_window.ai_tab.ai_streaming_checkbox.isChecked() is True

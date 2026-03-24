@@ -3,6 +3,7 @@
 负责录音的启动、停止和状态管理。
 """
 
+import inspect
 import time
 import uuid
 from typing import Optional
@@ -176,9 +177,25 @@ class RecordingController(LifecycleComponent, IRecordingController):
                 {"mode": streaming_mode, "provider": provider},
             )
 
+            if (
+                provider == "local"
+                and streaming_mode == "realtime"
+                and not self._ensure_local_realtime_model_ready()
+            ):
+                return
+
             # 启动流式会话（如果支持）
             if streaming_mode != "disabled":
-                self._streaming_manager.start_streaming_session()
+                if not self._streaming_manager.start_streaming_session():
+                    app_logger.log_audio_event(
+                        "Failed to start streaming session",
+                        {"mode": streaming_mode, "provider": provider},
+                    )
+                    self._events.emit(
+                        Events.RECORDING_ERROR,
+                        "Unable to start streaming transcription session",
+                    )
+                    return
 
             # 根据模式注册回调
             if streaming_mode == "chunked":
@@ -220,6 +237,61 @@ class RecordingController(LifecycleComponent, IRecordingController):
             # 转换为用户友好消息
             error_info = ErrorMessageTranslator.translate(e, "recording")
             self._events.emit(Events.RECORDING_ERROR, error_info["user_message"])
+
+    def _ensure_local_realtime_model_ready(self) -> bool:
+        """确保本地 realtime 录音在开始前已有可用模型。"""
+        if not self._speech_service or not hasattr(
+            self._speech_service, "is_model_loaded"
+        ):
+            self._events.emit(
+                Events.RECORDING_ERROR,
+                "Local speech service is not available for realtime recording",
+            )
+            return False
+
+        if self._speech_service.is_model_loaded:
+            return True
+
+        if not hasattr(self._speech_service, "load_model"):
+            self._events.emit(
+                Events.RECORDING_ERROR,
+                "Local speech service cannot load realtime model",
+            )
+            return False
+
+        model_name = self._config.get_setting(
+            ConfigKeys.TRANSCRIPTION_LOCAL_MODEL, "paraformer"
+        )
+        app_logger.log_audio_event(
+            "Loading local model before realtime recording",
+            {"model_name": model_name},
+        )
+
+        try:
+            load_model_signature = inspect.signature(self._speech_service.load_model)
+            if "download_if_missing" in load_model_signature.parameters:
+                load_success = self._speech_service.load_model(
+                    model_name,
+                    download_if_missing=True,
+                )
+            else:
+                load_success = self._speech_service.load_model(model_name)
+
+            if load_success:
+                return True
+        except Exception as e:
+            app_logger.log_error(e, "ensure_local_realtime_model_ready")
+            self._events.emit(
+                Events.RECORDING_ERROR,
+                "Failed to load local model for realtime recording",
+            )
+            return False
+
+        self._events.emit(
+            Events.RECORDING_ERROR,
+            "Failed to load local model for realtime recording",
+        )
+        return False
 
     def stop_recording(self) -> None:
         """停止录音"""

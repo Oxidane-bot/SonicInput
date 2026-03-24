@@ -328,6 +328,12 @@ class AITab(BaseSettingsTab):
         )
         common_layout.addRow("", self.first_chunk_output_checkbox)
 
+        self.ai_streaming_checkbox = QCheckBox("Enable AI streaming output")
+        self.ai_streaming_checkbox.setToolTip(
+            "Display AI-refined text live while the provider streams tokens"
+        )
+        common_layout.addRow("", self.ai_streaming_checkbox)
+
         self.api_timeout_spinbox = QSpinBox()
         self.api_timeout_spinbox.setRange(5, 120)
         self.api_timeout_spinbox.setSuffix(" seconds")
@@ -409,6 +415,7 @@ class AITab(BaseSettingsTab):
             "ai_enabled": self.ai_enabled_checkbox,
             "sentence_split": self.sentence_split_checkbox,
             "first_chunk_output": self.first_chunk_output_checkbox,
+            "streaming_enabled": self.ai_streaming_checkbox,
             "api_timeout": self.api_timeout_spinbox,
             "api_retries": self.api_retries_spinbox,
             "prompt": self.prompt_text_edit,
@@ -439,6 +446,7 @@ class AITab(BaseSettingsTab):
             self.refresh_openai_compatible_models_button
         )
         self.parent_window.ai_enabled_checkbox = self.ai_enabled_checkbox
+        self.parent_window.ai_streaming_checkbox = self.ai_streaming_checkbox
         self.parent_window.api_timeout_spinbox = self.api_timeout_spinbox
         self.parent_window.api_retries_spinbox = self.api_retries_spinbox
         self.parent_window.prompt_text_edit = self.prompt_text_edit
@@ -585,6 +593,15 @@ class AITab(BaseSettingsTab):
                 "Requires sentence split. Start AI on the first completed ASR chunk and keep writing incrementally",
             )
         )
+        self.ai_streaming_checkbox.setText(
+            QCoreApplication.translate("AITab", "Enable AI streaming output")
+        )
+        self.ai_streaming_checkbox.setToolTip(
+            QCoreApplication.translate(
+                "AITab",
+                "Display AI-refined text live while the provider streams tokens",
+            )
+        )
         self.common_timeout_label.setText(
             QCoreApplication.translate("AITab", "Timeout:")
         )
@@ -719,6 +736,7 @@ class AITab(BaseSettingsTab):
         self.first_chunk_output_checkbox.setChecked(
             ai_config.get("first_chunk_output", {}).get("enabled", False)
         )
+        self.ai_streaming_checkbox.setChecked(ai_config.get("streaming_enabled", False))
         default_system_prompt = (
             "You are an advanced ASR (Automatic Speech Recognition) Correction Engine with expertise in technical terminology.\n"
             "Your goal is to restore the **intended meaning** of the speaker by fixing phonetic errors while strictly maintaining the original language and role.\n\n"
@@ -817,6 +835,7 @@ class AITab(BaseSettingsTab):
                 "first_chunk_output": {
                     "enabled": self.first_chunk_output_checkbox.isChecked(),
                 },
+                "streaming_enabled": self.ai_streaming_checkbox.isChecked(),
                 "prompt": self.prompt_text_edit.toPlainText().strip(),
                 "timeout": self.api_timeout_spinbox.value(),
                 "retries": self.api_retries_spinbox.value(),

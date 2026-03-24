@@ -58,6 +58,14 @@ class FakeAIService:
         return f"<{text}>"
 
 
+class FakeStreamingAIService(FakeAIService):
+    def refine_text_streaming(self, text, prompt_template, model, on_token):
+        refined = f"<{text}>"
+        for token in refined:
+            on_token(token)
+        return refined
+
+
 class DummyInputService:
     def __init__(self):
         self.inputs = []
@@ -142,6 +150,138 @@ def test_input_controller_does_not_duplicate_final_incremental_ai_text():
     assert events.emitted[-1][0] == Events.TEXT_INPUT_COMPLETED
 
 
+def test_ai_processing_streaming_events_carry_cumulative_text(monkeypatch):
+    config = DummyConfigService(
+        {
+            "ai.enabled": True,
+            "ai.provider": "openrouter",
+            "ai.openrouter.model_id": "demo-model",
+            "ai.prompt": "prompt {text}",
+            "ai.sentence_split.enabled": True,
+            "ai.streaming_enabled": True,
+        }
+    )
+    events = DummyEventService()
+    controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=DummyStateManager(),
+        history_service=DummyHistoryService(),
+    )
+    monkeypatch.setattr(
+        controller, "_get_current_ai_service", lambda: FakeStreamingAIService()
+    )
+
+    final_text = controller.process_with_ai(
+        "第一句。第二句。第三句。第四句。第五句。第六句。",
+        incremental_event_data={"streaming_mode": "chunked"},
+    )
+
+    streaming_events = [
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_STREAMING_TOKEN_RECEIVED
+    ]
+    incremental_events = [
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_INCREMENTAL_TEXT_UPDATED
+    ]
+
+    assert streaming_events
+    assert all("streaming_text" in data for data in streaming_events)
+    assert incremental_events[0]["streaming_output_used"] is True
+    assert incremental_events[-1]["text"] == final_text
+
+
+def test_input_controller_streaming_final_reconcile_does_not_duplicate_text():
+    input_service = DummyInputService()
+    events = DummyEventService()
+    controller = InputController(
+        input_service=input_service,
+        config_service=DummyConfigService({}),
+        event_service=events,
+        state_manager=DummyStateManager(),
+    )
+
+    controller._on_recording_started()
+    controller._on_ai_streaming_token({"streaming_text": "你"})
+    controller._on_ai_streaming_token({"streaming_text": "你好"})
+    controller._on_ai_incremental_text_updated(
+        {"text": "你好", "streaming_output_used": True}
+    )
+    controller._on_text_ready_for_input(
+        {
+            "text": "你好",
+            "streaming_mode": "chunked",
+            "streaming_output_used": True,
+            "recording_stop_time": time.time(),
+            "audio_duration": 1.0,
+            "transcribe_duration": 0.5,
+        }
+    )
+
+    assert input_service.inputs == ["你", "好"]
+    assert input_service.stop_calls == 1
+    assert events.emitted[-1][0] == Events.TEXT_INPUT_COMPLETED
+
+
+def test_input_controller_streaming_final_reconcile_can_replace_partial_text():
+    input_service = DummyInputService()
+    events = DummyEventService()
+    controller = InputController(
+        input_service=input_service,
+        config_service=DummyConfigService({}),
+        event_service=events,
+        state_manager=DummyStateManager(),
+    )
+
+    controller._on_recording_started()
+    controller._on_ai_streaming_token({"streaming_text": "优"})
+    controller._on_ai_streaming_token({"streaming_text": "优化"})
+    controller._on_text_ready_for_input(
+        {
+            "text": "原文",
+            "streaming_mode": "chunked",
+            "streaming_output_used": True,
+            "recording_stop_time": time.time(),
+            "audio_duration": 1.0,
+            "transcribe_duration": 0.5,
+        }
+    )
+
+    assert input_service.inputs == ["优", "化", "\b\b", "原文"]
+    assert input_service.stop_calls == 1
+
+
+def test_input_controller_realtime_final_text_is_not_reinserted():
+    input_service = DummyInputService()
+    events = DummyEventService()
+    controller = InputController(
+        input_service=input_service,
+        config_service=DummyConfigService({}),
+        event_service=events,
+        state_manager=DummyStateManager(),
+    )
+
+    controller._on_recording_started()
+    controller._on_realtime_text_updated({"text": "实时"})
+    controller._on_realtime_text_updated({"text": "实时文本"})
+    controller._on_text_ready_for_input(
+        {
+            "text": "实时文本",
+            "streaming_mode": "realtime",
+            "recording_stop_time": time.time(),
+            "audio_duration": 1.0,
+            "transcribe_duration": 0.1,
+        }
+    )
+
+    assert input_service.inputs == ["实时", "文本"]
+    assert input_service.stop_calls == 1
+    assert events.emitted[-1] == (Events.TEXT_INPUT_COMPLETED, "")
+
+
 def test_first_chunk_output_emits_incremental_text_before_final(monkeypatch):
     config = DummyConfigService(
         {
@@ -204,6 +344,72 @@ def test_first_chunk_output_emits_incremental_text_before_final(monkeypatch):
     ]
     assert final_events[-1]["incremental_output_used"] is True
     assert final_events[-1]["text"] == "<第一句。第二句。><第三句。第四句。>"
+
+
+def test_first_chunk_streaming_marks_incremental_event_as_streaming(monkeypatch):
+    config = DummyConfigService(
+        {
+            "ai.enabled": True,
+            "ai.provider": "openrouter",
+            "ai.openrouter.model_id": "demo-model",
+            "ai.prompt": "prompt {text}",
+            "ai.sentence_split.enabled": True,
+            "ai.first_chunk_output.enabled": True,
+            "ai.streaming_enabled": True,
+        }
+    )
+    events = DummyEventService()
+    ai_controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=DummyStateManager(),
+        history_service=DummyHistoryService(),
+    )
+    monkeypatch.setattr(
+        ai_controller, "_get_current_ai_service", lambda: FakeStreamingAIService()
+    )
+
+    ai_controller._on_recording_started()
+    ai_controller._on_streaming_chunk_completed(
+        {
+            "chunk_id": 0,
+            "result": {
+                "success": True,
+                "text": "第一句。第二句。第三",
+            },
+        }
+    )
+
+    streaming_events = [
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_STREAMING_TOKEN_RECEIVED
+    ]
+    incremental_events = [
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.AI_INCREMENTAL_TEXT_UPDATED
+    ]
+
+    assert streaming_events
+    assert len(incremental_events) == 1
+    assert incremental_events[0]["text"] == "<第一句。第二句。>"
+    assert incremental_events[0]["streaming_output_used"] is True
+
+    input_service = DummyInputService()
+    input_controller = InputController(
+        input_service=input_service,
+        config_service=DummyConfigService({}),
+        event_service=events,
+        state_manager=DummyStateManager(),
+    )
+    input_controller._on_recording_started()
+
+    for payload in streaming_events:
+        input_controller._on_ai_streaming_token(payload)
+    input_controller._on_ai_incremental_text_updated(incremental_events[0])
+
+    assert "".join(input_service.inputs) == "<第一句。第二句。>"
 
 
 def test_first_chunk_output_can_emit_before_transcription_request(monkeypatch):

@@ -216,18 +216,6 @@ class TranscriptionController(
                 elif not isinstance(text, str):
                     text = str(text)
 
-            # 关键修复：Realtime模式下，文本已在录音过程中实时输入，清空最终文本避免重复
-            if streaming_mode == "realtime":
-                app_logger.log_audio_event(
-                    "Realtime mode: text already input during recording, clearing final text to prevent duplicate",
-                    {"original_text_length": len(text)},
-                )
-                text = ""  # 清空文本，避免重复输入
-
-                # 关键修复：realtime 模式下手动触发完成流程，让 RecordingOverlay 能够隐藏
-                self._events.emit(Events.TEXT_INPUT_COMPLETED, "")
-                self._state_manager.set_app_state(AppState.IDLE)
-
             # Chunked 模式下如果最终文本为空（含仅空白），执行 fallback。
             # 本地提供商走同步转录；云提供商走文件转录。
             if streaming_mode == "chunked" and not text.strip():

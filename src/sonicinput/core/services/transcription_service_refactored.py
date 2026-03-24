@@ -4,8 +4,10 @@
 职责单一，专注于组件协调而非具体实现。
 """
 
+import multiprocessing
 import threading
 import time
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
@@ -22,6 +24,104 @@ from .model_manager import ModelManager
 from .streaming_coordinator import StreamingCoordinator
 from .task_queue_manager import TaskPriority, TaskQueueManager
 from .transcription_core import TranscriptionCore
+
+
+# ---------------------------------------------------------------------------
+# 多进程转写：模块级函数，可在子进程中执行（可 pickle）
+# ---------------------------------------------------------------------------
+
+# 进程级全局变量：每个子进程加载一次模型
+_PROCESS_ENGINE: Optional[Any] = None
+_PROCESS_MODEL_CONFIG: Optional[Dict[str, Any]] = None
+
+
+def _init_subprocess_worker(model_config: Dict[str, Any]) -> None:
+    """子进程初始化函数：加载 whisper 模型（每进程只执行一次）"""
+    global _PROCESS_ENGINE, _PROCESS_MODEL_CONFIG
+    _PROCESS_MODEL_CONFIG = model_config
+
+    try:
+        import sherpa_onnx
+
+        if model_config["model_type"] == "paraformer":
+            _PROCESS_ENGINE = sherpa_onnx.OnlineRecognizer.from_paraformer(
+                tokens=model_config["tokens"],
+                encoder=model_config["encoder"],
+                decoder=model_config["decoder"],
+                num_threads=model_config.get("num_threads", 4),
+                sample_rate=16000,
+                feature_dim=80,
+                decoding_method=model_config.get("decoding_method", "greedy_search"),
+                enable_endpoint_detection=False,
+                provider=model_config.get("provider", "cpu"),
+            )
+        elif model_config["model_type"] == "zipformer":
+            _PROCESS_ENGINE = sherpa_onnx.OnlineRecognizer.from_transducer(
+                tokens=model_config["tokens"],
+                encoder=model_config["encoder"],
+                decoder=model_config["decoder"],
+                joiner=model_config["joiner"],
+                num_threads=model_config.get("num_threads", 4),
+                sample_rate=16000,
+                feature_dim=80,
+                decoding_method=model_config.get("decoding_method", "greedy_search"),
+                enable_endpoint_detection=False,
+                provider=model_config.get("provider", "cpu"),
+            )
+        else:
+            raise ValueError(f"Unknown model type: {model_config['model_type']}")
+    except Exception as e:
+        _PROCESS_ENGINE = None
+        raise RuntimeError(f"Failed to load model in subprocess: {e}") from e
+
+
+def _transcribe_in_subprocess(task_data: Dict[str, Any]) -> Dict[str, Any]:
+    """在子进程中执行音频转写（供 ProcessPoolExecutor 调用）"""
+    global _PROCESS_ENGINE
+
+    if _PROCESS_ENGINE is None:
+        return {"success": False, "text": "", "error": "Model not loaded in subprocess"}
+
+    audio_data = task_data["audio_data"]
+
+    try:
+        # sherpa_onnx 已在 _init_subprocess_worker 中导入，此处直接使用全局引擎
+        if not isinstance(audio_data, np.ndarray):
+            audio_data = np.array(audio_data, dtype=np.float32)
+
+        # sherpa-onnx OnlineRecognizer 要求 int16 PCM 或 float32
+        # 如果是 float32（0.0-1.0范围），转为 int16
+        if audio_data.dtype == np.float32:
+            if audio_data.max() <= 1.0:
+                audio_data = (audio_data * 32767.0).astype(np.int16)
+            else:
+                audio_data = audio_data.astype(np.int16)
+
+        # 清空之前的输入
+        while not _PROCESS_ENGINE.is_started():
+            pass
+        _PROCESS_ENGINE.reset()
+
+        # 分块输入音频
+        chunk_size = 5120
+        for i in range(0, len(audio_data), chunk_size):
+            chunk = audio_data[i : i + chunk_size]
+            _PROCESS_ENGINE.accept_waveform(sample_rate=16000, waveform=chunk)
+
+        # 获取转写结果
+        text_parts = []
+        while True:
+            tail = _PROCESS_ENGINE.get_text()
+            if tail:
+                text_parts.append(tail)
+            if not _PROCESS_ENGINE.is_endpoint():
+                break
+
+        text = "".join(text_parts)
+        return {"success": True, "text": text, "error": None}
+
+    except Exception as e:
+        return {"success": False, "text": "", "error": str(e)}
 
 
 class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
@@ -95,6 +195,10 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         )
         self.error_recovery_service = ErrorRecoveryService(event_service)
 
+        # 多进程池配置（用于并行转写）
+        self._transcription_pool: Optional[ProcessPoolExecutor] = None
+        self._pool_worker_count = max(1, (multiprocessing.cpu_count() or 1))
+
         # 状态管理（LifecycleComponent 提供 _state，不需要 _is_started）
         self._service_lock = threading.RLock()
         self._streaming_chunk_prev_tail = np.array([], dtype=np.float32)
@@ -106,6 +210,50 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             "RefactoredTranscriptionService initialized",
             {"streaming_mode": streaming_mode},
         )
+
+    def _get_pool_model_config(self) -> Optional[Dict[str, Any]]:
+        """获取用于子进程池的模型配置"""
+        if not self.model_manager or not self.model_manager.is_model_loaded():
+            return None
+        model_name = (
+            self.config_service.get_setting(
+                ConfigKeys.TRANSCRIPTION_LOCAL_MODEL, "paraformer"
+            )
+            if self.config_service
+            else "paraformer"
+        )
+        try:
+            return self.model_manager.get_model_config(model_name)
+        except Exception:
+            return None
+
+    def _init_transcription_pool(self) -> None:
+        """初始化多进程转写池"""
+        if self._transcription_pool is not None:
+            return
+
+        model_config = self._get_pool_model_config()
+        if model_config is None:
+            app_logger.audio("Skipping transcription pool: model not loaded", {})
+            return
+
+        try:
+            self._transcription_pool = ProcessPoolExecutor(
+                max_workers=self._pool_worker_count,
+                initializer=_init_subprocess_worker,
+                initargs=(model_config,),
+            )
+            app_logger.audio(
+                "Transcription process pool initialized",
+                {"worker_count": self._pool_worker_count, "model_config": model_config},
+            )
+        except Exception as e:
+            app_logger.error(
+                "Failed to initialize transcription pool",
+                e,
+                context={"worker_count": self._pool_worker_count},
+            )
+            self._transcription_pool = None
 
     def _do_start(self) -> bool:
         """启动转录服务 - LifecycleComponent 实现
@@ -148,6 +296,9 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                         },
                     )
 
+                # 初始化多进程转写池（在模型加载后）
+                self._init_transcription_pool()
+
                 app_logger.audio(
                     "RefactoredTranscriptionService started",
                     {
@@ -187,6 +338,12 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             try:
                 # 停止流式转录 (LifecycleComponent)
                 self.streaming_coordinator.stop()
+
+                # 停止多进程转写池
+                if self._transcription_pool is not None:
+                    self._transcription_pool.shutdown(wait=True)
+                    self._transcription_pool = None
+                    app_logger.audio("Transcription process pool stopped", {})
 
                 # 停止任务队列
                 self.task_queue_manager.stop()
@@ -617,15 +774,34 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         task_audio = self._build_streaming_task_audio(
             audio_data, self._streaming_chunk_prev_tail
         )
-        self.task_queue_manager.submit_task(
-            task_type="process_streaming_chunk",
-            data={"chunk_id": chunk_id, "audio_data": task_audio},
-            priority=TaskPriority.HIGH,
-            max_retries=0,
-        )
         self._streaming_chunk_prev_tail = self._extract_chunk_tail(
             audio_data, self._get_chunk_overlap_samples()
         )
+
+        # 优先使用多进程池进行并行转写（如果有可用池）
+        pool = getattr(self, "_transcription_pool", None)
+        if pool is not None:
+            pool = self._transcription_pool
+
+            def on_pool_result(future) -> None:
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = {"success": False, "text": "", "error": str(e)}
+                self.streaming_coordinator.complete_chunk(chunk_id, result)
+
+            pool.submit(
+                _transcribe_in_subprocess,
+                {"chunk_id": chunk_id, "audio_data": task_audio},
+            ).add_done_callback(on_pool_result)
+        else:
+            # 降级：使用任务队列（单线程）
+            self.task_queue_manager.submit_task(
+                task_type="process_streaming_chunk",
+                data={"chunk_id": chunk_id, "audio_data": task_audio},
+                priority=TaskPriority.HIGH,
+                max_retries=0,
+            )
 
         app_logger.audio(
             "Streaming chunk submitted for immediate transcription",
@@ -1147,13 +1323,18 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
     # 这些方法符合 ISpeechService 接口要求，用于兼容性
     # 推荐使用带 _async 后缀的异步版本以获得更好的性能
 
-    def load_model(self, model_name: Optional[str] = None) -> bool:
+    def load_model(
+        self,
+        model_name: Optional[str] = None,
+        download_if_missing: bool = False,
+    ) -> bool:
         """加载模型（同步阻塞）- ISpeechService 接口实现
 
         注意：这是同步阻塞调用，推荐使用 load_model_async() 异步版本
 
         Args:
             model_name: 模型名称，None 表示使用当前配置的模型
+            download_if_missing: 缺少模型文件时是否允许下载
 
         Returns:
             是否加载成功
@@ -1161,7 +1342,10 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         if not self.is_running:
             raise RuntimeError("Transcription service is not started")
 
-        return self.model_manager.load_model(model_name)
+        return self.model_manager.load_model(
+            model_name,
+            download_if_missing=download_if_missing,
+        )
 
     def unload_model(self) -> None:
         """卸载模型（同步）- ISpeechService 接口实现"""
