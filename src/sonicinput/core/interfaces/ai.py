@@ -1,5 +1,6 @@
 """AI服务接口定义"""
 
+import collections.abc
 from abc import ABC, abstractmethod
 
 
@@ -34,6 +35,32 @@ class IAIService(ABC):
             api_key: API密钥
         """
         pass
+
+    def refine_text_streaming(
+        self,
+        text: str,
+        prompt_template: str,
+        model: str,
+        on_token: "collections.abc.Callable[[str], None]",
+    ) -> str:
+        """流式优化文本（token 级实时输出）
+
+        默认实现退化为普通 refine_text，子类可覆盖以提供真正的流式输出。
+
+        Args:
+            text: 要优化的文本
+            prompt_template: 提示模板
+            model: 使用的AI模型
+            on_token: 每个 token 到达时的回调，参数为 token 字符串
+
+        Returns:
+            完整的优化后文本
+        """
+        # 默认实现：不支持流式，退化为普通调用
+        result = self.refine_text(text, prompt_template, model)
+        for token in result:
+            on_token(token)
+        return result
 
     # 移除的方法（不必需）：
     # - get_available_models: 在实际使用中不需要获取模型列表

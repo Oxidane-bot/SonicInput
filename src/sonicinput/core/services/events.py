@@ -42,6 +42,7 @@ class Events:
     AI_PROCESSING_ERROR = "ai_processing_error"
     AI_INCREMENTAL_TEXT_UPDATED = "ai_incremental_text_updated"
     AI_PROCESSED_TEXT = "ai_processed_text"
+    AI_STREAMING_TOKEN_RECEIVED = "ai_streaming_token_received"  # token 级流式输出
 
     # Text input
     TEXT_INPUT_STARTED = "text_input_started"
@@ -249,6 +250,11 @@ EVENT_METADATA: Dict[str, Dict[str, object]] = {
         "description": "AI processed text",
         "namespace": "ai",
         "tags": ["ai", "processing"],
+    },
+    Events.AI_STREAMING_TOKEN_RECEIVED: {
+        "description": "AI streaming token received",
+        "namespace": "ai",
+        "tags": ["ai", "streaming", "token"],
     },
     # Text input
     Events.TEXT_INPUT_STARTED: {

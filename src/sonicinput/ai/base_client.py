@@ -672,6 +672,151 @@ class BaseAIClient(IAIService):
         )
         return text
 
+    def refine_text_streaming(
+        self,
+        text: str,
+        prompt_template: str,
+        model: Optional[str] = None,
+        on_token: Any = None,
+        max_tokens: int = 1000,
+    ) -> str:
+        """使用 AI 流式优化文本（token 级实时输出）
+
+        Args:
+            text: 原始文本
+            prompt_template: 提示模板
+            model: 模型 ID（None 则使用默认模型）
+            on_token: 每个 token 到达时的回调，签名为 (token: str) -> None
+            max_tokens: 最大生成 token 数
+
+        Returns:
+            完整的优化后文本
+
+        Raises:
+            提供商特定的 API 错误
+        """
+        if on_token is None:
+            return self.refine_text(text, prompt_template, model, max_tokens)
+
+        if not self.api_key or not self.api_key.strip():
+            raise self._create_api_error(
+                f"API key not set for {self.get_provider_name()}"
+            )
+
+        if not text.strip():
+            return text
+
+        if model is None:
+            model = self.get_default_model()
+
+        provider = self.get_provider_name()
+
+        for attempt in range(self.max_retries):
+            try:
+                start_time = time.time()
+                request_data = self._build_request_data(
+                    text, prompt_template, model, max_tokens
+                )
+                request_data["stream"] = True
+
+                response = self.session.post(
+                    f"{self.get_base_url()}/chat/completions",
+                    json=request_data,
+                    timeout=self.timeout,
+                    stream=True,
+                )
+
+                response_time = time.time() - start_time
+
+                if response.status_code != 200:
+                    if response.status_code == 429:
+                        if self._handle_rate_limit(attempt, response_time):
+                            continue
+                    error_msg = self._handle_http_error(
+                        response.status_code, response.text, attempt, response_time
+                    )
+                    if error_msg and attempt < self.max_retries - 1:
+                        wait_time = self.retry_delay * (2**attempt)
+                        time.sleep(wait_time)
+                        continue
+                    raise self._create_api_error(
+                        f"HTTP {response.status_code}: {error_msg}"
+                    )
+
+                # 解析 SSE 流
+                full_text_parts: list[str] = []
+                token_count = 0
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+                    if not line_str.startswith("data: "):
+                        continue
+                    data_str = line_str[6:]  # strip "data: "
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        import json as _json
+
+                        chunk = _json.loads(data_str)
+                        choices = chunk.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_text_parts.append(content)
+                            token_count += 1
+                            try:
+                                on_token(content)
+                            except Exception:
+                                pass  # 回调异常不中断流程
+                    except Exception:
+                        continue
+
+                refined_text = "".join(full_text_parts)
+
+                # 过滤思考标签（如果启用）
+                if self.filter_thinking and refined_text:
+                    refined_text = self._filter_thinking_tags(refined_text)
+
+                total_time = time.time() - start_time
+                tps = token_count / total_time if total_time > 0 else 0.0
+
+                app_logger.log_api_call(
+                    provider,
+                    total_time,
+                    True,
+                    prompt_tokens=0,
+                    completion_tokens=token_count,
+                    total_tokens=token_count,
+                )
+                app_logger.log_audio_event(
+                    f"Text refined by {provider} (streaming)",
+                    {
+                        "model": model,
+                        "original_length": len(text),
+                        "refined_length": len(refined_text),
+                        "token_count": token_count,
+                        "tps": round(tps, 2),
+                        "total_time": round(total_time, 3),
+                    },
+                )
+
+                return refined_text
+
+            except requests.exceptions.Timeout:
+                if self._handle_timeout(attempt):
+                    continue
+            except requests.exceptions.RequestException:
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay * (2**attempt))
+                    continue
+                raise
+
+        return text
+
     def test_connection(self, model: Optional[str] = None) -> tuple[bool, str]:
         """测试 API 连接（使用 refine_text 复用完整的错误处理逻辑）
 

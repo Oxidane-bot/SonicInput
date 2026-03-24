@@ -213,7 +213,27 @@ class VoiceInputApp:
         self._ai_controller.start()
         self._input_controller.start()
 
+        self._sync_ui_runtime_services()
+
         app_logger.log_audio_event("All controllers initialized", {})
+
+    def _sync_ui_runtime_services(self) -> None:
+        """将最新运行时服务引用同步到 UI facade。"""
+        try:
+            from .services.ui_services import UIModelService, UISettingsService
+
+            if self.container.is_registered(UISettingsService):
+                settings_service = self.container.get(UISettingsService)
+                settings_service.sync_runtime_dependencies(
+                    transcription_service=self._speech_service,
+                    ai_processing_controller=self._ai_controller,
+                )
+
+            if self.container.is_registered(UIModelService):
+                model_service = self.container.get(UIModelService)
+                model_service.set_speech_service(self._speech_service)
+        except Exception as e:
+            app_logger.log_error(e, "sync_ui_runtime_services")
 
     def _on_hotkey_triggered(self, event_data: dict) -> None:
         """快捷键触发处理（事件回调）
@@ -298,6 +318,8 @@ class VoiceInputApp:
                     ai=self._ai_controller,
                     input=self._input_controller,
                 )
+
+            self._sync_ui_runtime_services()
 
             app_logger.log_audio_event("Controllers recreated successfully", {})
 

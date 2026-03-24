@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from sonicinput.core.interfaces import HistoryRecord
-from sonicinput.ui.settings_tabs.history_tab import BatchReprocessingWorker
+from sonicinput.ui.settings_tabs.history_workers import BatchReprocessingWorker
 
 
 class _DummyConfigService:

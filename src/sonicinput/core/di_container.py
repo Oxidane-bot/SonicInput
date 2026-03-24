@@ -277,7 +277,13 @@ def create_container() -> "DIContainer":
     from ..ai import AIClientFactory
     from ..audio import AudioRecorder
     from ..input import SmartTextInput
-    from .interfaces import IConfigService, IEventService, ISpeechService, IStateManager
+    from .interfaces import (
+        ICacheService,
+        IConfigService,
+        IEventService,
+        ISpeechService,
+        IStateManager,
+    )
     from .services.application_orchestrator import ApplicationOrchestrator
 
     # 服务实现
@@ -294,6 +300,11 @@ def create_container() -> "DIContainer":
 
     # 事件服务 - 单例（最先创建，因为其他服务依赖它）
     container.register_singleton(IEventService, DynamicEventSystem)
+
+    # 缓存服务 - 单例（无依赖，供其他服务使用）
+    from .services.cache_service import InMemoryCacheService
+
+    container.register_singleton(ICacheService, InMemoryCacheService)
 
     # 配置服务 - 单例（需要 EventService 和 Container）
     def create_config_service(container):
@@ -320,7 +331,8 @@ def create_container() -> "DIContainer":
 
     def create_history_service(container):
         config = container.resolve(IConfigService)
-        return HistoryStorageService(config)
+        cache = container.resolve(ICacheService)
+        return HistoryStorageService(config, cache_service=cache)
 
     container.register_singleton(
         HistoryStorageService, factory=lambda: create_history_service(container)

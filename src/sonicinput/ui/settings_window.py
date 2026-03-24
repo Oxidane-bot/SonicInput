@@ -89,46 +89,13 @@ class SettingsWindow(QMainWindow):
         # 创建滚轮事件过滤器（防止误触）
         self.wheel_filter = WheelEventFilter(self)
 
-        # 获取转录服务和AI处理控制器（用于HistoryTab的重处理功能）
-        transcription_service = None
-        ai_processing_controller = None
-        if hasattr(self.ui_settings_service, "get_transcription_service"):
-            transcription_service = self.ui_settings_service.get_transcription_service()
-            app_logger.log_audio_event(
-                "SettingsWindow got transcription service",
-                {
-                    "is_none": transcription_service is None,
-                    "service_type": type(transcription_service).__name__
-                    if transcription_service
-                    else "None",
-                },
-            )
-        if hasattr(self.ui_settings_service, "get_ai_processing_controller"):
-            ai_processing_controller = (
-                self.ui_settings_service.get_ai_processing_controller()
-            )
-            app_logger.log_audio_event(
-                "SettingsWindow got AI processing controller",
-                {
-                    "is_none": ai_processing_controller is None,
-                    "controller_type": type(ai_processing_controller).__name__
-                    if ai_processing_controller
-                    else "None",
-                },
-            )
-
         # 创建标签页实例
         self.application_tab = ApplicationTab(self.ui_settings_service, self)
         self.hotkey_tab = HotkeyTab(self.ui_settings_service, self)
         self.transcription_tab = TranscriptionTab(self.ui_settings_service, self)
         self.ai_tab = AITab(self.ui_settings_service, self)
         self.audio_input_tab = AudioInputTab(self.ui_settings_service, self)
-        self.history_tab = HistoryTab(
-            self.ui_settings_service,
-            self,
-            transcription_service=transcription_service,
-            ai_processing_controller=ai_processing_controller,
-        )
+        self.history_tab = HistoryTab(self.ui_settings_service, self)
 
         # 初始化UI
         self.setup_ui()
@@ -375,11 +342,7 @@ class SettingsWindow(QMainWindow):
             temp_manager = create_hotkey_manager(test_callback, backend)
 
             # Validate hotkey format via ConfigService if available
-            config_service = (
-                self.ui_settings_service.config_service
-                if hasattr(self.ui_settings_service, "config_service")
-                else None
-            )
+            config_service = self.ui_settings_service.get_config_service()
             if config_service and hasattr(config_service, "validate_before_save"):
                 is_valid, error_msg = config_service.validate_before_save(
                     "hotkey", hotkey
@@ -782,11 +745,7 @@ class SettingsWindow(QMainWindow):
                 continue
 
             # 获取ConfigService实例来调用验证方法
-            config_service = (
-                self.ui_settings_service.config_service
-                if hasattr(self.ui_settings_service, "config_service")
-                else None
-            )
+            config_service = self.ui_settings_service.get_config_service()
 
             if config_service and hasattr(config_service, "validate_before_save"):
                 is_valid, error_msg = config_service.validate_before_save(key, value)
@@ -838,11 +797,9 @@ class SettingsWindow(QMainWindow):
         try:
             # 获取事件服务
             events = self.ui_settings_service.get_event_service()
-            launch_at_login_service = None
-            if hasattr(self.ui_settings_service, "get_launch_at_login_service"):
-                launch_at_login_service = (
-                    self.ui_settings_service.get_launch_at_login_service()
-                )
+            launch_at_login_service = (
+                self.ui_settings_service.get_launch_at_login_service()
+            )
 
             # 创建事务
             transaction = ApplyTransaction(
@@ -977,12 +934,11 @@ class SettingsWindow(QMainWindow):
 
                 # 步骤6: 成功提示
                 # Apply UI language change if configured
-                if hasattr(self.ui_settings_service, "get_localization_service"):
-                    localization_service = (
-                        self.ui_settings_service.get_localization_service()
-                    )
-                    if localization_service:
-                        localization_service.apply_language()
+                localization_service = (
+                    self.ui_settings_service.get_localization_service()
+                )
+                if localization_service:
+                    localization_service.apply_language()
 
                 QMessageBox.information(
                     self,

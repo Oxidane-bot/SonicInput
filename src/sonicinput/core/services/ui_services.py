@@ -4,8 +4,8 @@
 采用纯依赖注入模式，符合SOLID原则。
 """
 
-from pathlib import Path
 import copy
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ...utils import app_logger
@@ -20,6 +20,8 @@ from ..services.storage.history_storage_service import HistoryStorageService
 
 if TYPE_CHECKING:
     from .launch_at_login_service import LaunchAtLoginService
+
+_UNSET = object()
 
 
 class UIMainService:
@@ -146,7 +148,7 @@ class UISettingsService:
         self.event_service = event_service
         self.history_service = history_service
         self._transcription_service = transcription_service
-        self.ai_processing_controller = ai_processing_controller
+        self._ai_processing_controller = ai_processing_controller
         self.localization_service = localization_service
         self._launch_at_login_service = launch_at_login_service
         self._container = container
@@ -219,6 +221,10 @@ class UISettingsService:
         """获取事件服务"""
         return self.event_service
 
+    def get_config_service(self) -> IConfigService:
+        """获取底层配置服务。"""
+        return self.config_service
+
     def get_history_service(self) -> HistoryStorageService:
         """获取历史记录存储服务"""
         return self.history_service
@@ -242,7 +248,19 @@ class UISettingsService:
 
     def get_ai_processing_controller(self):
         """获取AI处理控制器"""
-        return self.ai_processing_controller
+        return self._ai_processing_controller
+
+    def sync_runtime_dependencies(
+        self,
+        *,
+        transcription_service: Any = _UNSET,
+        ai_processing_controller: Any = _UNSET,
+    ) -> None:
+        """同步当前运行时依赖引用，供 UI 使用最新服务实例。"""
+        if transcription_service is not _UNSET:
+            self._transcription_service = transcription_service
+        if ai_processing_controller is not _UNSET:
+            self._ai_processing_controller = ai_processing_controller
 
     def get_launch_at_login_service(self):
         """获取开机自启系统集成服务。"""
@@ -429,6 +447,10 @@ class UIModelService:
         """
         self.speech_service = speech_service
         app_logger.log_audio_event("UIModelService initialized", {})
+
+    def set_speech_service(self, speech_service: ISpeechService) -> None:
+        """更新运行时 speech service 引用。"""
+        self.speech_service = speech_service
 
     def is_model_loaded(self) -> bool:
         """检查模型是否已加载"""
