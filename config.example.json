@@ -67,6 +67,9 @@
       "model_id": "local-model"
     }
   },
+  "_notes": {
+    "openai_compatible": "For remote OpenAI-compatible services such as Cerebras, prefer a model returned by GET /models for the current API key instead of relying only on documentation overview pages."
+  },
   "audio": {
     "sample_rate": 16000,
     "channels": 1,

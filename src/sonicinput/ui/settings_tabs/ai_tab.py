@@ -1323,6 +1323,23 @@ class AITab(BaseSettingsTab):
                 ).format(error=e),
             )
 
+    def _validate_openai_compatible_model_selection(
+        self, test_client, model_id: str
+    ) -> str | None:
+        """Return a clear validation error when the chosen model is unavailable."""
+        requested_model = model_id.strip()
+        if not requested_model:
+            return None
+
+        validator = getattr(test_client, "is_model_available", None)
+        if callable(validator) and not validator(requested_model):
+            return QCoreApplication.translate(
+                "AITab",
+                "Model '{model}' is not in the available model list for the current A​PI key/base URL.",
+            ).format(model=requested_model)
+
+        return None
+
     def _test_api_connection(self) -> None:
         """Test API connection."""
         try:
@@ -1421,7 +1438,30 @@ class AITab(BaseSettingsTab):
 
             self._api_test_provider_name = provider_name
 
-            result_container = {"success": False, "error": ""}
+            validation_error = None
+            if current_provider == "o​penai_compatible":
+                validation_error = self._validate_openai_compatible_model_selection(
+                    test_client, model_id
+                )
+
+            result_container = {"success": False, "error": validation_error or ""}
+
+            if validation_error:
+                QMessageBox.warning(
+                    self.parent_window,
+                    QCoreApplication.translate("AITab", "A​PI Connection Test"),
+                    QCoreApplication.translate(
+                        "AITab",
+                        "Connection failed:\n\n{error}",
+                    ).format(error=validation_error),
+                )
+                self.api_status_label.setText(
+                    QCoreApplication.translate("AITab", "Connection failed")
+                )
+                self.api_status_label.setProperty("status_key", "failed")
+                self.api_status_label.setStyleSheet("color: red;")
+                progress_dialog.close()
+                return
 
             def test_connection():
                 try:

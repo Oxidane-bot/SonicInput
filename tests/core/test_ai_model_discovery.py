@@ -134,3 +134,45 @@ def test_openai_compatible_get_available_models_returns_empty_on_http_error():
 
     assert models == []
     assert len(session.calls) == 1
+
+
+def test_openai_compatible_is_model_available_checks_remote_list():
+    client = OpenAICompatibleClient(api_key="", base_url="http://localhost:1234/v1")
+    response = _FakeResponse(
+        200,
+        {
+            "data": [
+                {"id": "qwen-3-235b-a22b-instruct-2507"},
+                {"id": "llama3.1-8b"},
+            ]
+        },
+    )
+    session = _FakeSession(response)
+    client.session = session
+
+    assert client.is_model_available("qwen-3-235b-a22b-instruct-2507") is True
+    assert client.is_model_available("zai-glm-4.7") is False
+    assert len(session.calls) == 2
+
+
+def test_openai_compatible_test_connection_rejects_unknown_model_before_chat_call():
+    client = OpenAICompatibleClient(
+        api_key="test-key", base_url="http://localhost:1234/v1"
+    )
+    response = _FakeResponse(
+        200,
+        {
+            "data": [
+                {"id": "qwen-3-235b-a22b-instruct-2507"},
+                {"id": "llama3.1-8b"},
+            ]
+        },
+    )
+    session = _FakeSession(response)
+    client.session = session
+
+    ok, message = client.test_connection(model="zai-glm-4.7")
+
+    assert ok is False
+    assert "not in the available model list" in message
+    assert len(session.calls) == 1

@@ -55,6 +55,12 @@ uv sync --extra dev
 - `pre-commit`：自动执行 `ruff format src tests` 和 `ruff check src tests --fix`。
 - `pre-push`：执行 `ruff check src tests` 与 `ruff format --check src tests`。
 
+## AI Provider Notes
+- `O​penAI Compatible` 会优先以当前 `base_url + A​PI k​ey` 请求 `/models` 作为真实可用模型列表。
+- 测试连接时，如果填写的 `model_id` 不在该列表中，会直接提示“当前模型不在可用模型列表中”，而不是继续发起无效推理请求。
+- 对接 Cerebras 这类 O​penAI-compatible 服务时，请以 `/models` 返回结果为准，不要只看文档总览页。
+- 配置路径：`%AppData%/SonicInput/config.json`，对应字段为 `ai.o​penai_compatible.base_url`、`ai.o​penai_compatible.a​pi_k​ey`、`ai.o​penai_compatible.model_id`。
+
 ## 路径
 - 配置：`%AppData%/SonicInput/config.json`
 - 日志：`%AppData%/SonicInput/logs/app.log`

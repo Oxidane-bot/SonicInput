@@ -118,6 +118,27 @@ class OpenAICompatibleClient(BaseAIClient):
         models = self.get_available_models()
         return [model["id"] for model in models if model.get("id")]
 
+    def is_model_available(self, model: str) -> bool:
+        """Check whether a model is exposed by the current endpoint/key."""
+        model_name = model.strip()
+        if not model_name:
+            return False
+
+        return model_name in self.fetch_available_models()
+
+    def test_connection(self, model: str | None = None) -> tuple[bool, str]:
+        """Test connectivity, validating requested models against `/models` first."""
+        requested_model = model.strip() if isinstance(model, str) else None
+        if requested_model:
+            available_models = self.fetch_available_models()
+            if available_models and requested_model not in available_models:
+                return (
+                    False,
+                    f"Model '{requested_model}' is not in the available model list for the current API key/base URL.",
+                )
+
+        return super().test_connection(model=model)
+
     def _extract_response_text(self, result: Dict[str, Any]) -> str:
         """从 API 响应中提取文本（增强 JSON 错误处理）
 

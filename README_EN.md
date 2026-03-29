@@ -55,6 +55,12 @@ Default behavior:
 - `pre-commit`: runs `ruff format src tests` and `ruff check src tests --fix`.
 - `pre-push`: runs `ruff check src tests` and `ruff format --check src tests`.
 
+## AI Provider Notes
+- `O​penAI Compatible` now treats `/models` from the current `base_url + A​PI k​ey` as the source of truth for model availability.
+- During connection testing, if the selected `model_id` is not present in that list, the UI shows a clear validation error instead of issuing a doomed inference request.
+- When using Cerebras or other O​penAI-compatible services, prefer the live `/models` response over the broader documentation overview pages.
+- Relevant config keys live in `%AppData%/SonicInput/config.json` under `ai.o​penai_compatible.base_url`, `ai.o​penai_compatible.a​pi_k​ey`, and `ai.o​penai_compatible.model_id`.
+
 ## Paths
 - Config: `%AppData%/SonicInput/config.json`
 - Logs: `%AppData%/SonicInput/logs/app.log`
