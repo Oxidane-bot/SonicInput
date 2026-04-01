@@ -12,6 +12,7 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
+VK_BACK = 0x08
 
 # Define structures for SendInput
 wintypes.ULONG_PTR = wintypes.WPARAM
@@ -61,6 +62,34 @@ class SendInputMethod:
         self.max_length = 4096  # Increased max length
         app_logger.log_audio_event("SendInput method (ctypes) initialized", {})
 
+    @staticmethod
+    def _build_virtual_key_inputs(virtual_key: int) -> tuple[INPUT, INPUT]:
+        keydown = INPUT(
+            type=INPUT_KEYBOARD,
+            union=_INPUT_UNION(
+                ki=KEYBDINPUT(
+                    wVk=virtual_key,
+                    wScan=0,
+                    dwFlags=0,
+                    time=0,
+                    dwExtraInfo=0,
+                )
+            ),
+        )
+        keyup = INPUT(
+            type=INPUT_KEYBOARD,
+            union=_INPUT_UNION(
+                ki=KEYBDINPUT(
+                    wVk=virtual_key,
+                    wScan=0,
+                    dwFlags=KEYEVENTF_KEYUP,
+                    time=0,
+                    dwExtraInfo=0,
+                )
+            ),
+        )
+        return keydown, keyup
+
     def input_via_sendinput(self, text: str) -> bool:
         """使用 modern SendInput API 输入文本 (优化版)"""
         if not text:
@@ -84,11 +113,15 @@ class SendInputMethod:
                     },
                 )
 
-            send_chars = []
+            send_units = []
             index = 0
             while index < len(text):
                 char = text[index]
                 code_point = ord(char)
+                if char == "\b":
+                    send_units.append(("vk", VK_BACK))
+                    index += 1
+                    continue
                 if 0xD800 <= code_point <= 0xDBFF:
                     if index + 1 < len(text):
                         next_code = ord(text[index + 1])
@@ -100,18 +133,27 @@ class SendInputMethod:
                 if 0xDC00 <= code_point <= 0xDFFF:
                     index += 1
                     continue
-                send_chars.append(char)
+                send_units.append(("unicode", char))
                 index += 1
 
-            num_events = len(send_chars) * 2
+            num_events = len(send_units) * 2
             if num_events == 0:
                 return True
 
             input_array = (INPUT * num_events)()
             event_index = 0
 
-            for char in send_chars:
-                char_code = ord(char)
+            for unit_type, unit_value in send_units:
+                if unit_type == "vk":
+                    keydown_input, keyup_input = self._build_virtual_key_inputs(
+                        unit_value
+                    )
+                    input_array[event_index] = keydown_input
+                    input_array[event_index + 1] = keyup_input
+                    event_index += 2
+                    continue
+
+                char_code = ord(unit_value)
 
                 # Key down event
                 keydown_input = input_array[event_index]
@@ -148,7 +190,7 @@ class SendInputMethod:
                 "Text input via SendInput (ctypes) successful",
                 {
                     "text_length": len(text),
-                    "sent_length": len(send_chars),
+                    "sent_length": len(send_units),
                     "events_count": num_events,
                 },
             )
@@ -169,27 +211,7 @@ class SendInputMethod:
             # Send a space and then a backspace to test.
             self.input_via_sendinput(" ")
 
-            VK_BACK = 0x08
-            keydown = INPUT(
-                type=INPUT_KEYBOARD,
-                union=_INPUT_UNION(
-                    ki=KEYBDINPUT(
-                        wVk=VK_BACK, wScan=0, dwFlags=0, time=0, dwExtraInfo=0
-                    )
-                ),
-            )
-            keyup = INPUT(
-                type=INPUT_KEYBOARD,
-                union=_INPUT_UNION(
-                    ki=KEYBDINPUT(
-                        wVk=VK_BACK,
-                        wScan=0,
-                        dwFlags=KEYEVENTF_KEYUP,
-                        time=0,
-                        dwExtraInfo=0,
-                    )
-                ),
-            )
+            keydown, keyup = self._build_virtual_key_inputs(VK_BACK)
             input_array = (INPUT * 2)(keydown, keyup)
             ctypes.windll.user32.SendInput(
                 2, ctypes.byref(input_array), ctypes.sizeof(INPUT)

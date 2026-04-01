@@ -120,3 +120,20 @@ def test_start_recording_mode_uses_text_only_clipboard_backup():
     smart_input.clipboard_input.set_recording_mode.assert_called_once_with(True)
     assert smart_input._recording_mode is True
     assert smart_input._original_clipboard == "hello"
+
+
+def test_input_text_routes_pure_backspace_to_sendinput_even_when_clipboard_preferred():
+    smart_input = SmartTextInput.__new__(SmartTextInput)
+    smart_input.preferred_method = "clipboard"
+    smart_input.fallback_enabled = True
+    smart_input._method_failures = {}
+    smart_input._last_failure_time = {}
+    smart_input.clipboard_input = Mock()
+    smart_input.sendinput_method = Mock()
+
+    smart_input._try_clipboard_method = Mock(return_value=True)
+    smart_input._try_sendinput_method = Mock(return_value=True)
+
+    assert smart_input.input_text("\b\b") is True
+    smart_input._try_sendinput_method.assert_called_once_with("\b\b")
+    smart_input._try_clipboard_method.assert_not_called()

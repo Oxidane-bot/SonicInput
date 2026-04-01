@@ -95,6 +95,9 @@ class SmartTextInput(LifecycleComponent, IInputService):
         if not text:
             return True
 
+        if force_method is None and self._should_force_sendinput(text):
+            force_method = "sendinput"
+
         # 确定使用的输入方法
         method = force_method or self._determine_best_method()
 
@@ -166,6 +169,11 @@ class SmartTextInput(LifecycleComponent, IInputService):
 
         # 否则使用首选方法
         return self.preferred_method
+
+    @staticmethod
+    def _should_force_sendinput(text: str) -> bool:
+        """实时编辑控制字符需要真实按键语义，不能走剪贴板粘贴。"""
+        return bool(text) and all(char == "\b" for char in text)
 
     def _try_input_method(self, text: str, method: str) -> bool:
         """尝试特定的输入方法"""
