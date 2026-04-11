@@ -12,7 +12,9 @@ class _InaccessiblePath:
 
 def test_is_model_cached_returns_false_when_cache_path_is_inaccessible(monkeypatch):
     manager = SherpaModelManager(cache_dir=".tmp_pytest/models")
-    monkeypatch.setattr(manager, "_get_model_dir", lambda _model_name: _InaccessiblePath())
+    monkeypatch.setattr(
+        manager, "_get_model_dir", lambda _model_name: _InaccessiblePath()
+    )
 
     assert manager.is_model_cached("paraformer") is False
 
@@ -28,7 +30,9 @@ def test_logger_disables_file_output_after_write_permission_error(monkeypatch, c
     monkeypatch.setattr(logger, "_file_logging_error_reported", False, raising=False)
     monkeypatch.setattr(logger, "_console_output_enabled", False, raising=False)
     monkeypatch.setattr(logger, "_min_level", LogLevel.DEBUG, raising=False)
-    monkeypatch.setattr(logger, "_enabled_categories", {LogCategory.AUDIO}, raising=False)
+    monkeypatch.setattr(
+        logger, "_enabled_categories", {LogCategory.AUDIO}, raising=False
+    )
 
     monkeypatch.setattr(
         "builtins.open",

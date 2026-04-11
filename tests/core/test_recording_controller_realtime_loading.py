@@ -233,7 +233,9 @@ def test_stop_recording_in_realtime_does_not_refeed_full_audio(monkeypatch):
             self.realtime_audio_calls.append(audio_data)
 
     speech_service.streaming_coordinator = _DummyCoordinator()
-    monkeypatch.setattr(controller, "_save_and_request_transcription", save_calls.append)
+    monkeypatch.setattr(
+        controller, "_save_and_request_transcription", save_calls.append
+    )
 
     controller.stop_recording()
 

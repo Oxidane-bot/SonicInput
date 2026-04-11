@@ -497,7 +497,6 @@ class TestSettingsWindowCoreButtons:
         assert current_value == original_value
 
 
-
 @pytest.mark.gui
 class TestConfigManagementIntegration:
     """配置管理集成测试 - 使用真实文件I/O"""

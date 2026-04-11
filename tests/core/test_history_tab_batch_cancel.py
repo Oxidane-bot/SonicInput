@@ -73,7 +73,9 @@ def test_history_tab_completed_after_cancel_shows_canceled_message(monkeypatch):
         lambda *args, **kwargs: info_calls.append((args[1], args[2])),
     )
 
-    tab._on_batch_completed({"total": 3, "success": 1, "skipped": 1, "failed": 1, "errors": []})
+    tab._on_batch_completed(
+        {"total": 3, "success": 1, "skipped": 1, "failed": 1, "errors": []}
+    )
 
     assert load_history_calls == [True]
     assert tab.batch_progress_dialog is None

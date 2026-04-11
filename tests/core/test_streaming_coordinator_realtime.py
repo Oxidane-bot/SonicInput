@@ -38,13 +38,17 @@ def test_realtime_text_accumulates_across_endpoint_resets():
 
     assert coordinator.get_realtime_text() == "第一句第二句"
     realtime_events = [
-        data for event_name, data in events.emitted if event_name == Events.REALTIME_TEXT_UPDATED
+        data
+        for event_name, data in events.emitted
+        if event_name == Events.REALTIME_TEXT_UPDATED
     ]
     assert [event["text"] for event in realtime_events] == ["第一句", "第一句第二句"]
 
 
 def test_realtime_text_treats_non_prefix_corrections_as_revisions():
-    coordinator = StreamingCoordinator(event_service=_DummyEventService(), streaming_mode="realtime")
+    coordinator = StreamingCoordinator(
+        event_service=_DummyEventService(), streaming_mode="realtime"
+    )
     session = _FakeRealtimeSession(["hello wrold", "hello world"])
     coordinator.start_streaming(session)
 
