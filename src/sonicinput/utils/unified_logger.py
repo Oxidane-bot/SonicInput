@@ -121,11 +121,19 @@ class UnifiedLogger:
         self._console_output_enabled = False  # 默认禁用控制台输出（从配置加载）
         self._enabled_categories = set(LogCategory)  # 默认所有类别
         self._lock = threading.RLock()
+        self._file_logging_disabled = False
+        self._file_logging_error_reported = False
 
         # 设置日志文件
         log_dir = Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
         self._log_file = log_dir / "app.log"
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self._file_logging_disabled = True
+            self._warn_config(
+                f"File logging disabled because log directory is unavailable: {e}"
+            )
         self._max_log_size_mb = 10
         self._max_backup_files = 2
         self._keep_logs_days = 7
@@ -244,6 +252,8 @@ class UnifiedLogger:
 
     def _rotate_logs(self) -> None:
         """检查并按大小滚动日志"""
+        if self._file_logging_disabled:
+            return
         try:
             if not self._log_file.exists():
                 return
@@ -273,6 +283,8 @@ class UnifiedLogger:
 
     def _cleanup_old_logs(self) -> None:
         """按天清理过期日志文件"""
+        if self._file_logging_disabled:
+            return
         if self._keep_logs_days < 1:
             return
 
@@ -562,6 +574,9 @@ class UnifiedLogger:
                 _safe_print(console_msg, output_stream)
 
             # 文件输出（全部）
+            if self._file_logging_disabled:
+                return
+
             try:
                 file_msg = self._format_file_message(
                     level, category, message, context, component
@@ -572,7 +587,13 @@ class UnifiedLogger:
                     if level.value >= LogLevel.WARNING.value:
                         f.flush()
             except Exception as e:
-                print(f"[LOG ERROR] Failed to write to log file: {e}", file=sys.stderr)
+                self._file_logging_disabled = True
+                if not self._file_logging_error_reported:
+                    self._file_logging_error_reported = True
+                    print(
+                        f"[LOG ERROR] Failed to write to log file: {e}",
+                        file=sys.stderr,
+                    )
 
     def _should_output_to_console(self, level: LogLevel, category: LogCategory) -> bool:
         """判断是否输出到控制台"""

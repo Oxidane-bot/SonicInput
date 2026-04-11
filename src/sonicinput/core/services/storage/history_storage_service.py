@@ -1058,18 +1058,33 @@ class HistoryStorageService(LifecycleComponent):
             if not record:
                 return False
 
-            # 删除音频文件
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM history_records "
+                "WHERE audio_file_path = ? AND id != ?",
+                (record.audio_file_path, record_id),
+            )
+            remaining_reference_count = int(cursor.fetchone()[0])
+
+            # 删除数据库记录
+            cursor.execute("DELETE FROM history_records WHERE id = ?", (record_id,))
+            conn.commit()
+
+            # 仅在没有其他记录引用同一音频文件时才删除文件
             audio_path = Path(record.audio_file_path)
-            if audio_path.exists():
+            if remaining_reference_count == 0 and audio_path.exists():
                 audio_path.unlink()
                 app_logger.log_audio_event(
                     "Audio file deleted", {"path": str(audio_path)}
                 )
-
-            # 删除数据库记录
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM history_records WHERE id = ?", (record_id,))
-            conn.commit()
+            elif remaining_reference_count > 0:
+                app_logger.log_audio_event(
+                    "Retained shared audio file during record deletion",
+                    {
+                        "path": str(audio_path),
+                        "remaining_reference_count": remaining_reference_count,
+                    },
+                )
 
             app_logger.log_audio_event(
                 "History record deleted", {"record_id": record_id}

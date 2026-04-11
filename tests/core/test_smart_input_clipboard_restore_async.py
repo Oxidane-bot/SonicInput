@@ -122,6 +122,38 @@ def test_start_recording_mode_uses_text_only_clipboard_backup():
     assert smart_input._original_clipboard == "hello"
 
 
+def test_start_recording_mode_cancels_pending_restore_thread():
+    smart_input = SmartTextInput.__new__(SmartTextInput)
+    smart_input.clipboard_input = Mock()
+    smart_input._recording_mode = False
+    smart_input._original_clipboard = ""
+    smart_input._restore_cancel_event = threading.Event()
+    smart_input._restore_thread_lock = threading.Lock()
+    pending_thread = _FakeThread(target=lambda: None, daemon=False)
+    pending_thread.started = True
+    smart_input._restore_thread = pending_thread
+    smart_input.clipboard_input.backup_clipboard_text_only.return_value = "hello"
+
+    smart_input.start_recording_mode()
+
+    assert pending_thread.join_called is True
+    smart_input.clipboard_input.backup_clipboard_text_only.assert_called_once_with()
+    smart_input.clipboard_input.set_recording_mode.assert_called_once_with(True)
+
+
+def test_record_method_failure_decays_stale_failure_history(monkeypatch):
+    smart_input = SmartTextInput.__new__(SmartTextInput)
+    smart_input._method_failures = {"clipboard": 12}
+    smart_input._last_failure_time = {"clipboard": 0.0}
+
+    monkeypatch.setattr("time.time", lambda: 4000.0)
+
+    smart_input._record_method_failure("clipboard", "boom")
+
+    assert smart_input._method_failures["clipboard"] == 7
+    assert smart_input._last_failure_time["clipboard"] == 4000.0
+
+
 def test_input_text_routes_pure_backspace_to_sendinput_even_when_clipboard_preferred():
     smart_input = SmartTextInput.__new__(SmartTextInput)
     smart_input.preferred_method = "clipboard"

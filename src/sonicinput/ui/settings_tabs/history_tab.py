@@ -56,6 +56,7 @@ class HistoryTab(BaseSettingsTab):
         self.current_records: List[Any] = []  # 当前显示的记录列表
         self.batch_worker = None  # 批量处理Worker
         self.batch_progress_dialog = None  # 批量处理进度对话框
+        self._batch_cancel_requested = False
         self._search_debounce_timer: Optional[QTimer] = None
         self._stats_worker: Optional[HistoryStatsWorker] = None
         self._stats_request_id = 0
@@ -656,6 +657,7 @@ class HistoryTab(BaseSettingsTab):
             cd_seconds: CD时间（秒）
         """
         # 获取必要的服务
+        self._batch_cancel_requested = False
         transcription_service = self.config_manager.get_transcription_service()
         ai_processing_controller = self.config_manager.get_ai_processing_controller()
         history_service = self._get_history_service()
@@ -743,6 +745,18 @@ class HistoryTab(BaseSettingsTab):
         # 刷新历史记录列表
         self._load_history()
 
+        if self._batch_cancel_requested:
+            self._batch_cancel_requested = False
+            QMessageBox.information(
+                self.parent_window,
+                QCoreApplication.translate("HistoryTab", "Batch Reprocessing Canceled"),
+                QCoreApplication.translate(
+                    "HistoryTab",
+                    "Batch reprocessing was canceled. Completed work has been kept, and remaining records were skipped.",
+                ),
+            )
+            return
+
         # 显示完成报告
         total = stats.get("total", 0)
         success = stats.get("success", 0)
@@ -791,21 +805,16 @@ class HistoryTab(BaseSettingsTab):
 
     def _on_batch_canceled(self) -> None:
         """用户取消批量处理"""
+        self._batch_cancel_requested = True
+
+        if self.batch_progress_dialog:
+            self.batch_progress_dialog.setLabelText(
+                QCoreApplication.translate(
+                    "HistoryTab",
+                    "Cancel requested...\nWaiting for the current record to finish safely.",
+                )
+            )
+            self.batch_progress_dialog.setCancelButton(None)
+
         if self.batch_worker:
             self.batch_worker.stop()
-            self.batch_worker.wait(5000)  # 等待最多5秒
-
-            # 强制终止（如果还在运行）
-            if self.batch_worker.isRunning():
-                self.batch_worker.terminate()
-                self.batch_worker.wait()
-
-            self.batch_worker = None
-
-        QMessageBox.information(
-            self.parent_window,
-            QCoreApplication.translate("HistoryTab", "Batch Reprocessing Canceled"),
-            QCoreApplication.translate(
-                "HistoryTab", "Batch reprocessing operation has been canceled."
-            ),
-        )

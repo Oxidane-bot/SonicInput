@@ -72,6 +72,7 @@ class StreamingCoordinator(LifecycleComponent):
 
         # realtime 模式：流式会话管理
         self._realtime_session = None
+        self._realtime_finalized_text = ""
         self._realtime_partial_text = ""
         self._realtime_last_update = time.time()
         self._realtime_debug_last_log = 0.0
@@ -160,6 +161,7 @@ class StreamingCoordinator(LifecycleComponent):
             # realtime 模式初始化
             if self._streaming_mode_type == "realtime":
                 self._realtime_session = streaming_session
+                self._realtime_finalized_text = ""
                 self._realtime_partial_text = ""
                 self._realtime_last_update = time.time()
 
@@ -213,7 +215,7 @@ class StreamingCoordinator(LifecycleComponent):
                 if self._realtime_session:
                     app_logger.log_audio_event(
                         "Realtime mode: keeping partial text, not calling get_final_result",
-                        {"partial_text_length": len(self._realtime_partial_text)},
+                        {"partial_text_length": len(self.get_realtime_text())},
                     )
 
                     # 显式清理sherpa-onnx streaming session
@@ -372,22 +374,31 @@ class StreamingCoordinator(LifecycleComponent):
                         },
                     )
 
-                # 检查是否有更新
+                # sherpa realtime session 在 endpoint 后可能从新片段重新开始计数。
+                # 这里保留已完成片段，并将当前片段作为可修正的尾部文本。
                 if partial_result != self._realtime_partial_text:
+                    previous_partial = self._realtime_partial_text
+                    if self._should_finalize_realtime_partial(
+                        previous_partial, partial_result
+                    ):
+                        self._realtime_finalized_text = self._merge_realtime_text(
+                            self._realtime_finalized_text, previous_partial
+                        )
                     self._realtime_partial_text = partial_result
                     self._realtime_last_update = time.time()
                     self._streaming_stats["realtime_updates"] += 1
+                    display_text = self.get_realtime_text()
 
                     # 发送实时更新事件
                     self._emit_streaming_event(
                         Events.REALTIME_TEXT_UPDATED,
                         {
-                            "text": partial_result,
+                            "text": display_text,
                             "timestamp": self._realtime_last_update,
                         },
                     )
 
-                    return partial_result
+                    return display_text
 
                 return None
 
@@ -402,7 +413,43 @@ class StreamingCoordinator(LifecycleComponent):
             当前转录文本
         """
         with self._streaming_lock:
-            return self._realtime_partial_text
+            return self._merge_realtime_text(
+                self._realtime_finalized_text, self._realtime_partial_text
+            )
+
+    @staticmethod
+    def _common_prefix_length(left: str, right: str) -> int:
+        prefix_length = 0
+        for left_char, right_char in zip(left, right):
+            if left_char != right_char:
+                break
+            prefix_length += 1
+        return prefix_length
+
+    @staticmethod
+    def _merge_realtime_text(prefix: str, current: str) -> str:
+        if not prefix:
+            return current
+        if not current:
+            return prefix
+        if current.startswith(prefix):
+            return current
+        return f"{prefix}{current}"
+
+    def _should_finalize_realtime_partial(
+        self, previous_partial: str, current_partial: str
+    ) -> bool:
+        if not previous_partial or not current_partial:
+            return False
+        if current_partial.startswith(previous_partial):
+            return False
+
+        common_prefix_length = self._common_prefix_length(
+            previous_partial, current_partial
+        )
+        min_length = min(len(previous_partial), len(current_partial))
+        restart_threshold = max(1, min_length // 3)
+        return common_prefix_length <= restart_threshold
 
     def get_pending_chunks(self) -> List[StreamingChunk]:
         """获取所有待处理的流式块

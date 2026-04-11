@@ -58,3 +58,31 @@ def test_input_via_sendinput_translates_backspace_to_vk_back(monkeypatch):
         (wintypes.WORD(0x08).value, 0, 0),
         (wintypes.WORD(0x08).value, 0, KEYEVENTF_KEYUP),
     ]
+
+
+def test_sendinput_capability_does_not_emit_foreground_keystrokes(monkeypatch):
+    monkeypatch.setattr(sendinput_module, "app_logger", _DummyLogger(), raising=False)
+    monkeypatch.setattr(sendinput_module.win32gui, "GetForegroundWindow", lambda: 1)
+
+    send_calls = []
+
+    def _fake_send_input(num_events, input_ptr, input_size):
+        send_calls.append((num_events, input_size))
+        return num_events
+
+    monkeypatch.setattr(
+        sendinput_module.ctypes,
+        "windll",
+        SimpleNamespace(user32=SimpleNamespace(SendInput=_fake_send_input)),
+        raising=False,
+    )
+
+    method = SendInputMethod()
+    monkeypatch.setattr(
+        method,
+        "input_via_sendinput",
+        lambda _text: (_ for _ in ()).throw(AssertionError("unexpected text input")),
+    )
+
+    assert method.test_sendinput_capability() is True
+    assert send_calls == []

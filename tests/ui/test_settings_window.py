@@ -384,6 +384,41 @@ class TestSettingsWindowCoreButtons:
         qtbot.waitUntil(lambda: not settings_window.isVisible(), timeout=2000)
         assert not settings_window.isVisible()
 
+    def test_ok_button_does_not_close_when_apply_fails(
+        self, qtbot, settings_window, monkeypatch
+    ):
+        """保存失败时，OK 不应关闭设置窗口。"""
+        monkeypatch.setattr(settings_window, "apply_settings", lambda: False)
+
+        settings_window.show()
+        qtbot.waitExposed(settings_window, timeout=1000)
+
+        settings_window.findChild(QPushButton, "ok_btn").click()
+        qtbot.wait(200)
+
+        assert settings_window.isVisible()
+
+    def test_unload_model_does_not_emit_when_user_cancels(
+        self, qtbot, settings_window, monkeypatch
+    ):
+        """用户取消卸载时，不应发出卸载请求。"""
+        unload_requests = []
+
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *args, **kwargs: QMessageBox.StandardButton.No,
+        )
+        monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+
+        settings_window.model_unload_requested.connect(
+            lambda: unload_requests.append(True)
+        )
+
+        settings_window.unload_model()
+
+        assert unload_requests == []
+
     def test_reset_tab_button_resets_config(
         self, qtbot, settings_window, isolated_config, monkeypatch
     ):
@@ -460,6 +495,7 @@ class TestSettingsWindowCoreButtons:
         # 验证配置未被重置
         current_value = settings_window.application_tab.log_level_combo.currentText()
         assert current_value == original_value
+
 
 
 @pytest.mark.gui
@@ -811,3 +847,36 @@ class TestAIStreamingSetting:
     def test_ai_tab_load_reads_streaming_enabled(self, qtbot, settings_window):
         settings_window.ai_tab.load_config({"ai": {"streaming_enabled": True}})
         assert settings_window.ai_tab.ai_streaming_checkbox.isChecked() is True
+
+
+class TestModelUnloadConfirmation:
+    def test_unload_model_decline_does_not_emit_request(self, monkeypatch):
+        from sonicinput.ui.settings_window import SettingsWindow
+
+        class _SignalStub:
+            def __init__(self):
+                self.calls = 0
+
+            def emit(self):
+                self.calls += 1
+
+        settings_window = SettingsWindow.__new__(SettingsWindow)
+        settings_window.model_unload_requested = _SignalStub()
+
+        emitted = []
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *args, **kwargs: QMessageBox.StandardButton.No,
+        )
+        monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            QMessageBox,
+            "critical",
+            lambda *args, **kwargs: emitted.append(("critical", args, kwargs)),
+        )
+
+        settings_window.unload_model()
+
+        assert emitted == []
+        assert settings_window.model_unload_requested.calls == 0

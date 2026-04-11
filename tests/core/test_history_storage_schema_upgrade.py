@@ -235,3 +235,74 @@ def test_fts_index_syncs_with_save_and_update() -> None:
     service._do_stop()
     if db_path.exists():
         db_path.unlink()
+
+
+def test_delete_record_keeps_shared_audio_file_until_last_reference() -> None:
+    temp_dir = Path(".tmp_pytest")
+    temp_dir.mkdir(exist_ok=True)
+    db_path = temp_dir / f"history_delete_shared_{uuid.uuid4().hex}.db"
+    audio_path = temp_dir / f"shared_audio_{uuid.uuid4().hex}.wav"
+    audio_path.write_bytes(b"wav")
+
+    service = HistoryStorageService(_DummyConfigService())
+    service._db_path = db_path
+    service._init_database()
+
+    first_record = HistoryRecord(
+        id="rec-shared-1",
+        timestamp=datetime(2026, 3, 8, 12, 0, 0),
+        audio_file_path=str(audio_path),
+        duration=1.0,
+        transcription_text="one",
+        transcription_provider="local",
+        transcription_status="success",
+        streaming_mode="chunked",
+        transcription_duration=0.1,
+        used_fallback=False,
+        fallback_type="none",
+        fallback_reason=None,
+        diagnostics_collected=True,
+        reprocess_parent_id=None,
+        transcription_error=None,
+        ai_optimized_text=None,
+        ai_provider=None,
+        ai_status="skipped",
+        ai_error=None,
+        final_text="one",
+    )
+    second_record = HistoryRecord(
+        id="rec-shared-2",
+        timestamp=datetime(2026, 3, 8, 12, 1, 0),
+        audio_file_path=str(audio_path),
+        duration=1.0,
+        transcription_text="two",
+        transcription_provider="local",
+        transcription_status="success",
+        streaming_mode="chunked",
+        transcription_duration=0.1,
+        used_fallback=False,
+        fallback_type="none",
+        fallback_reason=None,
+        diagnostics_collected=True,
+        reprocess_parent_id=None,
+        transcription_error=None,
+        ai_optimized_text=None,
+        ai_provider=None,
+        ai_status="skipped",
+        ai_error=None,
+        final_text="two",
+    )
+
+    assert service.save_record(first_record) is True
+    assert service.save_record(second_record) is True
+
+    assert service.delete_record("rec-shared-1") is True
+    assert audio_path.exists() is True
+    assert service.get_record_by_id("rec-shared-2") is not None
+
+    assert service.delete_record("rec-shared-2") is True
+    assert audio_path.exists() is False
+
+    service._do_stop()
+    if db_path.exists():
+        db_path.unlink()

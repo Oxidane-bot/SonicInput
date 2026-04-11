@@ -7,9 +7,13 @@ from sonicinput.core.services.events import Events
 class _DummyAudioService:
     def __init__(self) -> None:
         self.started_with = []
+        self.stop_result = (b"audio", 1.0)
 
     def start_recording(self, device_id):
         self.started_with.append(device_id)
+
+    def stop_recording(self):
+        return self.stop_result
 
 
 class _DummyConfigService:
@@ -54,6 +58,7 @@ class _DummySpeechService:
         self._is_model_loaded = is_model_loaded
         self.load_result = load_result
         self.load_calls = []
+        self.streaming_coordinator = None
 
     @property
     def is_model_loaded(self):
@@ -72,7 +77,8 @@ class _DummySpeechService:
 
 
 class _DummyHistoryService:
-    pass
+    def generate_audio_file_path(self):
+        return "C:/fake.wav"
 
 
 class _DummyStreamingManager:
@@ -92,6 +98,7 @@ class _DummyStreamingManager:
 class _DummyCallbackRouter:
     def __init__(self) -> None:
         self.realtime_calls = 0
+        self.unregister_calls = 0
 
     def register_realtime_callback(self):
         self.realtime_calls += 1
@@ -101,6 +108,9 @@ class _DummyCallbackRouter:
 
     def register_basic_callback(self):
         return None
+
+    def unregister_callbacks(self):
+        self.unregister_calls += 1
 
 
 def _build_controller(
@@ -187,3 +197,47 @@ def test_realtime_recording_aborts_when_session_start_fails():
         Events.RECORDING_ERROR,
         "Unable to start streaming transcription session",
     ) in events.emitted
+
+
+def test_start_recording_does_not_force_reset_legitimate_processing_state():
+    controller, audio_service, events, speech_service = _build_controller(
+        is_model_loaded=True
+    )
+    controller._state_manager.app_state = AppState.PROCESSING
+    controller._state_manager.recording_state = RecordingState.IDLE
+
+    controller.start_recording()
+
+    assert controller._state_manager.app_state == AppState.PROCESSING
+    assert controller._state_manager.recording_state == RecordingState.IDLE
+    assert audio_service.started_with == []
+    assert controller._streaming_manager.start_calls == 0
+    assert controller._callback_router.realtime_calls == 0
+    assert speech_service.load_calls == []
+    assert events.emitted == []
+
+
+def test_stop_recording_in_realtime_does_not_refeed_full_audio(monkeypatch):
+    controller, audio_service, events, speech_service = _build_controller(
+        is_model_loaded=True
+    )
+    controller._state_manager.recording_state = RecordingState.RECORDING
+    controller._recording_start_time = 0.0
+    save_calls = []
+
+    class _DummyCoordinator:
+        def __init__(self) -> None:
+            self.realtime_audio_calls = []
+
+        def add_realtime_audio(self, audio_data):
+            self.realtime_audio_calls.append(audio_data)
+
+    speech_service.streaming_coordinator = _DummyCoordinator()
+    monkeypatch.setattr(controller, "_save_and_request_transcription", save_calls.append)
+
+    controller.stop_recording()
+
+    assert speech_service.streaming_coordinator.realtime_audio_calls == []
+    assert save_calls == [b"audio"]
+    assert controller._callback_router.unregister_calls == 1
+    assert (Events.RECORDING_STOPPED, len(b"audio")) in events.emitted

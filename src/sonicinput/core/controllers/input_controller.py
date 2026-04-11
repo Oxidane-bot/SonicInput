@@ -219,10 +219,20 @@ class InputController(LifecycleComponent, BaseController, IInputController):
         )
 
         if backspace_count > 0:
-            self._input_service.input_text("\b" * backspace_count)
+            if not self._input_service.input_text("\b" * backspace_count):
+                app_logger.log_audio_event(
+                    f"{log_context} backspace input failed",
+                    {"backspace_count": backspace_count},
+                )
+                return
 
         if text_to_append:
-            self._input_service.input_text(text_to_append)
+            if not self._input_service.input_text(text_to_append):
+                app_logger.log_audio_event(
+                    f"{log_context} append input failed",
+                    {"append_length": len(text_to_append)},
+                )
+                return
 
         setattr(self, update_state_attr, new_text)
 

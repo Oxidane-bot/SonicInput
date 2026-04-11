@@ -18,7 +18,7 @@ from ..interfaces import (
     ISpeechService,
     IStateManager,
 )
-from ..interfaces.state import AppState, RecordingState
+from ..interfaces.state import RecordingState
 from ..services.config import ConfigKeys
 from ..services.events import Events
 from ..services.storage import HistoryStorageService
@@ -121,34 +121,6 @@ class RecordingController(LifecycleComponent, IRecordingController):
 
     def start_recording(self, device_id: Optional[int] = None) -> None:
         """开始录音"""
-        # 检查状态并强制重置卡住的状态
-        current_app_state = self._state_manager.get_app_state()
-        if current_app_state == AppState.PROCESSING:
-            app_logger.log_audio_event(
-                "Detected stuck PROCESSING state, forcing reset",
-                {
-                    "current_app_state": current_app_state.name,
-                    "recording_state": self._state_manager.get_recording_state().name,
-                },
-            )
-            # 强制重置状态
-            ControllerLogging.log_state_change(
-                "app",
-                AppState.PROCESSING,
-                AppState.IDLE,
-                {"reason": "detected_stuck_state"},
-                is_forced=True,
-            )
-            self._state_manager.set_app_state(AppState.IDLE)
-            ControllerLogging.log_state_change(
-                "recording",
-                self._state_manager.get_recording_state(),
-                RecordingState.IDLE,
-                is_forced=True,
-            )
-            self._state_manager.set_recording_state(RecordingState.IDLE)
-
-        # 再次检查状态
         if self.is_recording() or self._state_manager.is_processing():
             app_logger.log_audio_event(
                 "Cannot start recording - already recording or processing",
@@ -412,17 +384,13 @@ class RecordingController(LifecycleComponent, IRecordingController):
 
         try:
             if streaming_mode == "realtime":
-                # realtime 模式：发送完整音频到实时流处理
-                if len(audio_data) == 0:
-                    return
-                if hasattr(self._speech_service, "streaming_coordinator"):
-                    self._speech_service.streaming_coordinator.add_realtime_audio(
-                        audio_data
-                    )
-                    app_logger.log_audio_event(
-                        "Final realtime audio added",
-                        {"audio_length": len(audio_data)},
-                    )
+                # realtime 模式的文本已在录音过程中持续推送并输入。
+                # 停止时重新喂入完整音频会导致重复识别和历史最终文本错乱。
+                app_logger.log_audio_event(
+                    "Skipping final realtime audio submission",
+                    {"audio_length": len(audio_data)},
+                )
+                return
             else:  # chunked
                 # chunked 模式：只发送剩余未发送的增量音频
                 if hasattr(self._audio_service, "get_remaining_audio_for_streaming"):

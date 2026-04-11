@@ -67,13 +67,16 @@ class FakeStreamingAIService(FakeAIService):
 
 
 class DummyInputService:
-    def __init__(self):
+    def __init__(self, failed_inputs=None):
         self.inputs = []
         self.stop_calls = 0
         self.start_calls = 0
+        self.failed_inputs = set(failed_inputs or [])
 
     def input_text(self, text):
         self.inputs.append(text)
+        if text in self.failed_inputs:
+            return False
         return True
 
     def stop_recording_mode(self):
@@ -280,6 +283,29 @@ def test_input_controller_realtime_final_text_is_not_reinserted():
     assert input_service.inputs == ["实时", "文本"]
     assert input_service.stop_calls == 1
     assert events.emitted[-1] == (Events.TEXT_INPUT_COMPLETED, "")
+
+
+def test_input_controller_live_update_does_not_advance_baseline_when_input_fails():
+    input_service = DummyInputService(failed_inputs={"\b\b\b\b"})
+    events = DummyEventService()
+    controller = InputController(
+        input_service=input_service,
+        config_service=DummyConfigService({}),
+        event_service=events,
+        state_manager=DummyStateManager(),
+    )
+
+    controller._last_streaming_ai_text = "hello"
+    controller._apply_live_text_update(
+        new_text="hi",
+        previous_text="hello",
+        update_state_attr="_last_streaming_ai_text",
+        shrink_guard_ratio=None,
+        log_context="AI streaming text",
+    )
+
+    assert input_service.inputs == ["\b\b\b\b"]
+    assert controller._last_streaming_ai_text == "hello"
 
 
 def test_first_chunk_output_emits_incremental_text_before_final(monkeypatch):

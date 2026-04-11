@@ -109,9 +109,15 @@ class SherpaModelManager(LifecycleComponent):
             # Paraformer 特殊文件名
             required_files = ["tokens.txt", "encoder.int8.onnx", "decoder.int8.onnx"]
 
-        return model_dir.exists() and all(
-            (model_dir / f).exists() for f in required_files
-        )
+        try:
+            return model_dir.exists() and all(
+                (model_dir / f).exists() for f in required_files
+            )
+        except OSError as e:
+            logger.warning(
+                f"Failed to inspect cached model '{model_name}' at {model_dir}: {e}"
+            )
+            return False
 
     @staticmethod
     def _validate_download_url(url: str) -> None:

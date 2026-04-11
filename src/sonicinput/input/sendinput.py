@@ -208,14 +208,11 @@ class SendInputMethod:
     def test_sendinput_capability(self) -> bool:
         """Tests the modern SendInput functionality."""
         try:
-            # Send a space and then a backspace to test.
-            self.input_via_sendinput(" ")
+            hwnd = win32gui.GetForegroundWindow()
+            send_input = ctypes.windll.user32.SendInput
 
-            keydown, keyup = self._build_virtual_key_inputs(VK_BACK)
-            input_array = (INPUT * 2)(keydown, keyup)
-            ctypes.windll.user32.SendInput(
-                2, ctypes.byref(input_array), ctypes.sizeof(INPUT)
-            )
+            if hwnd == 0 or send_input is None:
+                raise TextInputError("SendInput API is not available")
 
             app_logger.log_audio_event(
                 "SendInput capability test (ctypes) successful.", {}

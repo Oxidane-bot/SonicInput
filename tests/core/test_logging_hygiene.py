@@ -2,6 +2,8 @@
 
 import os
 import time
+import uuid
+from pathlib import Path
 
 from sonicinput.utils.unified_logger import LogCategory, UnifiedLogger
 
@@ -14,10 +16,20 @@ class DummyConfigService:
         return self._settings.get(key, default)
 
 
-def test_logger_invalid_values_fallback(tmp_path, monkeypatch):
+def _make_temp_dir(prefix: str) -> Path:
+    temp_dir = Path(".tmp_pytest")
+    temp_dir.mkdir(exist_ok=True)
+    path = temp_dir / f"{prefix}_{uuid.uuid4().hex}"
+    path.mkdir()
+    return path
+
+
+def test_logger_invalid_values_fallback(monkeypatch):
     logger = UnifiedLogger()
+    tmp_path = _make_temp_dir("logging_hygiene_invalid")
 
     monkeypatch.setattr(logger, "_log_file", tmp_path / "app.log", raising=False)
+    monkeypatch.setattr(logger, "_file_logging_disabled", False, raising=False)
     logger._log_file.parent.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(logger, "_cleanup_old_logs", lambda: None, raising=False)
 
@@ -42,8 +54,9 @@ def test_logger_invalid_values_fallback(tmp_path, monkeypatch):
     assert logger._enabled_categories == {LogCategory.AUDIO}
 
 
-def test_logger_retention_removes_old_logs(tmp_path, monkeypatch):
+def test_logger_retention_removes_old_logs(monkeypatch):
     logger = UnifiedLogger()
+    tmp_path = _make_temp_dir("logging_hygiene_retention")
 
     log_file = tmp_path / "app.log"
     log_file.write_text("current", encoding="utf-8")
@@ -55,6 +68,7 @@ def test_logger_retention_removes_old_logs(tmp_path, monkeypatch):
     os.utime(old_log, (old_time, old_time))
 
     monkeypatch.setattr(logger, "_log_file", log_file, raising=False)
+    monkeypatch.setattr(logger, "_file_logging_disabled", False, raising=False)
     monkeypatch.setattr(logger, "_keep_logs_days", 1, raising=False)
 
     logger._cleanup_old_logs()

@@ -713,7 +713,7 @@ class SettingsWindow(QMainWindow):
                 flat[full_key] = value
         return flat
 
-    def apply_settings(self) -> None:
+    def apply_settings(self) -> bool:
         """应用设置（原子操作，使用事务确保全成功或全失败）"""
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QProgressDialog
@@ -771,7 +771,7 @@ class SettingsWindow(QMainWindow):
                 "Configuration validation failed",
                 {"errors": validation_errors, "error_count": len(validation_errors)},
             )
-            return  # 阻止保存
+            return False  # 阻止保存
 
         # 步骤2: 检测模型是否需要变更
         transcription_config = new_config.get("transcription", {})
@@ -908,7 +908,7 @@ class SettingsWindow(QMainWindow):
                             ),
                             str(reload_error),
                         )
-                        return  # 不继续执行，不提交事务
+                        return False  # 不继续执行，不提交事务
                     except Exception:
                         # 其他错误
                         try:
@@ -947,6 +947,7 @@ class SettingsWindow(QMainWindow):
                         "SettingsWindow", "Settings applied successfully!"
                     ),
                 )
+                return True
 
             except TransactionError as te:
                 # 事务异常，已自动回滚
@@ -963,6 +964,7 @@ class SettingsWindow(QMainWindow):
                         "Please check your settings and try again.",
                     ).format(error=error_msg),
                 )
+                return False
 
         except Exception as e:
             # 意外异常
@@ -976,6 +978,7 @@ class SettingsWindow(QMainWindow):
                     "Settings may not have been applied correctly.",
                 ).format(error=e),
             )
+            return False
 
     def _validate_transcription_provider_for_apply(
         self, provider: str, config: Dict[str, Any]
@@ -1087,8 +1090,8 @@ class SettingsWindow(QMainWindow):
 
     def accept_settings(self) -> None:
         """接受设置并关闭"""
-        self.apply_settings()
-        self.close()
+        if self.apply_settings():
+            self.close()
 
     def collect_settings_from_ui(self) -> Dict[str, Any]:
         """从UI收集所有设置
@@ -1126,10 +1129,6 @@ class SettingsWindow(QMainWindow):
     def unload_model(self) -> None:
         """卸载模型"""
         try:
-            # 发送模型卸载请求信号
-            self.model_unload_requested.emit()
-
-            # 更新UI状态
             reply = QMessageBox.question(
                 self,
                 QCoreApplication.translate("SettingsWindow", "Unload Model"),
@@ -1142,15 +1141,19 @@ class SettingsWindow(QMainWindow):
                 QMessageBox.StandardButton.No,
             )
 
-            if reply == QMessageBox.StandardButton.Yes:
-                QMessageBox.information(
-                    self,
-                    QCoreApplication.translate("SettingsWindow", "Model Unload"),
-                    QCoreApplication.translate(
-                        "SettingsWindow",
-                        "Model unload request sent. Check the system tray for status updates.",
-                    ),
-                )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            self.model_unload_requested.emit()
+
+            QMessageBox.information(
+                self,
+                QCoreApplication.translate("SettingsWindow", "Model Unload"),
+                QCoreApplication.translate(
+                    "SettingsWindow",
+                    "Model unload request sent. Check the system tray for status updates.",
+                ),
+            )
 
         except Exception as e:
             QMessageBox.critical(

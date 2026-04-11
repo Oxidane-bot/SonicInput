@@ -258,6 +258,8 @@ class SmartTextInput(LifecycleComponent, IInputService):
 
     def start_recording_mode(self) -> None:
         """开始录音模式 - 保存原始剪贴板，禁用中途restore"""
+        self._ensure_restore_thread_state()
+        self._cancel_pending_restore_thread(join_timeout=0.05)
         self._recording_mode = True
         # 热键线程中避免走 OLE/复杂格式快照，降低 COM 崩溃与阻塞风险。
         self._original_clipboard = self.clipboard_input.backup_clipboard_text_only()
@@ -368,7 +370,29 @@ class SmartTextInput(LifecycleComponent, IInputService):
         import time
 
         current_time = time.time()
-        self._method_failures[method] = self._method_failures.get(method, 0) + 1
+        previous_count = self._method_failures.get(method, 0)
+        previous_failure_time = self._last_failure_time.get(method)
+        elapsed_since_last_failure = (
+            current_time - previous_failure_time
+            if previous_failure_time is not None
+            else 0.0
+        )
+
+        # 长时间未失败时衰减历史，避免方法被永久性标记为不可靠。
+        if elapsed_since_last_failure > 1800 and previous_count > 10:
+            reduced_count = max(1, previous_count // 2)
+            self._method_failures[method] = reduced_count
+            app_logger.log_audio_event(
+                "Reduced failure count for method",
+                {
+                    "method": method,
+                    "old_count": previous_count,
+                    "new_count": reduced_count,
+                },
+            )
+            previous_count = reduced_count
+
+        self._method_failures[method] = previous_count + 1
         self._last_failure_time[method] = current_time
 
         app_logger.log_audio_event(
@@ -377,25 +401,9 @@ class SmartTextInput(LifecycleComponent, IInputService):
                 "method": method,
                 "error_message": error_msg,
                 "failure_count": self._method_failures[method],
-                "time_since_last_failure": current_time
-                - self._last_failure_time.get(method, current_time),
+                "time_since_last_failure": elapsed_since_last_failure,
             },
         )
-
-        # 如果失败次数过多，清理旧的失败记录（避免永久性禁用）
-        if current_time - self._last_failure_time[method] > 1800:  # 30分钟后清理
-            if self._method_failures[method] > 10:
-                self._method_failures[method] = max(
-                    1, self._method_failures[method] // 2
-                )
-                app_logger.log_audio_event(
-                    "Reduced failure count for method",
-                    {
-                        "method": method,
-                        "old_count": self._method_failures[method] * 2,
-                        "new_count": self._method_failures[method],
-                    },
-                )
 
     def _do_start(self) -> bool:
         """Initialize input system"""
