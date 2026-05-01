@@ -55,6 +55,31 @@ def test_stop_streaming_chunked_adds_context_overlap_and_dedupes_text() -> None:
     )
 
 
+def test_stop_streaming_chunked_includes_chunks_completed_before_stop() -> None:
+    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service.task_queue_manager = Mock()
+    service.streaming_coordinator = Mock()
+
+    completed_chunk1 = _make_chunk(0, np.array([1.0], dtype=np.float32), "第一段。")
+    completed_chunk2 = _make_chunk(1, np.array([2.0], dtype=np.float32), "第二段。")
+    pending_chunk = _make_chunk(2, np.array([3.0], dtype=np.float32), "第三段。")
+
+    service.streaming_coordinator.get_streaming_mode.return_value = "chunked"
+    service.streaming_coordinator.get_completed_chunks.return_value = [
+        completed_chunk1,
+        completed_chunk2,
+    ]
+    service.streaming_coordinator.get_pending_chunks.return_value = [pending_chunk]
+    service.streaming_coordinator.stop_streaming.return_value = {"mode": "chunked"}
+
+    result = service.stop_streaming()
+
+    assert result["text"] == "第一段。第二段。第三段。"
+    assert service.task_queue_manager.submit_task.call_count == 1
+    submitted_data = service.task_queue_manager.submit_task.call_args.kwargs["data"]
+    assert submitted_data["chunk_id"] == 2
+
+
 def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat() -> (
     None
 ):

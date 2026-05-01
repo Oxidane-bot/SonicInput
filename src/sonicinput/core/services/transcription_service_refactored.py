@@ -599,11 +599,15 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                     {"chunk_ids": timed_out_chunks},
                 )
 
-            # 从保存的块引用中提取转录文本
+            # 从所有块引用中提取转录文本。录音过程中已经完成的块会被
+            # StreamingCoordinator 移到 completed 列表，不能只读取 stop 时仍 pending 的块。
+            chunks_for_text = sorted(
+                [*completed_chunks, *pending_chunk_refs], key=lambda c: c.chunk_id
+            )
             text_parts = []
             completed_count = 0
 
-            for chunk in sorted(pending_chunk_refs, key=lambda c: c.chunk_id):
+            for chunk in chunks_for_text:
                 result = chunk.result_container
                 if result.get("success"):
                     completed_count += 1
@@ -617,7 +621,9 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             app_logger.audio(
                 "Extracted transcription text from chunks",
                 {
-                    "total_chunks": len(pending_chunk_refs),
+                    "total_chunks": len(chunks_for_text),
+                    "pending_chunks": len(pending_chunk_refs),
+                    "precompleted_chunks": len(completed_chunks),
                     "completed_chunks": completed_count,
                     "text_length": len(transcribed_text),
                 },

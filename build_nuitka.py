@@ -287,6 +287,7 @@ nuitka_cmd = [
     "nuitka",
     "--standalone",  # Create standalone distribution
     "--onefile",  # Package everything into single .exe
+    "--assume-yes-for-downloads",  # Allow required Nuitka helper downloads in non-interactive builds
     "--windows-console-mode=attach",  # Attach to console when launched from cmd, GUI when double-clicked
     "--enable-plugin=pyside6",  # Enable PySide6 plugin for Qt support
     # Package inclusions
