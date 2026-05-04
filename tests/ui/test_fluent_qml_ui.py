@@ -119,6 +119,49 @@ class TestFluentSettingsParity:
         assert view_model.uiLanguage == "zh-CN"
         assert view_model.translate("application", "Application") == "应用"
         assert view_model.translate("apply", "Apply") == "应用"
+        assert view_model.translate("filter_thinking_tags", "Filter thinking tags") == (
+            "过滤思考标签"
+        )
+        assert view_model.translate("system_prompt", "System Prompt") == "系统提示词"
+
+    def test_hotkey_management_adds_replaces_and_removes_shortcuts(
+        self, mock_config_service
+    ):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+
+        assert view_model.hotkeyList == ["f12"]
+        assert view_model.hotkeyCount == 1
+
+        added = view_model.addHotkey("Ctrl+Shift+V")
+        assert added["success"] is True
+        assert view_model.hotkeyList == ["f12", "ctrl+shift+v"]
+
+        duplicate = view_model.addHotkey("ctrl+shift+v")
+        assert duplicate["success"] is False
+        assert "exists" in duplicate["message"] or "存在" in duplicate["message"]
+
+        replaced = view_model.replaceHotkey("Alt+F9", 0)
+        assert replaced["success"] is True
+        assert view_model.hotkeyList == ["alt+f9", "ctrl+shift+v"]
+
+        removed = view_model.removeHotkeyAt(0)
+        assert removed["success"] is True
+        assert view_model.hotkeyList == ["ctrl+shift+v"]
+
+        blocked = view_model.removeHotkeyAt(0)
+        assert blocked["success"] is False
+        assert (
+            "at least one" in blocked["message"].lower() or "至少" in blocked["message"]
+        )
+
+    def test_hotkey_normalization_keeps_modifiers_ordered(self, mock_config_service):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+
+        assert view_model.normalizeHotkey("Command + Shift + V") == "shift+win+v"
 
     def test_settings_host_exposes_model_management_signals(
         self, qtbot, mock_config_service
@@ -150,7 +193,8 @@ class TestFluentSettingsParity:
 
         for object_name in [
             "languageCombo",
-            "hotkeysField",
+            "hotkeyCaptureButton",
+            "hotkeysListView",
             "hotkeyBackendCombo",
             "transcriptionProviderCombo",
             "qwenApiKeyField",
@@ -162,6 +206,172 @@ class TestFluentSettingsParity:
             "historySearchField",
         ]:
             assert f'objectName: "{object_name}"' in qml_source
+
+    def test_hotkeys_section_uses_standard_shortcut_management_ui(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        assert 'objectName: "hotkeysToolbar"' in qml_source
+        assert 'objectName: "hotkeysListView"' in qml_source
+        assert 'objectName: "hotkeyCaptureButton"' in qml_source
+        assert 'objectName: "hotkeyCapturePanel"' in qml_source
+        assert 'objectName: "hotkeyRecorderSurface"' in qml_source
+        assert 'objectName: "hotkeyStatusLabel"' in qml_source
+        assert 'objectName: "hotkeyDelegateChangeButton"' in qml_source
+        assert 'objectName: "hotkeyDelegateRemoveButton"' in qml_source
+        assert "function hotkeyLabelText" in qml_source
+        assert 'root.t("active_hotkeys", "Active hotkeys")' in qml_source
+        assert 'root.t("add_shortcut", "Add shortcut")' in qml_source
+        assert 'root.t("capture_cancel_hint", "Press Esc to cancel")' in qml_source
+        assert 'root.t("remove", "Remove")' in qml_source
+        assert "color: palette.base" in qml_source
+        assert "color: palette.alternateBase" not in qml_source
+        assert "border.color: palette.highlight" not in qml_source
+        assert "border.color: palette.mid" in qml_source
+        assert 'objectName: "hotkeysField"' not in qml_source
+        assert "one_hotkey_per_line" not in qml_source
+
+    def test_provider_settings_are_progressively_disclosed(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        for expected in [
+            'visible: root.selectedTranscriptionProvider === "local"',
+            'visible: root.selectedTranscriptionProvider === "groq"',
+            'visible: root.selectedTranscriptionProvider === "siliconflow"',
+            'visible: root.selectedTranscriptionProvider === "qwen"',
+            'visible: root.selectedAiProvider === "openrouter"',
+            'visible: root.selectedAiProvider === "groq"',
+            'visible: root.selectedAiProvider === "nvidia"',
+            'visible: root.selectedAiProvider === "openai_compatible"',
+        ]:
+            assert expected in qml_source
+
+        assert 'title: root.t("provider_credentials", "Provider Credentials")' not in (
+            qml_source
+        )
+        assert 'ListElement { value: "qwen"; label: "Qwen ASR (Alibaba Cloud)" }' in (
+            qml_source
+        )
+        assert (
+            'ListElement { value: "openai_compatible"; label: "OpenAI Compatible" }'
+            in qml_source
+        )
+
+    def test_ai_behavior_and_prompt_copy_are_translated(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        for token in [
+            "filter_thinking_tags",
+            "enable_sentence_split",
+            "start_ai_after_first_chunk",
+            "enable_ai_streaming_output",
+            "system_prompt",
+            "system_prompt_help",
+            "system_prompt_placeholder",
+        ]:
+            assert f'root.t("{token}"' in qml_source
+
+        assert 'placeholderText: "System prompt"' not in qml_source
+
+    def test_ai_prompt_editor_uses_fixed_scrollable_editor(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        assert 'objectName: "aiPromptScrollView"' in qml_source
+        assert 'objectName: "aiPromptField"' in qml_source
+        assert "ScrollView {" in qml_source
+        assert "Layout.preferredHeight: 170" in qml_source
+        assert "Math.max(220, aiPromptField.contentHeight + 28)" not in qml_source
+        assert "wrapMode: TextEdit.WordWrap" in qml_source
+        assert "verticalAlignment: TextEdit.AlignTop" in qml_source
+        assert "ScrollBar.vertical.policy: ScrollBar.AsNeeded" in qml_source
+        assert "ScrollBar.horizontal.policy: ScrollBar.AlwaysOff" in qml_source
+
+    def test_settings_qml_updates_language_without_reopen(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtCore import QObject, QUrl
+        from PySide6.QtQml import QQmlApplicationEngine
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel, qml_path
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("settingsViewModel", view_model)
+        engine.rootContext().setContextProperty("settingsHost", None)
+        engine.load(QUrl.fromLocalFile(str(qml_path("FluentSettingsWindow.qml"))))
+        root = engine.rootObjects()[0]
+        apply_button = root.findChild(QObject, "applyButton")
+
+        assert apply_button.property("text") == "Apply"
+
+        view_model.setValue("ui.language", "zh-CN")
+        qapp.processEvents()
+
+        assert apply_button.property("text") == "应用"
+
+    def test_settings_qml_shows_only_selected_provider_cards(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtCore import QObject, QUrl
+        from PySide6.QtQml import QQmlApplicationEngine
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel, qml_path
+
+        mock_config_service.set_setting("transcription.provider", "qwen")
+        mock_config_service.set_setting("ai.provider", "openai_compatible")
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("settingsViewModel", view_model)
+        engine.rootContext().setContextProperty("settingsHost", None)
+        engine.load(QUrl.fromLocalFile(str(qml_path("FluentSettingsWindow.qml"))))
+        root = engine.rootObjects()[0]
+
+        root.setProperty("selectedSection", 2)
+        qapp.processEvents()
+        transcription_visible_cards = {
+            name: root.findChild(QObject, name).property("visible")
+            for name in [
+                "localTranscriptionCard",
+                "groqTranscriptionCard",
+                "siliconflowTranscriptionCard",
+                "qwenTranscriptionCard",
+            ]
+        }
+
+        root.setProperty("selectedSection", 3)
+        qapp.processEvents()
+        ai_visible_cards = {
+            name: root.findChild(QObject, name).property("visible")
+            for name in [
+                "openrouterAiCard",
+                "groqAiCard",
+                "nvidiaAiCard",
+                "openAiCompatibleAiCard",
+            ]
+        }
+
+        assert transcription_visible_cards == {
+            "localTranscriptionCard": False,
+            "groqTranscriptionCard": False,
+            "siliconflowTranscriptionCard": False,
+            "qwenTranscriptionCard": True,
+        }
+        assert ai_visible_cards == {
+            "openrouterAiCard": False,
+            "groqAiCard": False,
+            "nvidiaAiCard": False,
+            "openAiCompatibleAiCard": True,
+        }
 
 
 @pytest.mark.gui
@@ -196,11 +406,13 @@ class TestFluentRecordingOverlayHost:
         assert "function visualLevel" in qml_source
         assert 'objectName: "waveformMeter"' in qml_source
         assert "model: 11" in qml_source
-        assert "width: 252" in qml_source
+        assert "width: 232" in qml_source
         assert "height: 52" in qml_source
-        assert "anchors.leftMargin: 8" in qml_source
-        assert "anchors.rightMargin: 8" in qml_source
-        assert qml_source.count("Layout.preferredWidth: 54") == 2
+        assert "anchors.leftMargin: 7" in qml_source
+        assert "anchors.rightMargin: 7" in qml_source
+        assert "Layout.preferredWidth: 48" in qml_source
+        assert "Layout.preferredWidth: 42" in qml_source
+        assert "Layout.leftMargin: 4" in qml_source
 
     def test_settings_qml_uses_consistent_windows_ui_font(self):
         from sonicinput.ui.qml_bridge import qml_path
@@ -256,6 +468,37 @@ class TestFluentRecordingOverlayHost:
 
         assert int(overlay.root.x()) == 321
         assert int(overlay.root.y()) == 234
+
+    def test_overlay_position_respects_auto_save_setting(
+        self, qapp, mock_config_service
+    ):
+        from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay
+
+        overlay = FluentRecordingOverlay()
+        overlay.set_config_service(mock_config_service)
+        mock_config_service.set_setting("ui.overlay_position.auto_save", False)
+
+        overlay.save_position(321, 234)
+
+        assert mock_config_service.get_setting("ui.overlay_position.mode") != "custom"
+        assert mock_config_service.get_setting("ui.overlay_position.custom.x") != 321
+        assert mock_config_service.get_setting("ui.overlay_position.custom.y") != 234
+
+    def test_overlay_position_persists_screen_metadata(self, qapp, mock_config_service):
+        from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay
+
+        overlay = FluentRecordingOverlay()
+        overlay.set_config_service(mock_config_service)
+
+        overlay.save_position(321, 234)
+
+        last_screen = mock_config_service.get_setting(
+            "ui.overlay_position.last_screen", {}
+        )
+        assert isinstance(last_screen, dict)
+        assert "name" in last_screen
+        assert "geometry" in last_screen
+        assert "device_pixel_ratio" in last_screen
 
 
 @pytest.mark.gui

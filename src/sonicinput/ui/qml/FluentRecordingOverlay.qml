@@ -5,7 +5,7 @@ import QtQuick.Layouts
 Window {
     id: root
     objectName: "fluentRecordingOverlay"
-    width: 252
+    width: 232
     height: 52
     visible: viewModel ? viewModel.visible : false
     flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -64,12 +64,12 @@ Window {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            spacing: 4
+            anchors.leftMargin: 7
+            anchors.rightMargin: 7
+            spacing: 3
 
             RowLayout {
-                Layout.preferredWidth: 54
+                Layout.preferredWidth: 48
                 Layout.alignment: Qt.AlignVCenter
                 spacing: 5
 
@@ -94,6 +94,7 @@ Window {
                 objectName: "waveformMeter"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
+                Layout.leftMargin: 4
                 Layout.alignment: Qt.AlignVCenter
 
                 Row {
@@ -123,7 +124,7 @@ Window {
 
             Item {
                 id: stopSlot
-                Layout.preferredWidth: 54
+                Layout.preferredWidth: 42
                 Layout.fillHeight: true
                 Layout.alignment: Qt.AlignVCenter
 

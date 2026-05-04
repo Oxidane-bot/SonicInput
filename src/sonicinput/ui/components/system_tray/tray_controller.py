@@ -11,9 +11,8 @@ import time
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal
-from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QSystemTrayIcon
 
-from .... import __version__
 from ....core.interfaces import EventPriority, IEventService
 from ....core.interfaces.config import IConfigService
 from ....core.services.config.config_keys import ConfigKeys
@@ -65,6 +64,7 @@ class TrayController(QObject):
 
         # UI widget
         self._tray_widget: Optional[TrayWidget] = None
+        self._about_window = None
 
         # State tracking
         self._recording_state = RecordingState.IDLE
@@ -648,29 +648,15 @@ class TrayController(QObject):
             )
 
     def _show_about_dialog(self) -> None:
-        """Show about dialog"""
-        QMessageBox.about(
-            None,
-            QCoreApplication.translate("TrayController", "About Sonic Input"),
-            QCoreApplication.translate(
-                "TrayController",
-                "<h3>Sonic Input v{version}</h3>"
-                "<p>An AI-powered voice-to-text input solution for Windows.</p>"
-                "<p><b>Features:</b></p>"
-                "<ul>"
-                "<li>Local speech recognition (sherpa-onnx)</li>"
-                "<li>AI text optimization via OpenRouter</li>"
-                "<li>Smart text input methods</li>"
-                "<li>Global hotkey support</li>"
-                "</ul>"
-                "<p><b>Hotkeys:</b></p>"
-                "<ul>"
-                "<li>Global recording hotkey (configurable)</li>"
-                "<li>Double-click tray icon: Settings</li>"
-                "<li>Middle-click tray icon: Toggle recording</li>"
-                "</ul>",
-            ).format(version=__version__),
-        )
+        """Show Fluent about window."""
+        from ...fluent_about_window import FluentAboutWindow
+
+        if self._about_window is None:
+            self._about_window = FluentAboutWindow()
+
+        self._about_window.show()
+        self._about_window.raise_()
+        self._about_window.activateWindow()
 
     # ==================== Public Interface ====================
 

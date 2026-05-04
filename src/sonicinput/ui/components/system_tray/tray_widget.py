@@ -8,7 +8,14 @@ from typing import Dict, Optional
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import (
+    QLabel,
+    QMenu,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
+    QWidgetAction,
+)
 
 from ...styles.modern_styles import (
     ModernColors,
@@ -141,20 +148,35 @@ class TrayWidget(QObject):
 
         return QIcon(pixmap)
 
+    def _create_menu_header(self) -> QWidget:
+        header = QWidget()
+        header.setObjectName("trayMenuHeader")
+        header.setFixedWidth(220)
+
+        layout = QVBoxLayout(header)
+        layout.setContentsMargins(12, 10, 12, 9)
+        layout.setSpacing(4)
+
+        title = QLabel("SonicInput")
+        title.setObjectName("trayMenuTitle")
+        layout.addWidget(title)
+
+        self._status_label = QLabel(QCoreApplication.translate("TrayWidget", "Ready"))
+        self._status_label.setObjectName("trayMenuStatus")
+        layout.addWidget(self._status_label)
+
+        return header
+
     def _create_context_menu(self) -> None:
         """Create the context menu"""
         self._context_menu = QMenu()
         self._context_menu.setObjectName("sonic_tray_menu")
         self._context_menu.setStyleSheet(tray_menu_style())
 
-        # Status display (disabled)
-        status_action = QAction(
-            QCoreApplication.translate("TrayWidget", "Ready"), self._context_menu
-        )
-        status_action.setIcon(simple_text_icon("●", ModernColors.SUCCESS))
-        status_action.setEnabled(False)
-        self._context_menu.addAction(status_action)
-        self._menu_actions["status"] = status_action
+        header_action = QWidgetAction(self._context_menu)
+        header_action.setDefaultWidget(self._create_menu_header())
+        self._context_menu.addAction(header_action)
+        self._menu_actions["header"] = header_action
 
         self._context_menu.addSeparator()
 
@@ -224,10 +246,6 @@ class TrayWidget(QObject):
             self._menu_actions["settings"].setText(
                 QCoreApplication.translate("TrayWidget", "Settings")
             )
-        if "status" in self._menu_actions:
-            self._menu_actions["status"].setText(
-                QCoreApplication.translate("TrayWidget", "Ready")
-            )
         if "recording" in self._menu_actions:
             self._menu_actions["recording"].setText(
                 QCoreApplication.translate("TrayWidget", "Start Recording")
@@ -265,8 +283,9 @@ class TrayWidget(QObject):
         Args:
             status: Status text to display
         """
-        if "status" in self._menu_actions:
-            self._menu_actions["status"].setText(status)
+        label = getattr(self, "_status_label", None)
+        if label is not None:
+            label.setText(status)
 
     def update_recording_action_text(self, text: str) -> None:
         """Update the recording action text

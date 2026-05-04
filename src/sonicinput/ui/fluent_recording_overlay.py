@@ -65,9 +65,15 @@ class FluentRecordingOverlay(QWidget):
     def save_position(self, x: int, y: int) -> None:
         if self.config_service is None:
             return
+        if not self.config_service.get_setting("ui.overlay_position.auto_save", True):
+            return
+        x, y = self._clamp_to_screen(int(x), int(y))
         self.config_service.set_setting("ui.overlay_position.mode", "custom")
-        self.config_service.set_setting("ui.overlay_position.custom.x", int(x))
-        self.config_service.set_setting("ui.overlay_position.custom.y", int(y))
+        self.config_service.set_setting("ui.overlay_position.custom.x", x)
+        self.config_service.set_setting("ui.overlay_position.custom.y", y)
+        self.config_service.set_setting(
+            "ui.overlay_position.last_screen", self._current_screen_info()
+        )
         save = getattr(self.config_service, "save_config", None)
         if callable(save):
             save()
@@ -95,6 +101,19 @@ class FluentRecordingOverlay(QWidget):
             min(max(x, bounds.x()), max_x),
             min(max(y, bounds.y()), max_y),
         )
+
+    def _current_screen_info(self) -> dict[str, object]:
+        screen = self.root.screen()
+        if screen is None:
+            return {"name": "", "geometry": "", "device_pixel_ratio": 1.0}
+        geometry = screen.geometry()
+        return {
+            "name": screen.name(),
+            "geometry": (
+                f"{geometry.x()},{geometry.y()},{geometry.width()},{geometry.height()}"
+            ),
+            "device_pixel_ratio": float(screen.devicePixelRatio()),
+        }
 
     @property
     def is_recording(self) -> bool:
