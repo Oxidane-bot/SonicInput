@@ -368,23 +368,27 @@ class MainWindow(QMainWindow):
     def show_settings(self) -> None:
         """显示设置窗口"""
         try:
-            from .settings_window import SettingsWindow
-
             if not hasattr(self, "_settings_window") or not self._settings_window:
-                self._settings_window = SettingsWindow(
+                from .fluent_settings_window import FluentSettingsWindow
+
+                self._settings_window = FluentSettingsWindow(
                     self.ui_settings_service, self.ui_model_service
                 )
+                app_logger.log_audio_event("Fluent settings window created", {})
 
                 # 连接模型管理信号
-                self._settings_window.model_load_requested.connect(
-                    self._on_model_load_requested
-                )
-                self._settings_window.model_unload_requested.connect(
-                    self._on_model_unload_requested
-                )
-                self._settings_window.model_test_requested.connect(
-                    self._on_model_test_requested
-                )
+                if hasattr(self._settings_window, "model_load_requested"):
+                    self._settings_window.model_load_requested.connect(
+                        self._on_model_load_requested
+                    )
+                if hasattr(self._settings_window, "model_unload_requested"):
+                    self._settings_window.model_unload_requested.connect(
+                        self._on_model_unload_requested
+                    )
+                if hasattr(self._settings_window, "model_test_requested"):
+                    self._settings_window.model_test_requested.connect(
+                        self._on_model_test_requested
+                    )
 
             self._settings_window.show()
             self._settings_window.raise_()

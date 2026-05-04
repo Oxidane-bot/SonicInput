@@ -23,9 +23,8 @@ class RecordingOverlay(QWidget):
     _initialized = False
     _creation_lock = None  # Python threading lock for reliable thread safety
 
-    # 信号 (移除stop_recording_requested，因为用ESC键代替)
-
     # 线程安全信号
+    stop_recording_requested = Signal()
     show_recording_requested = Signal()
     hide_recording_requested = Signal()
     show_processing_requested = Signal()  # 显示处理状态
@@ -133,14 +132,16 @@ class RecordingOverlay(QWidget):
             app_logger.log_audio_event("Starting RecordingOverlay UI setup", {})
             # 使用UIBuilder构建UI
             ui_builder = OverlayUIBuilder()
-            ui_components = ui_builder.build_ui(self, self.hide_recording)
+            ui_components = ui_builder.build_ui(self, self.request_stop_recording)
 
             # 设置UI组件属性
             self.background_frame = ui_components["background_frame"]
             self.status_indicator = ui_components["status_indicator"]
             self.audio_level_bars = ui_components["audio_level_bars"]
+            self.title_label = ui_components["title_label"]
             self.time_label = ui_components["time_label"]
             self.close_button = ui_components["close_button"]
+            self.stop_button = ui_components["stop_button"]
             self.position_manager = ui_components["position_manager"]
             self.current_audio_level = ui_components["current_audio_level"]
             self.config_service = None  # 将在set_config_service中设置
@@ -551,6 +552,10 @@ class RecordingOverlay(QWidget):
         """Show recording status - Thread-safe public interface"""
         self.show_recording_requested.emit()
 
+    def request_stop_recording(self) -> None:
+        """Request recording stop from the owning application."""
+        self.stop_recording_requested.emit()
+
     def _show_recording_impl(self) -> None:
         """Show recording status - Internal implementation (Qt main thread only)
 
@@ -566,6 +571,9 @@ class RecordingOverlay(QWidget):
         # 更新状态指示器为录音状态（红色）
         try:
             self.status_indicator.set_state(StatusIndicator.STATE_RECORDING)
+            self.title_label.setText(
+                QCoreApplication.translate("RecordingOverlay", "Recording")
+            )
             self.time_label.setText("00:00")
         except Exception as e:
             app_logger.log_error(e, "status_update_show")
@@ -641,6 +649,9 @@ class RecordingOverlay(QWidget):
         try:
             # 切换到完成状态（绿色）
             self.status_indicator.set_state(StatusIndicator.STATE_COMPLETED)
+            self.title_label.setText(
+                QCoreApplication.translate("RecordingOverlay", "Completed")
+            )
 
             # 取消旧的延迟隐藏定时器（避免多个定时器冲突）
             if self.delayed_hide_timer.isActive():
@@ -666,6 +677,9 @@ class RecordingOverlay(QWidget):
         try:
             # 切换到警告状态（橙色）
             self.status_indicator.set_state(StatusIndicator.STATE_WARNING)
+            self.title_label.setText(
+                QCoreApplication.translate("RecordingOverlay", "Warning")
+            )
 
             # 取消旧的延迟隐藏定时器（避免多个定时器冲突）
             if self.delayed_hide_timer.isActive():
@@ -691,6 +705,9 @@ class RecordingOverlay(QWidget):
         try:
             # 切换到错误状态（深红色）
             self.status_indicator.set_state(StatusIndicator.STATE_ERROR)
+            self.title_label.setText(
+                QCoreApplication.translate("RecordingOverlay", "Error")
+            )
 
             # 取消旧的延迟隐藏定时器（避免多个定时器冲突）
             if self.delayed_hide_timer.isActive():
@@ -710,6 +727,9 @@ class RecordingOverlay(QWidget):
         try:
             # 设置处理状态（黄色）
             self.status_indicator.set_state(StatusIndicator.STATE_PROCESSING)
+            self.title_label.setText(
+                QCoreApplication.translate("RecordingOverlay", "Processing")
+            )
 
             # 停止录音计时器（录音已结束）
             # Phase 3: Removed `self.is_recording = False` - State already IDLE in StateManager

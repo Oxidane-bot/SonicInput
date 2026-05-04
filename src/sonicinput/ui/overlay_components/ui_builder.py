@@ -2,19 +2,21 @@
 
 from typing import Any, Dict, List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ...utils import app_logger
-from ..overlay import CloseButton, StatusIndicator
+from ..overlay import StatusIndicator
+from ..styles.modern_styles import overlay_hud_style
 from .position_manager import PositionManager
 
 
@@ -33,55 +35,55 @@ class OverlayUIBuilder:
         """初始化UI构建器"""
         app_logger.log_audio_event("OverlayUIBuilder initialized", {})
 
-    def build_ui(self, parent: QWidget, hide_recording_callback) -> Dict[str, Any]:
+    def build_ui(self, parent: QWidget, stop_recording_callback) -> Dict[str, Any]:
         """构建完整的UI并返回组件字典
 
         Args:
             parent: 父窗口组件
-            hide_recording_callback: 关闭按钮的回调函数
+            stop_recording_callback: 停止录音按钮的回调函数
 
         Returns:
             包含所有UI组件的字典
         """
         try:
-            # 主布局 - 更紧凑的间距
             main_layout = QVBoxLayout()
             main_layout.setContentsMargins(8, 8, 8, 8)
             main_layout.setSpacing(0)
 
-            # 创建Material Design背景框架
             background_frame = self._create_background_frame()
 
-            # 横向布局
             frame_layout = QHBoxLayout(background_frame)
-            frame_layout.setContentsMargins(8, 6, 8, 6)
-            frame_layout.setSpacing(8)
+            frame_layout.setContentsMargins(14, 10, 12, 10)
+            frame_layout.setSpacing(10)
 
-            # 创建状态指示器
             status_indicator = StatusIndicator(parent)
             frame_layout.addWidget(status_indicator, 0, Qt.AlignmentFlag.AlignCenter)
 
-            # 创建音频级别条
+            text_layout = QVBoxLayout()
+            text_layout.setContentsMargins(0, 0, 0, 0)
+            text_layout.setSpacing(3)
+
+            title_label = QLabel(
+                QCoreApplication.translate("RecordingOverlay", "Recording")
+            )
+            title_label.setObjectName("overlayTitle")
+            text_layout.addWidget(title_label)
+
+            time_label = self._create_time_label()
+            text_layout.addWidget(time_label)
+            frame_layout.addLayout(text_layout)
+
             audio_level_bars = self._create_audio_level_bars(frame_layout)
 
-            # 弹性空间
             frame_layout.addStretch()
 
-            # 创建时间标签
-            time_label = self._create_time_label()
-            frame_layout.addWidget(time_label)
+            stop_button = self._create_stop_button(stop_recording_callback)
+            frame_layout.addWidget(stop_button, 0, Qt.AlignmentFlag.AlignCenter)
 
-            # 创建关闭按钮
-            close_button = self._create_close_button(parent, hide_recording_callback)
-            frame_layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignCenter)
-
-            # 添加到主布局
             main_layout.addWidget(background_frame)
 
-            # 应用阴影效果
             self._apply_shadow_effect(background_frame)
 
-            # 设置父窗口属性
             self._setup_parent_widget(parent, main_layout)
 
             # 创建位置管理器
@@ -94,8 +96,10 @@ class OverlayUIBuilder:
                 "background_frame": background_frame,
                 "status_indicator": status_indicator,
                 "audio_level_bars": audio_level_bars,
+                "title_label": title_label,
                 "time_label": time_label,
-                "close_button": close_button,
+                "close_button": stop_button,
+                "stop_button": stop_button,
                 "position_manager": position_manager,
                 "current_audio_level": 0.0,  # 初始音频级别
             }
@@ -111,13 +115,8 @@ class OverlayUIBuilder:
             配置好的QFrame背景框架
         """
         background_frame = QFrame()
-        background_frame.setObjectName("recordingOverlayFrame")
-        background_frame.setStyleSheet("""
-            QFrame#recordingOverlayFrame {
-                background-color: #303030;
-                border-radius: 12px;
-            }
-        """)
+        background_frame.setObjectName("recordingOverlayHud")
+        background_frame.setStyleSheet(overlay_hud_style())
         return background_frame
 
     def _create_audio_level_bars(self, layout: QHBoxLayout) -> List[QLabel]:
@@ -131,13 +130,12 @@ class OverlayUIBuilder:
         """
         audio_level_bars = []
 
-        # 创建5个音频级别条 - Material Design风格
         for i in range(5):
             bar = QLabel()
-            bar.setFixedSize(4, 18)
+            bar.setFixedSize(5, 24)
             bar.setStyleSheet("""
                 QLabel {
-                    background-color: rgba(80, 80, 90, 100);
+                    background-color: rgba(92, 102, 128, 110);
                     border-radius: 2px;
                 }
             """)
@@ -153,37 +151,28 @@ class OverlayUIBuilder:
             配置好的时间标签
         """
         time_label = QLabel("00:00")
+        time_label.setObjectName("overlayTimer")
         font = time_label.font()
         font.setPointSize(9)
         time_label.setFont(font)
-        time_label.setStyleSheet("""
-            QLabel {
-                color: #CCCCCC;
-                background: transparent;
-            }
-        """)
         return time_label
 
-    def _create_close_button(self, parent: QWidget, hide_callback) -> CloseButton:
-        """创建关闭按钮
+    def _create_stop_button(self, stop_callback) -> QPushButton:
+        """创建停止录音按钮
 
         Args:
-            parent: 父窗口
-            hide_callback: 点击回调函数
+            stop_callback: 点击回调函数
 
         Returns:
-            配置好的关闭按钮
+            配置好的停止按钮
         """
-        close_button = CloseButton(parent)
-
-        # 实现点击事件
-        def close_button_click(event):
-            if event.button() == Qt.MouseButton.LeftButton:
-                hide_callback()
-
-        close_button.mousePressEvent = close_button_click
-
-        return close_button
+        stop_button = QPushButton("■")
+        stop_button.setObjectName("overlay_stop_button")
+        stop_button.setToolTip(
+            QCoreApplication.translate("RecordingOverlay", "Stop Recording")
+        )
+        stop_button.clicked.connect(stop_callback)
+        return stop_button
 
     def _apply_shadow_effect(self, frame: QFrame) -> None:
         """应用Material Design阴影效果
@@ -192,10 +181,10 @@ class OverlayUIBuilder:
             frame: 要应用阴影的框架
         """
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
+        shadow.setBlurRadius(26)
         shadow.setXOffset(0)
-        shadow.setYOffset(4)
-        shadow.setColor(QColor(0, 0, 0, 60))  # Material Elevation 8
+        shadow.setYOffset(6)
+        shadow.setColor(QColor(0, 0, 0, 110))
         frame.setGraphicsEffect(shadow)
 
     def _setup_parent_widget(self, parent: QWidget, layout: QVBoxLayout) -> None:
@@ -208,8 +197,7 @@ class OverlayUIBuilder:
         # 设置布局
         parent.setLayout(layout)
 
-        # 设置固定大小 - Material Design紧凑横向布局
-        parent.setFixedSize(200, 50)
+        parent.setFixedSize(300, 64)
 
         # 确保悬浮窗本身透明背景
         parent.setStyleSheet("""

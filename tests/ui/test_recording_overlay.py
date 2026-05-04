@@ -257,18 +257,14 @@ class TestRecordingOverlayComponents:
         assert hasattr(recording_overlay, "close_button")
         assert recording_overlay.close_button is not None
 
-    def test_close_button_click(self, qtbot, recording_overlay):
-        """测试关闭按钮点击"""
+    def test_close_button_click_requests_stop(self, qtbot, recording_overlay):
+        """测试浮窗按钮请求停止录音"""
         # 显示overlay
         recording_overlay.show()
         qtbot.waitExposed(recording_overlay, timeout=1000)
 
-        # 点击关闭按钮 (使用qtbot.mouseClick因为是自定义组件)
-        qtbot.mouseClick(recording_overlay.close_button, Qt.MouseButton.LeftButton)
-
-        # 验证overlay隐藏
-        qtbot.waitUntil(lambda: not recording_overlay.isVisible(), timeout=2000)
-        assert not recording_overlay.isVisible()
+        with qtbot.waitSignal(recording_overlay.stop_recording_requested, timeout=1000):
+            qtbot.mouseClick(recording_overlay.close_button, Qt.MouseButton.LeftButton)
 
 
 @pytest.mark.gui

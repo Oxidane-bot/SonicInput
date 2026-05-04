@@ -290,6 +290,7 @@ nuitka_cmd = [
     "--assume-yes-for-downloads",  # Allow required Nuitka helper downloads in non-interactive builds
     "--windows-console-mode=attach",  # Attach to console when launched from cmd, GUI when double-clicked
     "--enable-plugin=pyside6",  # Enable PySide6 plugin for Qt support
+    "--include-qt-plugins=qml",  # QML runtime plugins for Fluent Qt Quick surfaces
     # Package inclusions
     "--include-package=sonicinput",  # Main application package
     "--include-package=sherpa_onnx",  # sherpa-onnx package (local ASR engine, includes C extension)
@@ -297,7 +298,11 @@ nuitka_cmd = [
     f"--include-data-file={onnxruntime_dll}=sherpa_onnx/lib/onnxruntime.dll",
     "--include-module=sonicinput.utils.constants",  # Ensure constants.py is included
     "--include-module=PySide6.QtUiTools",  # qt_material needs QtUiTools at runtime
+    "--include-package=PySide6.QtQml",  # Fluent QML settings/overlay host
+    "--include-package=PySide6.QtQuick",  # Qt Quick scene graph/window support
+    "--include-package=PySide6.QtQuickControls2",  # FluentWinUI3 controls style
     f"--include-data-dir={staged_assets_dir}=assets",  # UI translations/fonts and other assets
+    "--include-data-dir=src/sonicinput/ui/qml=sonicinput/ui/qml",  # QML UI files
     # Windows API dependencies (for clipboard input and GUI operations)
     "--include-package=win32clipboard",  # Clipboard operations (clipboard input method)
     "--include-package=win32con",  # Windows constants
@@ -312,9 +317,7 @@ nuitka_cmd = [
     "--nofollow-import-to=tests",
     "--nofollow-import-to=scipy",
     "--nofollow-import-to=PySide6.QtPdf",
-    "--nofollow-import-to=PySide6.QtOpenGL",
     "--noinclude-dlls=qt6pdf.dll",
-    "--noinclude-dlls=qt6opengl.dll",
     # Application metadata
     "--windows-icon-from-ico=src/sonicinput/resources/icons/app_icon.ico",
     "--output-dir=dist",

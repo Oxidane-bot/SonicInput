@@ -10,6 +10,12 @@ from PySide6.QtCore import QCoreApplication, QObject, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from ...styles.modern_styles import (
+    ModernColors,
+    simple_text_icon,
+    tray_menu_style,
+)
+
 
 class TrayWidget(QObject):
     """Pure UI component for system tray
@@ -138,10 +144,14 @@ class TrayWidget(QObject):
     def _create_context_menu(self) -> None:
         """Create the context menu"""
         self._context_menu = QMenu()
+        self._context_menu.setObjectName("sonic_tray_menu")
+        self._context_menu.setStyleSheet(tray_menu_style())
+
         # Status display (disabled)
         status_action = QAction(
             QCoreApplication.translate("TrayWidget", "Ready"), self._context_menu
         )
+        status_action.setIcon(simple_text_icon("●", ModernColors.SUCCESS))
         status_action.setEnabled(False)
         self._context_menu.addAction(status_action)
         self._menu_actions["status"] = status_action
@@ -153,6 +163,7 @@ class TrayWidget(QObject):
             QCoreApplication.translate("TrayWidget", "Start Recording"),
             self._context_menu,
         )
+        recording_action.setIcon(simple_text_icon("●", ModernColors.RECORDING))
         recording_action.triggered.connect(
             lambda: self.menu_action_triggered.emit("toggle_recording")
         )
@@ -165,6 +176,7 @@ class TrayWidget(QObject):
         settings_action = QAction(
             QCoreApplication.translate("TrayWidget", "Settings"), self._context_menu
         )
+        settings_action.setIcon(simple_text_icon("⚙", ModernColors.ACCENT_2))
         settings_action.triggered.connect(
             lambda: self.menu_action_triggered.emit("show_settings")
         )
@@ -175,6 +187,7 @@ class TrayWidget(QObject):
         about_action = QAction(
             QCoreApplication.translate("TrayWidget", "About"), self._context_menu
         )
+        about_action.setIcon(simple_text_icon("i", ModernColors.TEXT_SECONDARY))
         about_action.triggered.connect(
             lambda: self.menu_action_triggered.emit("show_about")
         )
@@ -187,6 +200,7 @@ class TrayWidget(QObject):
         exit_action = QAction(
             QCoreApplication.translate("TrayWidget", "Exit"), self._context_menu
         )
+        exit_action.setIcon(simple_text_icon("×", ModernColors.WARNING))
         exit_action.triggered.connect(
             lambda: self.menu_action_triggered.emit("exit_application")
         )
@@ -209,6 +223,14 @@ class TrayWidget(QObject):
         if "settings" in self._menu_actions:
             self._menu_actions["settings"].setText(
                 QCoreApplication.translate("TrayWidget", "Settings")
+            )
+        if "status" in self._menu_actions:
+            self._menu_actions["status"].setText(
+                QCoreApplication.translate("TrayWidget", "Ready")
+            )
+        if "recording" in self._menu_actions:
+            self._menu_actions["recording"].setText(
+                QCoreApplication.translate("TrayWidget", "Start Recording")
             )
         if "about" in self._menu_actions:
             self._menu_actions["about"].setText(

@@ -199,19 +199,12 @@ def mock_ui_services():
 
 
 @pytest.fixture
-def recording_overlay(qtbot):
-    """创建 RecordingOverlay 实例
+def recording_overlay(qtbot, mock_config_service):
+    """创建 FluentRecordingOverlay 实例。"""
+    from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay
 
-    RecordingOverlay不需要配置服务,所以可以直接创建。
-    """
-    from sonicinput.ui.recording_overlay import RecordingOverlay
-
-    # 重置单例以确保测试隔离
-    RecordingOverlay._instance = None
-    RecordingOverlay._initialized = False
-
-    overlay = RecordingOverlay()
-    qtbot.addWidget(overlay)  # 确保测试结束后自动清理
+    overlay = FluentRecordingOverlay()
+    overlay.set_config_service(mock_config_service)
 
     yield overlay
 
@@ -226,11 +219,8 @@ def recording_overlay(qtbot):
 
 @pytest.fixture
 def settings_window(qtbot, mock_config_service):
-    """创建 SettingsWindow 实例(使用隔离配置)
-
-    这个fixture确保SettingsWindow使用临时配置,不会修改真实配置。
-    """
-    from sonicinput.ui.settings_window import SettingsWindow
+    """创建 FluentSettingsWindow 实例(使用隔离配置)。"""
+    from sonicinput.ui.fluent_settings_window import FluentSettingsWindow
 
     # 创建mock UI服务,但使用真实的配置服务方法
     mock_ui_settings_service = MagicMock()
@@ -275,18 +265,15 @@ def settings_window(qtbot, mock_config_service):
     mock_ui_model_service.get_state = Mock(return_value={"recording": False})
 
     # 创建设置窗口
-    window = SettingsWindow(
+    window = FluentSettingsWindow(
         ui_settings_service=mock_ui_settings_service,
         ui_model_service=mock_ui_model_service,
     )
-
-    qtbot.addWidget(window)
 
     yield window
 
     # 清理
     window.close()
-    window.deleteLater()
 
 
 # ============= SystemTray Fixtures =============

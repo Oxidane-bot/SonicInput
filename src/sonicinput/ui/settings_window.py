@@ -13,9 +13,11 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QListWidget,
+    QListWidgetItem,
     QScrollArea,
     QSpinBox,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +33,7 @@ from .settings_tabs import (
     HotkeyTab,
     TranscriptionTab,
 )
+from .styles.modern_styles import settings_window_style, simple_text_icon
 
 
 class WheelEventFilter(QObject):
@@ -124,15 +127,37 @@ class SettingsWindow(QMainWindow):
     def setup_ui(self) -> None:
         """设置UI界面"""
         central_widget = QWidget()
+        central_widget.setObjectName("settings_root")
         self.setCentralWidget(central_widget)
+        self.setStyleSheet(settings_window_style())
 
         # 主布局
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(12)
 
-        # 创建标签页
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setObjectName("tab_widget")
+        shell = QFrame()
+        shell.setObjectName("settings_shell")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+
+        self.settings_sidebar = QListWidget()
+        self.settings_sidebar.setObjectName("settings_sidebar")
+        self.settings_sidebar.setFixedWidth(190)
+        self.settings_sidebar.currentRowChanged.connect(self._on_sidebar_changed)
+        shell_layout.addWidget(self.settings_sidebar)
+
+        self.settings_content_stack = QStackedWidget()
+        self.settings_content_stack.setObjectName("settings_content_stack")
+        self.settings_content_stack.currentChanged.connect(
+            self._sync_sidebar_from_stack
+        )
+        shell_layout.addWidget(self.settings_content_stack, 1)
+
+        # Compatibility: existing tests and reset logic still use tab_widget.
+        self.tab_widget = self.settings_content_stack
+        self._tab_titles: list[str] = []
 
         # 使用独立的标签页模块
         self._create_scrollable_tab(
@@ -160,7 +185,10 @@ class SettingsWindow(QMainWindow):
             QCoreApplication.translate("SettingsWindow", "History"),
         )
 
-        main_layout.addWidget(self.tab_widget)
+        if self.settings_sidebar.count() > 0:
+            self.settings_sidebar.setCurrentRow(0)
+
+        main_layout.addWidget(shell, 1)
 
         # 底部按钮
         self.setup_bottom_buttons(main_layout)
@@ -182,8 +210,10 @@ class SettingsWindow(QMainWindow):
         )
 
         for index, title in enumerate(tab_titles):
-            if index < self.tab_widget.count():
-                self.tab_widget.setTabText(index, title)
+            if index < self.settings_sidebar.count():
+                self.settings_sidebar.item(index).setText(title)
+            if index < len(self._tab_titles):
+                self._tab_titles[index] = title
 
         self.apply_button.setText(QCoreApplication.translate("SettingsWindow", "Apply"))
         self.ok_button.setText(QCoreApplication.translate("SettingsWindow", "OK"))
@@ -235,17 +265,30 @@ class SettingsWindow(QMainWindow):
         )
 
     def _create_scrollable_tab(self, content_widget: QWidget, tab_name: str) -> None:
-        """创建带滚动的Tab页
+        """创建带滚动的设置页
 
         Args:
-            content_widget: Tab内容widget
-            tab_name: Tab名称
+            content_widget: 内容widget
+            tab_name: 页面名称
         """
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)  # 无边框，更现代
         scroll_area.setWidget(content_widget)
-        self.tab_widget.addTab(scroll_area, tab_name)
+        self.settings_content_stack.addWidget(scroll_area)
+        self._tab_titles.append(tab_name)
+
+        item = QListWidgetItem(tab_name)
+        item.setIcon(simple_text_icon("●"))
+        self.settings_sidebar.addItem(item)
+
+    def _on_sidebar_changed(self, index: int) -> None:
+        if index >= 0 and index != self.settings_content_stack.currentIndex():
+            self.settings_content_stack.setCurrentIndex(index)
+
+    def _sync_sidebar_from_stack(self, index: int) -> None:
+        if index >= 0 and index != self.settings_sidebar.currentRow():
+            self.settings_sidebar.setCurrentRow(index)
 
     def setup_bottom_buttons(self, main_layout: QVBoxLayout) -> None:
         """设置底部按钮"""

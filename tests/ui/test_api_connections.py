@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch, MagicMock
 from PySide6.QtWidgets import QMessageBox, QComboBox, QLineEdit, QPushButton
 from PySide6.QtCore import Qt
 
+pytestmark = pytest.mark.gui
+
 
 class TestAITabAPIConnections:
     """AI Tab API连接测试"""

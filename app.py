@@ -825,10 +825,10 @@ def run_gui():
 
         # Import Qt and UI components
         from PySide6.QtWidgets import QApplication
+        from PySide6.QtQuickControls2 import QQuickStyle
         from PySide6.QtCore import QTimer
         from sonicinput.ui.main_window import MainWindow
         from sonicinput.ui.components.system_tray.tray_controller import TrayController
-        from sonicinput.ui.recording_overlay import RecordingOverlay
         from sonicinput.core.voice_input_app import VoiceInputApp
 
         # Import qt-material for modern UI theming
@@ -849,6 +849,7 @@ def run_gui():
         qt_app = QApplication.instance()
         if qt_app is None:
             qt_app = QApplication(sys.argv)
+        QQuickStyle.setStyle("FluentWinUI3")
 
         apply_windows_ui_font(qt_app)
 
@@ -977,7 +978,10 @@ def run_gui():
         app_logger.debug(f"TrayController initialized and started: {tray_controller}")
 
         # Create recording overlay
-        recording_overlay = RecordingOverlay()
+        from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay
+
+        recording_overlay = FluentRecordingOverlay()
+        app_logger.log_audio_event("Fluent recording overlay created", {})
 
         # Set config service for position persistence
         recording_overlay.set_config_service(voice_app.config)
@@ -993,6 +997,7 @@ def run_gui():
         tray_controller.show_settings_requested.connect(main_window.show_settings)
         tray_controller.toggle_recording_requested.connect(main_window.toggle_recording)
         tray_controller.exit_application_requested.connect(qt_app.quit)
+        recording_overlay.stop_recording_requested.connect(main_window.toggle_recording)
 
         # Recording overlay signals (simplified - ESC key handled internally)
         # Note: TrayController now subscribes to events internally through event_service
