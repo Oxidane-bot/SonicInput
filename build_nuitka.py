@@ -118,6 +118,43 @@ def stage_assets() -> Path:
     return staging_dir
 
 
+def _resolve_pyside6_qml_dir() -> Path:
+    try:
+        import PySide6
+    except Exception as exc:
+        raise RuntimeError("PySide6 is required to stage QML runtime modules.") from exc
+
+    qml_dir = Path(PySide6.__file__).resolve().parent / "qml"
+    if not qml_dir.exists():
+        raise RuntimeError(f"PySide6 QML directory not found: {qml_dir}")
+    return qml_dir
+
+
+def stage_qml_runtime() -> Path:
+    """Stage only the QML imports used by the Fluent UI surfaces."""
+    source_qml_dir = _resolve_pyside6_qml_dir()
+    staging_dir = Path("build") / "qml_staging"
+    target_root = staging_dir / "PySide6" / "qml"
+
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    qml_imports = [
+        "Qt",
+        "QtCore",
+        "QtQml",
+        "QtQuick",
+    ]
+    for import_name in qml_imports:
+        source_dir = source_qml_dir / import_name
+        if not source_dir.exists():
+            raise RuntimeError(f"Required QML import not found: {source_dir}")
+        shutil.copytree(source_dir, target_root / import_name)
+
+    return staging_dir
+
+
 def _remove_reserved_files(package_name: str) -> None:
     """Remove Windows-reserved filenames (e.g., NUL) from package data."""
     try:
@@ -269,8 +306,10 @@ build_start = time.perf_counter()
 
 stage_start = time.perf_counter()
 staged_assets_dir = stage_assets()
+staged_qml_dir = stage_qml_runtime()
 stage_elapsed = time.perf_counter() - stage_start
 print(f"Using staged assets: {staged_assets_dir}")
+print(f"Using staged QML runtime: {staged_qml_dir}")
 print(f"[TIME] Asset staging: {stage_elapsed:.2f}s")
 _remove_reserved_files("sherpa_onnx")
 onnxruntime_dll = _find_onnxruntime_dll()
@@ -290,7 +329,6 @@ nuitka_cmd = [
     "--assume-yes-for-downloads",  # Allow required Nuitka helper downloads in non-interactive builds
     "--windows-console-mode=attach",  # Attach to console when launched from cmd, GUI when double-clicked
     "--enable-plugin=pyside6",  # Enable PySide6 plugin for Qt support
-    "--include-qt-plugins=qml",  # QML runtime plugins for Fluent Qt Quick surfaces
     # Package inclusions
     "--include-package=sonicinput",  # Main application package
     "--include-package=sherpa_onnx",  # sherpa-onnx package (local ASR engine, includes C extension)
@@ -302,6 +340,7 @@ nuitka_cmd = [
     "--include-package=PySide6.QtQuick",  # Qt Quick scene graph/window support
     "--include-package=PySide6.QtQuickControls2",  # FluentWinUI3 controls style
     f"--include-data-dir={staged_assets_dir}=assets",  # UI translations/fonts and other assets
+    f"--include-data-dir={staged_qml_dir}=.",  # Minimal QML imports used by Fluent surfaces
     "--include-data-dir=src/sonicinput/ui/qml=sonicinput/ui/qml",  # QML UI files
     # Windows API dependencies (for clipboard input and GUI operations)
     "--include-package=win32clipboard",  # Clipboard operations (clipboard input method)
@@ -317,7 +356,15 @@ nuitka_cmd = [
     "--nofollow-import-to=tests",
     "--nofollow-import-to=scipy",
     "--nofollow-import-to=PySide6.QtPdf",
+    "--nofollow-import-to=PySide6.QtWebEngineCore",
+    "--nofollow-import-to=PySide6.QtWebEngineQuick",
+    "--nofollow-import-to=PySide6.QtWebEngineWidgets",
+    "--nofollow-import-to=PySide6.QtWebView",
     "--noinclude-dlls=qt6pdf.dll",
+    "--noinclude-dlls=qt6pdfquick.dll",
+    "--noinclude-dlls=qt6pdfwidgets.dll",
+    "--noinclude-dlls=qt6web*.dll",
+    "--noinclude-dlls=*webengine*.dll",
     # Application metadata
     "--windows-icon-from-ico=src/sonicinput/resources/icons/app_icon.ico",
     "--output-dir=dist",
@@ -326,10 +373,6 @@ nuitka_cmd = [
 
 qt_dll_names = [
     "Qt6UiTools.dll",
-    "Qt6Designer.dll",
-    "Qt6DesignerComponents.dll",
-    "Qt6OpenGL.dll",
-    "Qt6OpenGLWidgets.dll",
     "pyside6.abi3.dll",
     "pyside6qml.abi3.dll",
 ]

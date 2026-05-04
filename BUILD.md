@@ -23,18 +23,17 @@ uv sync --extra local --group dev
 uv run python build_nuitka.py
 ```
 
-**输出文件**：`dist/SonicInput-v{version}-win64.exe
+**输出文件**：`dist/SonicInput-v{version}-win64.exe`
 **可选离线包**:
 - 设置 `SONICINPUT_OFFLINE_MODELS_DIR` 指向模型根目录（包含两个已解压的模型文件夹）
 - 运行 `uv run python build_nuitka.py`
 - 输出 `dist/SonicInput-v{version}-win64-offline.zip`（包含 exe + `models/`）
-`
 
 **特性**：
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小：~40-50MB
+- 文件大小：~66MB（v0.7.2，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
 
 ## 构建说明
 
@@ -51,13 +50,17 @@ uv run python build_nuitka.py
 "--include-package=sonicinput"      # 包含主应用包
 "--include-package=sherpa_onnx"     # 包含 sherpa-onnx 包（本地版）
 "--include-data-dir=assets=assets"  # UI assets (i18n, fonts)
+"--include-data-dir=build/qml_staging=." # 精简 QML runtime staging
 "--include-package-data=sherpa_onnx"# 包含 sherpa-onnx 数据文件和 C 扩展
 
 # 排除项
 "--nofollow-import-to=pytest"       # 排除测试依赖
 "--nofollow-import-to=mypy"         # 排除类型检查依赖
 "--nofollow-import-to=tests"        # 排除测试模块
+"--nofollow-import-to=PySide6.QtWebEngine*" # 排除未使用的 WebEngine
 ```
+
+Qt Quick / QML UI 使用 `build_nuitka.py` 中的 `stage_qml_runtime()` 精简复制必要 QML imports。不要重新启用 `--include-qt-plugins=qml` 作为默认构建参数；该参数会全量打包 `PySide6/qml`，容易把 `Qt6WebEngineCore.dll` 等未使用的大体积模块带入 exe。
 
 ### sherpa-onnx C 扩展处理
 
@@ -122,8 +125,10 @@ uv sync --extra local --group dev
 
 **解决**：
 1. 检查是否意外包含了测试依赖
-2. 添加更多 `--nofollow-import-to` 排除项
-3. 考虑构建云端版（不包含 sherpa-onnx）
+2. 检查 `dist/app.dist` 是否包含 `Qt6WebEngineCore.dll`、`qt6webengine*.dll` 或 `PySide6/qml/QtWebEngine/`
+3. 确认没有启用 `--include-qt-plugins=qml`，并使用 `stage_qml_runtime()` 生成的精简 QML runtime
+4. 添加更多 `--nofollow-import-to` / `--noinclude-dlls` 排除项
+5. 考虑构建云端版（不包含 sherpa-onnx）
 
 ### Q4: 运行时提示缺少 DLL
 
@@ -233,8 +238,8 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ---
 
-**最后更新**：2025-11-13
-**适用版本**：v0.3.0+
+**最后更新**：2026-05-04
+**适用版本**：v0.7.2+
 
 
 ## Release Script

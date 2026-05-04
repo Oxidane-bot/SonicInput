@@ -9,15 +9,12 @@
 - Ready to use: clipboard / text / GUI entry points
 - No admin needed: Win32 RegisterHotKey (default F12, customizable), conflict prompts
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
-- Small footprint: onefile ~52 MB (v0.6.4)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
 
-## What’s New (v0.6.4)
-- Improved chunk-stop flow to reduce long tail waits and stop-path jitter
-- Faster history search/stats via FTS + async aggregate queries
-- Switched history pagination to keyset for smoother large-history scrolling
-- Kept provider/mode/duration/fallback diagnostics in history, while simplifying the main table view
-- Batch reprocess now preserves original records and writes new reprocessed entries for easier comparison
+## What’s New (v0.7.2)
+- Migrated the settings window to Qt Quick / QML FluentWinUI3, keeping the main settings surfaces for language, hotkeys, transcription, AI, audio input, and history
+- Migrated the recording overlay to Fluent QML, redesigning it as a compact waveform capsule with persisted drag position
+- Fixed runtime language application and aligned Chinese UI font rendering
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -28,7 +25,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.6.4-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
+1. Download `SonicInput-v0.7.2-win64.exe` from [v0.7.2 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.2)
 2. Run the exe; default hotkey is F12 (use Alt+H or customize if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 
