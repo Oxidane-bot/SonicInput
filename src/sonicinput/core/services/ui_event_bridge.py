@@ -9,9 +9,22 @@
 
 from typing import Any, Callable, Dict
 
+from PySide6.QtCore import QObject, QThread, Signal
+
 from ...utils import app_logger
 from ..interfaces import IEventService
 from .events import Events
+
+
+class _UIThreadDispatcher(QObject):
+    dispatch = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.dispatch.connect(self._execute)
+
+    def _execute(self, callback: Callable[[], None]) -> None:
+        callback()
 
 
 class UIEventBridge:
@@ -34,6 +47,7 @@ class UIEventBridge:
         self._overlay = None
         self._event_handlers: Dict[str, Callable] = {}
         self._is_listening = False
+        self._ui_dispatcher = _UIThreadDispatcher()
 
         app_logger.log_audio_event("UIEventBridge initialized", {})
 
@@ -75,7 +89,7 @@ class UIEventBridge:
             app_logger.log_audio_event(
                 "UIEventBridge: Calling overlay.show_recording()", {}
             )
-            self._overlay.show_recording()
+            self._call_overlay("show_recording")
         else:
             app_logger.log_audio_event(
                 "UIEventBridge: WARNING - overlay is None, cannot show recording", {}
@@ -87,7 +101,7 @@ class UIEventBridge:
     def handle_recording_stopped(self, data: dict) -> None:
         """处理录音停止事件"""
         if self._overlay:
-            self._overlay.show_processing()
+            self._call_overlay("show_processing")
 
         # 执行自定义处理器
         self._execute_custom_handler(Events.RECORDING_STOPPED, data)
@@ -95,7 +109,7 @@ class UIEventBridge:
     def handle_ai_processing_started(self, data: Any = None) -> None:
         """处理AI处理开始事件"""
         if self._overlay:
-            self._overlay.set_status_text("AI Processing...")
+            self._call_overlay("set_status_text", "AI Processing...")
 
         # 执行自定义处理器
         self._execute_custom_handler(Events.AI_PROCESSING_STARTED, data)
@@ -103,9 +117,7 @@ class UIEventBridge:
     def handle_ai_processing_completed(self, data: Any = None) -> None:
         """处理AI处理完成事件"""
         if self._overlay:
-            from ...ui.overlay import StatusIndicator
-
-            self._overlay.status_indicator.set_state(StatusIndicator.STATE_COMPLETED)
+            self._call_overlay("show_completed", delay_ms=500)
 
         # 执行自定义处理器
         self._execute_custom_handler(Events.AI_PROCESSING_COMPLETED, data)
@@ -113,7 +125,7 @@ class UIEventBridge:
     def handle_text_input_completed(self, text: str) -> None:
         """处理文本输入完成事件"""
         if self._overlay:
-            self._overlay.show_completed(delay_ms=500)
+            self._call_overlay("show_completed", delay_ms=500)
 
         # 执行自定义处理器
         self._execute_custom_handler(Events.TEXT_INPUT_COMPLETED, text)
@@ -129,13 +141,13 @@ class UIEventBridge:
             # 检查是否是AI相关的错误（但流程会继续）
             if "AI" in error_msg or "processing" in error_msg.lower():
                 # AI错误：显示警告色（橙色），延迟1.5秒隐藏
-                self._overlay.show_warning(delay_ms=1500)
+                self._call_overlay("show_warning", delay_ms=1500)
                 app_logger.log_audio_event(
                     "AI error handled - showing warning state", {"error_msg": error_msg}
                 )
             else:
                 # 其他错误：显示错误色（红色），延迟2秒隐藏
-                self._overlay.show_error(delay_ms=2000)
+                self._call_overlay("show_error", delay_ms=2000)
                 app_logger.log_audio_event(
                     "Critical error handled - showing error state",
                     {"error_msg": error_msg},
@@ -147,7 +159,7 @@ class UIEventBridge:
     def handle_audio_level_update(self, level: float) -> None:
         """处理音频级别更新事件"""
         if self._overlay:
-            self._overlay.update_audio_level(level)
+            self._call_overlay("update_audio_level", level)
 
         # 执行自定义处理器
         self._execute_custom_handler(Events.AUDIO_LEVEL_UPDATE, level)
@@ -204,6 +216,25 @@ class UIEventBridge:
                 self._event_handlers[event_name](data)
             except Exception as e:
                 app_logger.log_error(e, f"custom_event_handler_{event_name}")
+
+    def _call_overlay(self, method_name: str, *args, **kwargs) -> None:
+        overlay = self._overlay
+        if overlay is None:
+            return
+
+        def invoke() -> None:
+            current_overlay = self._overlay
+            if current_overlay is None:
+                return
+            getattr(current_overlay, method_name)(*args, **kwargs)
+
+        self._run_on_ui_thread(invoke)
+
+    def _run_on_ui_thread(self, callback: Callable[[], None]) -> None:
+        if QThread.currentThread() == self._ui_dispatcher.thread():
+            callback()
+            return
+        self._ui_dispatcher.dispatch.emit(callback)
 
     @property
     def has_overlay(self) -> bool:

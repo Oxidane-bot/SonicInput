@@ -44,6 +44,8 @@ class AudioRecorder(LifecycleComponent, IAudioService):
 
         # 线程安全：保护 _audio_data 的并发访问
         self._data_lock = threading.Lock()
+        self._state_lock = threading.RLock()
+        self._recording_stopping = False
 
         # 流式转录块时长（从配置读取，默认15秒）
         if config_service:
@@ -57,6 +59,7 @@ class AudioRecorder(LifecycleComponent, IAudioService):
 
         # 优化: 累积音频缓存,避免重复拼接 (v0.5.1 性能优化)
         self._accumulated_audio: np.ndarray = None  # 累积的完整音频数据
+        self._accumulated_chunk_count = 0  # 已合并进累积缓冲区的 _audio_data 块数
 
         # Auto-start to maintain backward compatibility
         # (old code called _initialize_audio() in __init__)
@@ -121,14 +124,16 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         """
         try:
             # Stop any active recording first
-            if self._recording:
+            if self.is_recording():
                 self.stop_recording()
 
             # Ensure recording thread terminates
-            if hasattr(self, "_record_thread") and self._record_thread:
+            with self._state_lock:
+                record_thread = self._record_thread
+            if record_thread:
                 try:
-                    self._record_thread.join(timeout=2.0)
-                    if self._record_thread.is_alive():
+                    record_thread.join(timeout=2.0)
+                    if record_thread.is_alive():
                         app_logger.log_warning(
                             "Recording thread did not terminate cleanly", {}
                         )
@@ -249,82 +254,86 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         Raises:
             AudioRecordingError: 启动录音失败时抛出
         """
-        if self._recording:
-            app_logger.log_audio_event("Recording already in progress", {})
-            return False
+        with self._state_lock:
+            if self._recording or self._recording_stopping:
+                app_logger.log_audio_event("Recording already in progress", {})
+                return False
 
-        # 尝试打开指定设备，失败时fallback到默认设备
-        attempted_devices = []
-        last_error = None
+            # 尝试打开指定设备，失败时fallback到默认设备
+            attempted_devices = []
+            last_error = None
 
-        # 尝试1：使用指定的设备
-        if device_id is not None:
+            # 尝试1：使用指定的设备
+            if device_id is not None:
+                try:
+                    self._stream = self._audio.open(
+                        format=self.format,
+                        channels=self.channels,
+                        rate=self._sample_rate,
+                        input=True,
+                        input_device_index=device_id,
+                        frames_per_buffer=self.chunk_size,
+                    )
+                    attempted_devices.append(f"Device {device_id} (specified)")
+                    app_logger.log_audio_event(
+                        "Opened specified audio device", {"device_id": device_id}
+                    )
+
+                    # 成功，继续启动录音
+                    self._device_id = device_id
+                    self._start_recording_thread()
+                    return True
+
+                except Exception as e:
+                    last_error = e
+                    attempted_devices.append(f"Device {device_id} (failed: {str(e)})")
+                    app_logger.log_audio_event(
+                        "Failed to open specified device, trying fallback",
+                        {"device_id": device_id, "error": str(e)},
+                    )
+
+            # 尝试2：Fallback到系统默认设备
             try:
                 self._stream = self._audio.open(
                     format=self.format,
                     channels=self.channels,
                     rate=self._sample_rate,
                     input=True,
-                    input_device_index=device_id,
+                    input_device_index=None,  # None = 系统默认设备
                     frames_per_buffer=self.chunk_size,
                 )
-                attempted_devices.append(f"Device {device_id} (specified)")
+                attempted_devices.append("System Default (fallback)")
                 app_logger.log_audio_event(
-                    "Opened specified audio device", {"device_id": device_id}
+                    "Fallback to system default device succeeded",
+                    {"attempted_devices": attempted_devices},
                 )
 
                 # 成功，继续启动录音
-                self._device_id = device_id
+                self._device_id = None
                 self._start_recording_thread()
                 return True
 
             except Exception as e:
+                self._stream = None
                 last_error = e
-                attempted_devices.append(f"Device {device_id} (failed: {str(e)})")
-                app_logger.log_audio_event(
-                    "Failed to open specified device, trying fallback",
-                    {"device_id": device_id, "error": str(e)},
+                attempted_devices.append(f"System Default (failed: {str(e)})")
+                app_logger.log_error(e, "start_recording_fallback_failed")
+
+                # 所有尝试都失败
+                error_msg = (
+                    f"Failed to start recording after trying: {', '.join(attempted_devices)}. "
+                    f"Last error: {str(last_error)}"
                 )
-
-        # 尝试2：Fallback到系统默认设备
-        try:
-            self._stream = self._audio.open(
-                format=self.format,
-                channels=self.channels,
-                rate=self._sample_rate,
-                input=True,
-                input_device_index=None,  # None = 系统默认设备
-                frames_per_buffer=self.chunk_size,
-            )
-            attempted_devices.append("System Default (fallback)")
-            app_logger.log_audio_event(
-                "Fallback to system default device succeeded",
-                {"attempted_devices": attempted_devices},
-            )
-
-            # 成功，继续启动录音
-            self._device_id = None
-            self._start_recording_thread()
-            return True
-
-        except Exception as e:
-            last_error = e
-            attempted_devices.append(f"System Default (failed: {str(e)})")
-            app_logger.log_error(e, "start_recording_fallback_failed")
-
-            # 所有尝试都失败
-            error_msg = (
-                f"Failed to start recording after trying: {', '.join(attempted_devices)}. "
-                f"Last error: {str(last_error)}"
-            )
-            raise AudioRecordingError(error_msg)
+                raise AudioRecordingError(error_msg)
 
     def _start_recording_thread(self) -> None:
         """启动录音线程（从 start_recording 中提取的辅助方法）"""
         self._recording = True
+        self._recording_stopping = False
         self._audio_data = []
         self._chunked_samples_sent = 0  # 重置chunk追踪计数器
         self._accumulated_audio = None  # 重置累积缓冲区 (性能优化)
+        self._accumulated_chunk_count = 0
 
         # 启动录音线程（30秒计时在线程内部实现）
         self._record_thread = threading.Thread(target=self._record_audio)
@@ -350,14 +359,24 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         last_chunk_time = time.time()  # 30秒分块计时
 
         try:
-            while self._recording and self._stream:
+            while True:
+                state_lock = getattr(self, "_state_lock", None)
+                if state_lock is None:
+                    state_lock = threading.RLock()
+                    self._state_lock = state_lock
+
+                with state_lock:
+                    recording = self._recording
+                    stream = self._stream
+
+                if not recording or stream is None:
+                    break
+
                 chunk_start_time = time.time()
 
                 # 只保护可能抛出 IOError 的音频流读取
                 try:
-                    data = self._stream.read(
-                        self.chunk_size, exception_on_overflow=False
-                    )
+                    data = stream.read(self.chunk_size, exception_on_overflow=False)
                 except (OSError, IOError) as stream_error:
                     app_logger.log_error(stream_error, "_record_audio_stream_read")
                     break
@@ -458,9 +477,15 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         """
         stop_time_start = time.time()
 
-        if not self._recording:
-            app_logger.log_audio_event("No recording in progress", {})
-            return np.array([]), 0.0
+        with self._state_lock:
+            if not self._recording:
+                app_logger.log_audio_event("No recording in progress", {})
+                return np.array([]), 0.0
+
+            self._recording = False
+            self._recording_stopping = True
+            record_thread = self._record_thread
+            stream = self._stream
 
         app_logger.log_audio_event(
             "Recording stop initiated",
@@ -472,13 +497,16 @@ class AudioRecorder(LifecycleComponent, IAudioService):
             },
         )
 
-        self._recording = False
         stop_flag_set_time = time.time()
 
         # 等待录音线程结束
-        if self._record_thread and self._record_thread.is_alive():
+        if (
+            record_thread
+            and record_thread.is_alive()
+            and record_thread is not threading.current_thread()
+        ):
             thread_join_start = time.time()
-            self._record_thread.join(timeout=1.0)
+            record_thread.join(timeout=1.0)
             thread_join_end = time.time()
 
             app_logger.log_audio_event(
@@ -490,14 +518,24 @@ class AudioRecorder(LifecycleComponent, IAudioService):
             )
 
         # 关闭音频流
-        if self._stream:
+        if stream:
             try:
-                self._stream.stop_stream()
-                self._stream.close()
+                stream.stop_stream()
+                stream.close()
             except Exception as e:
                 app_logger.log_error(e, "stop_recording")
             finally:
-                self._stream = None
+                with self._state_lock:
+                    if self._stream is stream:
+                        self._stream = None
+                    if self._record_thread is record_thread:
+                        self._record_thread = None
+                    self._recording_stopping = False
+        else:
+            with self._state_lock:
+                if self._record_thread is record_thread:
+                    self._record_thread = None
+                self._recording_stopping = False
         stream_close_end = time.time()
 
         # 合并音频数据（线程安全）
@@ -506,6 +544,8 @@ class AudioRecorder(LifecycleComponent, IAudioService):
                 audio_array = np.concatenate(self._audio_data)
                 chunks_count = len(self._audio_data)
             else:
+                with self._state_lock:
+                    self._recording_stopping = False
                 return np.array([]), 0.0
 
         # 计算实际音频时长（基于采样数）
@@ -546,23 +586,7 @@ class AudioRecorder(LifecycleComponent, IAudioService):
             if len(self._audio_data) == 0:
                 return
 
-            # 优化: 仅拼接新增的块到累积缓冲区
-            if self._accumulated_audio is None:
-                # 首次拼接: 拼接所有现有数据
-                self._accumulated_audio = np.concatenate(
-                    self._audio_data, axis=0
-                ).flatten()
-            else:
-                # 增量拼接: 仅拼接新块
-                # 计算已累积的块数（每个块大小为 chunk_size）
-                accumulated_chunks = len(self._accumulated_audio) // self.chunk_size
-                new_chunks = self._audio_data[accumulated_chunks:]
-
-                if new_chunks:
-                    new_audio = np.concatenate(new_chunks, axis=0).flatten()
-                    self._accumulated_audio = np.concatenate(
-                        [self._accumulated_audio, new_audio]
-                    )
+            self._sync_accumulated_audio_locked()
 
             total_samples = len(self._accumulated_audio)
 
@@ -612,28 +636,8 @@ class AudioRecorder(LifecycleComponent, IAudioService):
             if not self._audio_data:
                 return np.array([])
 
-            # 优化: 使用累积缓冲区或按需拼接
-            if self._accumulated_audio is not None:
-                # 已有累积缓冲区,直接切片
-                full_audio = self._accumulated_audio
-            else:
-                # 首次访问,拼接一次
-                full_audio = np.concatenate(self._audio_data, axis=0).flatten()
-
-            # 关键修复：stop_recording 可能发生在两个 chunk 回调之间，
-            # 此时 _accumulated_audio 只包含上一次 _on_chunk_ready() 时刻的数据。
-            # 如果这里直接复用 _accumulated_audio，会误判“无剩余音频”，导致最后一个分块不被发送。
-            if self._accumulated_audio is not None and self.chunk_size > 0:
-                accumulated_chunks = len(self._accumulated_audio) // self.chunk_size
-                if accumulated_chunks < len(self._audio_data):
-                    new_chunks = self._audio_data[accumulated_chunks:]
-                    if new_chunks:
-                        new_audio = np.concatenate(new_chunks, axis=0).flatten()
-                        if len(new_audio) > 0:
-                            self._accumulated_audio = np.concatenate(
-                                [self._accumulated_audio, new_audio]
-                            )
-                            full_audio = self._accumulated_audio
+            self._sync_accumulated_audio_locked()
+            full_audio = self._accumulated_audio
 
             total_samples = len(full_audio)
 
@@ -651,8 +655,52 @@ class AudioRecorder(LifecycleComponent, IAudioService):
                     },
                 )
                 return remaining_audio
-            else:
-                return np.array([])
+            return np.array([])
+        return np.array([])
+
+    def _sync_accumulated_audio_locked(self) -> None:
+        """Append newly recorded chunks to the accumulated buffer.
+
+        The caller must hold _data_lock. Chunk sizes can vary, so progress is
+        tracked by _audio_data index rather than by accumulated sample length.
+        """
+        if not self._audio_data:
+            self._accumulated_audio = np.array([])
+            self._accumulated_chunk_count = 0
+            return
+
+        if self._accumulated_audio is None:
+            self._accumulated_audio = np.concatenate(self._audio_data, axis=0).flatten()
+            self._accumulated_chunk_count = len(self._audio_data)
+            return
+
+        accumulated_chunk_count = self._get_accumulated_chunk_count_locked()
+        new_chunks = self._audio_data[accumulated_chunk_count:]
+        if new_chunks:
+            new_audio = np.concatenate(new_chunks, axis=0).flatten()
+            if len(new_audio) > 0:
+                self._accumulated_audio = np.concatenate(
+                    [self._accumulated_audio, new_audio]
+                )
+        self._accumulated_chunk_count = len(self._audio_data)
+
+    def _get_accumulated_chunk_count_locked(self) -> int:
+        chunk_count = getattr(self, "_accumulated_chunk_count", None)
+        if chunk_count is not None:
+            return min(chunk_count, len(self._audio_data))
+
+        if self._accumulated_audio is None:
+            return 0
+
+        accumulated_samples = len(self._accumulated_audio)
+        sample_count = 0
+        for index, chunk in enumerate(self._audio_data):
+            sample_count += len(chunk)
+            if sample_count == accumulated_samples:
+                return index + 1
+            if sample_count > accumulated_samples:
+                break
+        return 0
 
     def save_to_file(
         self, file_path: str, audio_data: Optional[np.ndarray] = None
@@ -778,7 +826,11 @@ class AudioRecorder(LifecycleComponent, IAudioService):
     @property
     def is_recording(self) -> bool:
         """检查是否正在录音"""
-        return self._recording
+        state_lock = getattr(self, "_state_lock", None)
+        if state_lock is None:
+            return self._recording
+        with state_lock:
+            return self._recording
 
     def get_audio_level(self) -> float:
         """获取当前音频音量级别"""
@@ -827,11 +879,12 @@ class AudioRecorder(LifecycleComponent, IAudioService):
                 return False
 
             # 如果正在录音，需要重新启动
-            was_recording = self._recording
+            was_recording = self.is_recording
             if was_recording:
                 self.stop_recording()
 
-            self._device_id = device_id
+            with self._state_lock:
+                self._device_id = device_id
             app_logger.log_audio_event("Audio device set", {"device_id": device_id})
 
             # 如果之前在录音，重新开始

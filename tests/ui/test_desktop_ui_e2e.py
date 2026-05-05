@@ -56,17 +56,9 @@ def test_main_window_uses_only_fluent_settings(qapp, monkeypatch, mock_config_se
         def activateWindow(self):
             return None
 
-    def legacy_settings_window_forbidden(*_args, **_kwargs):
-        raise AssertionError("legacy SettingsWindow must not be used as fallback")
-
     monkeypatch.setattr(
         "sonicinput.ui.fluent_settings_window.FluentSettingsWindow",
         FakeFluentSettings,
-    )
-    monkeypatch.setattr(
-        "sonicinput.ui.settings_window.SettingsWindow",
-        legacy_settings_window_forbidden,
-        raising=False,
     )
 
     window = MainWindow(
@@ -86,3 +78,13 @@ def test_app_creates_only_fluent_recording_overlay():
     assert "FluentRecordingOverlay" in source
     assert "from sonicinput.ui.recording_overlay import RecordingOverlay" not in source
     assert "fluent_overlay_fallback" not in source
+
+
+def test_public_recording_overlay_export_is_fluent_only():
+    import importlib.util
+
+    from sonicinput.ui import RecordingOverlay
+    from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay
+
+    assert RecordingOverlay is FluentRecordingOverlay
+    assert importlib.util.find_spec("sonicinput.ui.recording_overlay") is None

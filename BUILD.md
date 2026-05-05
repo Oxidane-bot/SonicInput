@@ -33,7 +33,7 @@ uv run python build_nuitka.py
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小：~66MB（v0.7.3，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
+- 文件大小：~66MB（v0.7.4，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
 
 ## 构建说明
 
@@ -224,22 +224,19 @@ sherpa_onnx/
 
 ## Localization (i18n)
 
-Update UI translations with Qt tools (PySide6 bundle):
+Runtime localization files are packaged from `assets/i18n/*.qm`.
+
+The legacy QWidget `.ts` sources were removed with the Fluent QML migration. If a release changes user-visible QML or bridge strings, regenerate translation sources from the current QML/Python surfaces before compiling fresh `.qm` files:
 
 ```bash
-# Extract/update source strings
-.\.venv\Lib\site-packages\PySide6\lupdate.exe -extensions py -recursive src app.py `
-  -ts assets\i18n\sonicinput_en_US.ts assets\i18n\sonicinput_zh_CN.ts
-
-# Compile .ts to .qm
-.\.venv\Lib\site-packages\PySide6\lrelease.exe assets\i18n\sonicinput_en_US.ts `
-  assets\i18n\sonicinput_zh_CN.ts
+# Existing release artifacts include compiled translations only.
+Get-ChildItem assets\i18n\*.qm
 ```
 
 ---
 
-**最后更新**：2026-05-04
-**适用版本**：v0.7.3+
+**最后更新**：2026-05-06
+**适用版本**：v0.7.4+
 
 
 ## Release Script

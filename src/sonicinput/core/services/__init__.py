@@ -4,7 +4,7 @@
 """
 
 from .ai_service import AIService
-from .config_service import ConfigService
+from .config import ConfigService
 from .event_bus import EventBus
 from .state_manager import StateManager
 from .transcription_service import TranscriptionResult, TranscriptionService

@@ -175,7 +175,7 @@ class UISettingsService:
         """保存配置到文件（别名方法）
 
         这个方法是为了兼容不同的调用方式而存在的。
-        settings_window.py 调用 save_config()，其他地方可能调用 save_settings()。
+        Settings UI 调用 save_config()，其他地方可能调用 save_settings()。
         实现立即保存，不使用防抖延迟。
         """
         if hasattr(self.config_service, "save_config"):
@@ -569,7 +569,7 @@ class UIModelService:
 
     def _get_engine(self) -> Optional[Any]:
         """获取底层引擎（内部方法）"""
-        # 优先检查 RefactoredTranscriptionService 的 model_manager
+        # 优先检查 TranscriptionService 的 model_manager
         if hasattr(self.speech_service, "model_manager"):
             model_manager = self.speech_service.model_manager
             if hasattr(model_manager, "_whisper_engine"):

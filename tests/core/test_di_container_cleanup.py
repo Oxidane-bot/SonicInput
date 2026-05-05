@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sonicinput.core.di_container import DIContainer
+from sonicinput.core.base.lifecycle_component import LifecycleComponent
+from sonicinput.core.di_container import DIContainer, create_container
 
 
 class _StoppableService:
@@ -54,3 +55,17 @@ def test_clear_continues_after_singleton_stop_exception() -> None:
     container.clear()
 
     assert container.is_registered(_FailingStopService) is False
+
+
+def test_create_container_does_not_start_lifecycle_components(monkeypatch) -> None:
+    start_calls = []
+
+    def record_start(self):
+        start_calls.append(self.component_name)
+        return True
+
+    monkeypatch.setattr(LifecycleComponent, "start", record_start)
+
+    create_container()
+
+    assert start_calls == []

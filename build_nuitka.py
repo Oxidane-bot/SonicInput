@@ -334,7 +334,6 @@ nuitka_cmd = [
     "--include-package=sherpa_onnx",  # sherpa-onnx package (local ASR engine, includes C extension)
     "--include-package-data=sherpa_onnx",  # Include model/config data (remove NUL file if present)
     f"--include-data-file={onnxruntime_dll}=sherpa_onnx/lib/onnxruntime.dll",
-    "--include-module=sonicinput.utils.constants",  # Ensure constants.py is included
     "--include-module=PySide6.QtUiTools",  # qt_material needs QtUiTools at runtime
     "--include-package=PySide6.QtQml",  # Fluent QML settings/overlay host
     "--include-package=PySide6.QtQuick",  # Qt Quick scene graph/window support

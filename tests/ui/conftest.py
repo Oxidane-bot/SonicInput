@@ -127,12 +127,12 @@ def mock_config_service(isolated_config):
 
     这个mock确保UI组件使用隔离的配置,不会触碰真实配置。
     """
-    from sonicinput.core.services.config.config_service_refactored import (
-        RefactoredConfigService,
+    from sonicinput.core.services.config.config_service import (
+        ConfigService,
     )
 
     # 创建使用临时配置文件的ConfigService
-    config_service = RefactoredConfigService(
+    config_service = ConfigService(
         config_path=str(isolated_config),
         event_service=None,  # UI测试不需要事件服务
     )

@@ -98,7 +98,7 @@ class StartupDiagnostics:
             "sonicinput.core.di_container",
             "sonicinput.core.hotkey_manager",
             "sonicinput.ui.main_window",
-            "sonicinput.ui.recording_overlay",
+            "sonicinput.ui.fluent_recording_overlay",
             "sonicinput.audio.recorder",
         ]
 

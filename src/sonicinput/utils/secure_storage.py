@@ -1,200 +1,225 @@
-"""安全存储工具 - 用于敏感信息加密存储"""
+"""Secure storage helpers for sensitive configuration values."""
+
+from __future__ import annotations
 
 import base64
-import hashlib
-import os
+import copy
+import re
+import threading
 from typing import Any, Dict
-
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from . import app_logger
 
 
+SENSITIVE_KEYWORDS = (
+    "api_key",
+    "apikey",
+    "access_key",
+    "secret_key",
+    "private_key",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "bearer",
+    "auth",
+    "authorization",
+    "credential",
+    "credentials",
+)
+
+_SENSITIVE_TOKENS = {
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "bearer",
+    "auth",
+    "authorization",
+    "credential",
+    "credentials",
+}
+
+_SENSITIVE_KEY_TOKEN_PAIRS = {
+    ("api", "key"),
+    ("access", "key"),
+    ("secret", "key"),
+    ("private", "key"),
+}
+
+
 class SecureStorage:
-    """安全存储类 - 提供敏感信息的加密存储功能"""
+    """Protect sensitive values using Windows DPAPI."""
+
+    PREFIX = "dpapi:v1:"
 
     def __init__(self, app_name: str = "SonicInput"):
-        """
-        初始化安全存储
-
-        Args:
-            app_name: 应用程序名称，用于生成唯一的加密密钥
-        """
         self.app_name = app_name
-        self._key = None
-        self._cipher = None
-        self._init_encryption()
+        self._available = self._check_dpapi_available()
+        if self._available:
+            app_logger.log_audio_event("SecureStorage initialized with DPAPI", {})
+        else:
+            app_logger.log_warning("SecureStorage DPAPI unavailable", {})
 
-    def _init_encryption(self) -> None:
-        """初始化加密器"""
+    def _check_dpapi_available(self) -> bool:
         try:
-            # 基于系统信息和应用程序名称生成密钥
-            machine_id = self._get_machine_id()
-            key_material = f"{self.app_name}:{machine_id}".encode()
+            import win32crypt  # noqa: F401
 
-            # 使用PBKDF2生成密钥
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=b"sonicinput_salt_2025",  # 固定salt，确保同一机器上密钥一致
-                iterations=100000,
-            )
-            key = base64.urlsafe_b64encode(kdf.derive(key_material))
-
-            self._cipher = Fernet(key)
-            app_logger.log_audio_event("SecureStorage initialized successfully", {})
-
+            return True
         except Exception as e:
             app_logger.log_error(e, "SecureStorage_init")
-            # 降级到不安全存储（仅在Windows环境中）
-            self._cipher = None
-            app_logger.log_warning("SecureStorage falling back to plain text", {})
+            return False
 
-    def _get_machine_id(self) -> str:
-        """获取机器唯一标识"""
-        try:
-            import platform
-            import uuid
+    @classmethod
+    def is_sensitive_key(cls, key: str) -> bool:
+        normalized = key.lower().replace("-", "_")
+        compact = re.sub(r"[^a-z0-9]", "", normalized)
+        tokens = tuple(token for token in re.split(r"[^a-z0-9]+", normalized) if token)
+        token_set = set(tokens)
 
-            # 尝试多种方式获取机器ID
-            machine_id_sources = [
-                lambda: str(uuid.getnode()),  # MAC地址
-                lambda: platform.node(),  # 计算机名
-                lambda: os.environ.get("COMPUTERNAME", ""),  # Windows计算机名
-                lambda: os.environ.get("USERNAME", ""),  # 用户名
-            ]
+        if compact in {keyword.replace("_", "") for keyword in SENSITIVE_KEYWORDS}:
+            return True
+        if token_set & _SENSITIVE_TOKENS:
+            return True
+        return any(
+            pair[0] in token_set and pair[1] in token_set
+            for pair in _SENSITIVE_KEY_TOKEN_PAIRS
+        )
 
-            combined_id = ""
-            for idx, source in enumerate(machine_id_sources):
-                try:
-                    combined_id += source() + "|"
-                except Exception as e:
-                    app_logger.log_error(
-                        e,
-                        "machine_id_source_failed",
-                        {
-                            "context": f"Failed to get machine ID from source #{idx}",
-                            "source_index": idx,
-                        },
-                    )
-                    continue
+    def _protect_bytes(self, data: bytes) -> bytes:
+        import win32crypt
 
-            # 如果所有方法都失败，使用默认值
-            if not combined_id:
-                combined_id = "default_machine_id"
+        return win32crypt.CryptProtectData(
+            data,
+            self.app_name,
+            None,
+            None,
+            None,
+            0,
+        )
 
-            # 生成最终ID的hash
-            return hashlib.sha256(combined_id.encode()).hexdigest()[:32]
+    def _unprotect_bytes(self, data: bytes) -> bytes:
+        import win32crypt
 
-        except Exception:
-            return "fallback_machine_id"
+        _description, plaintext = win32crypt.CryptUnprotectData(
+            data,
+            None,
+            None,
+            None,
+            0,
+        )
+        return plaintext
 
     def encrypt(self, data: str) -> str:
-        """
-        加密数据
+        """Encrypt a string for persistence.
 
-        Args:
-            data: 要加密的字符串
-
-        Returns:
-            加密后的base64字符串，如果加密失败则返回原始数据
+        Raises:
+            RuntimeError: DPAPI is unavailable or encryption fails.
         """
-        if not self._cipher or not data:
+        if not data or data.startswith(self.PREFIX):
             return data
+        if not self._available:
+            raise RuntimeError("DPAPI is not available")
 
         try:
-            encrypted_data = self._cipher.encrypt(data.encode())
-            return base64.urlsafe_b64encode(encrypted_data).decode()
+            protected = self._protect_bytes(data.encode("utf-8"))
+            encoded = base64.urlsafe_b64encode(protected).decode("ascii")
+            return f"{self.PREFIX}{encoded}"
         except Exception as e:
             app_logger.log_error(e, "SecureStorage_encrypt")
-            return data  # 降级到原始数据
+            raise RuntimeError("Failed to protect sensitive value") from e
 
     def decrypt(self, encrypted_data: str) -> str:
-        """
-        解密数据
+        """Decrypt a DPAPI-prefixed string.
 
-        Args:
-            encrypted_data: 加密的base64字符串
-
-        Returns:
-            解密后的原始字符串，如果解密失败则返回原始数据
+        Unprefixed values are legacy plaintext and are returned unchanged.
         """
-        if not self._cipher or not encrypted_data:
+        if not encrypted_data or not encrypted_data.startswith(self.PREFIX):
             return encrypted_data
+        if not self._available:
+            raise RuntimeError("DPAPI is not available")
 
         try:
-            # 尝试解密
-            encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
-            decrypted_data = self._cipher.decrypt(encrypted_bytes)
-            return decrypted_data.decode()
-        except Exception:
-            # 如果解密失败，可能是未加密的数据，直接返回
-            return encrypted_data
+            payload = encrypted_data[len(self.PREFIX) :]
+            protected = base64.urlsafe_b64decode(payload.encode("ascii"))
+            plaintext = self._unprotect_bytes(protected)
+            return plaintext.decode("utf-8")
+        except Exception as e:
+            app_logger.log_error(e, "SecureStorage_decrypt")
+            raise RuntimeError("Failed to unprotect sensitive value") from e
 
     def secure_store_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        安全存储字典（加密所有字符串值）
-
-        Args:
-            data: 要存储的字典
-
-        Returns:
-            加密后的字典
-        """
-        secure_data = {}
-        for key, value in data.items():
-            if isinstance(value, str) and value:  # 只加密非空字符串
-                # 检测是否是API密钥（包含'key', 'token', 'secret'等关键词）
-                if any(
-                    keyword in key.lower()
-                    for keyword in ["key", "token", "secret", "password"]
-                ):
-                    secure_data[key] = self.encrypt(value)
-                else:
-                    secure_data[key] = value
-            else:
-                secure_data[key] = value
-        return secure_data
+        """Return a copy with sensitive string values encrypted."""
+        return self._transform_dict(copy.deepcopy(data), encrypt=True)
 
     def secure_load_dict(self, secure_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        安全加载字典（解密所有加密值）
+        """Return a copy with DPAPI-prefixed sensitive values decrypted."""
+        return self._transform_dict(copy.deepcopy(secure_data), encrypt=False)
 
-        Args:
-            secure_data: 加密的字典
+    def _transform_dict(self, data: Dict[str, Any], *, encrypt: bool) -> Dict[str, Any]:
+        transformed: Dict[str, Any] = {}
+        for key, value in data.items():
+            transformed[key] = self._transform_value(
+                key,
+                value,
+                encrypt=encrypt,
+                sensitive_parent=self.is_sensitive_key(key),
+            )
+        return transformed
 
-        Returns:
-            解密后的字典
-        """
-        data = {}
-        for key, value in secure_data.items():
-            if isinstance(value, str) and value:
-                # 检测是否是API密钥字段
-                if any(
-                    keyword in key.lower()
-                    for keyword in ["key", "token", "secret", "password"]
-                ):
-                    data[key] = self.decrypt(value)
-                else:
-                    data[key] = value
-            else:
-                data[key] = value
-        return data
+    def _transform_value(
+        self,
+        key: str,
+        value: Any,
+        *,
+        encrypt: bool,
+        sensitive_parent: bool,
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                child_key: self._transform_value(
+                    child_key,
+                    child_value,
+                    encrypt=encrypt,
+                    sensitive_parent=sensitive_parent
+                    or self.is_sensitive_key(child_key),
+                )
+                for child_key, child_value in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._transform_value(
+                    key,
+                    item,
+                    encrypt=encrypt,
+                    sensitive_parent=sensitive_parent,
+                )
+                for item in value
+            ]
+        if isinstance(value, str) and value:
+            if encrypt and sensitive_parent:
+                return self.encrypt(value)
+            if not encrypt and (sensitive_parent or value.startswith(self.PREFIX)):
+                return self.decrypt(value)
+        return value
 
     def is_encryption_available(self) -> bool:
-        """检查加密是否可用"""
-        return self._cipher is not None
+        """Return whether DPAPI protection is available."""
+        return self._available
 
 
-# 全局安全存储实例
-_secure_storage = None
+_secure_storage: SecureStorage | None = None
+_secure_storage_lock = threading.Lock()
 
 
 def get_secure_storage() -> SecureStorage:
-    """获取全局安全存储实例"""
+    """Get the process-wide secure storage instance."""
     global _secure_storage
     if _secure_storage is None:
-        _secure_storage = SecureStorage()
+        with _secure_storage_lock:
+            if _secure_storage is None:
+                _secure_storage = SecureStorage()
     return _secure_storage

@@ -7,13 +7,13 @@ import pytest
 
 from sonicinput.core.base.lifecycle_component import ComponentState
 from sonicinput.core.services.task_queue_manager import TaskPriority
-from sonicinput.core.services.transcription_service_refactored import (
-    RefactoredTranscriptionService,
+from sonicinput.core.services.transcription_service import (
+    TranscriptionService,
 )
 
 
-def _make_running_service() -> RefactoredTranscriptionService:
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+def _make_running_service() -> TranscriptionService:
+    service = TranscriptionService.__new__(TranscriptionService)
     service._state = ComponentState.RUNNING
     service.task_queue_manager = Mock()
     service.streaming_coordinator = Mock()
@@ -21,7 +21,7 @@ def _make_running_service() -> RefactoredTranscriptionService:
 
 
 def test_start_streaming_processing_requires_running_state() -> None:
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service = TranscriptionService.__new__(TranscriptionService)
     service._state = ComponentState.STOPPED
     service.task_queue_manager = Mock()
     service.streaming_coordinator = Mock()

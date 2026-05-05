@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, TypeVar
 
 from ....utils import app_logger
+from ....utils.secure_storage import get_secure_storage
 from .config_defaults import get_default_config
 
 T = TypeVar("T")
@@ -34,6 +35,8 @@ class ConfigReader:
             if self.config_path.exists():
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     loaded_config = json.load(f)
+
+                loaded_config = get_secure_storage().secure_load_dict(loaded_config)
 
                 # 合并默认配置和加载的配置
                 self._config = self._merge_configs(self._default_config, loaded_config)

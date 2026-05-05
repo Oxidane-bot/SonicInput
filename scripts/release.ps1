@@ -29,7 +29,7 @@ if (-not $SkipBuild) {
         }
     }
 
-    uv run --cache-dir $uvCacheDir --group dev python build_nuitka.py
+    uv run --cache-dir $uvCacheDir --extra local --group dev python build_nuitka.py
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed (uv exit code: $LASTEXITCODE)"
     }

@@ -5,6 +5,7 @@
 """
 
 import re
+import threading
 import time
 from abc import abstractmethod
 from typing import Any, Dict, Optional, Tuple
@@ -197,6 +198,8 @@ class BaseAIClient(IAIService):
             max_retries: 最大重试次数
             filter_thinking: 是否过滤 AI 思考标签 (<think>...</think>)
         """
+        self._api_key_lock = threading.RLock()
+
         # 安全存储API密钥
         self._raw_api_key = api_key
         self._secure_storage = None
@@ -214,9 +217,6 @@ class BaseAIClient(IAIService):
         self.max_retries = max_retries
         self.retry_delay = 1.0  # 初始重试延迟（指数退避）
         self.filter_thinking = filter_thinking
-
-        # 设置请求头
-        self._update_headers()
 
         app_logger.log_audio_event(
             f"{self.get_provider_name()} client initialized",
@@ -252,7 +252,7 @@ class BaseAIClient(IAIService):
             response = self.session.get(
                 health_url,
                 timeout=5,  # 短超时用于健康检查
-                headers=self.session.headers,
+                headers=self._build_headers(),
             )
             response_time = time.time() - start_time
 
@@ -291,7 +291,8 @@ class BaseAIClient(IAIService):
     @property
     def api_key(self) -> str:
         """获取API密钥（兼容性属性）"""
-        return self._raw_api_key
+        with self._api_key_lock:
+            return self._raw_api_key
 
     @property
     def _last_tps(self) -> float:
@@ -303,7 +304,14 @@ class BaseAIClient(IAIService):
         return self._performance_monitor.get_tps()
 
     def _update_headers(self) -> None:
-        """更新 HTTP 请求头"""
+        """Backward-compatible no-op.
+
+        Headers are built per request so concurrent API key changes cannot
+        mutate shared Session headers used by in-flight requests.
+        """
+
+    def _build_headers(self) -> Dict[str, str]:
+        """Build HTTP headers for one request."""
         headers = {
             "Content-Type": "application/json",
         }
@@ -315,7 +323,7 @@ class BaseAIClient(IAIService):
         # 子类提供的额外请求头
         headers.update(self.get_extra_headers())
 
-        self.session.headers.update(headers)
+        return headers
 
     def set_api_key(self, api_key: str) -> None:
         """设置 API 密钥
@@ -323,8 +331,8 @@ class BaseAIClient(IAIService):
         Args:
             api_key: 新的 API 密钥
         """
-        self._raw_api_key = api_key
-        self._update_headers()
+        with self._api_key_lock:
+            self._raw_api_key = api_key
         app_logger.log_audio_event(
             f"API key updated for {self.get_provider_name()}",
             {"has_key": bool(api_key)},
@@ -565,6 +573,7 @@ class BaseAIClient(IAIService):
                     f"{self.get_base_url()}/chat/completions",
                     json=request_data,
                     timeout=self.timeout,
+                    headers=self._build_headers(),
                 )
 
                 response_time = time.time() - start_time
@@ -722,7 +731,8 @@ class BaseAIClient(IAIService):
                 response = self.session.post(
                     f"{self.get_base_url()}/chat/completions",
                     json=request_data,
-                    timeout=self.timeout,
+                    timeout=(self.timeout, self.timeout),
+                    headers=self._build_headers(),
                     stream=True,
                 )
 
@@ -770,9 +780,15 @@ class BaseAIClient(IAIService):
                             token_count += 1
                             try:
                                 on_token(content)
-                            except Exception:
-                                pass  # 回调异常不中断流程
-                    except Exception:
+                            except Exception as callback_error:
+                                app_logger.log_error(
+                                    callback_error,
+                                    "ai_streaming_token_callback",
+                                )
+                                raise self._create_api_error(
+                                    f"Token callback failed: {callback_error}"
+                                ) from callback_error
+                    except (ValueError, KeyError, TypeError):
                         continue
 
                 refined_text = "".join(full_text_parts)

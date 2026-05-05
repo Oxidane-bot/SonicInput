@@ -62,6 +62,8 @@ class EventListener:
     created_at: float = field(default_factory=time.time)
     call_count: int = 0
     last_called: float = 0.0
+    failure_count: int = 0
+    last_error: str = ""
     is_once: bool = False
     namespace: str = "default"
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -92,6 +94,7 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
         # 性能优化：缓存机制
         self._sorted_listeners_cache: Dict[str, List[EventListener]] = {}
         self._listener_version: Dict[str, int] = {}
+        self._listener_failure_count = 0
 
         # 获取logger
         self.logger = _get_logger()
@@ -279,9 +282,13 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
                         self._remove_listener(event_name, listener.id)
 
                 except Exception as e:
+                    listener.failure_count += 1
+                    listener.last_error = str(e)
+                    self._listener_failure_count += 1
                     if self.logger:
                         self.logger.error(
-                            f"Error in event listener for '{event_name}': {e}"
+                            f"Error in event listener for '{event_name}' "
+                            f"(listener_id={listener.id}): {e}"
                         )
 
                     # 继续处理其他监听器
@@ -331,8 +338,7 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
 
             self._listeners[event_name].append(listener)
 
-            # 清除缓存
-            self._invalidate_cache_for_event(event_name)
+            self._bump_listener_version(event_name)
 
             if self.logger:
                 self.logger.log_audio_event(
@@ -376,8 +382,7 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
         removed = len(self._listeners[event_name]) < original_count
 
         if removed:
-            # 清除缓存
-            self._invalidate_cache_for_event(event_name)
+            self._bump_listener_version(event_name)
 
         return removed
 
@@ -397,8 +402,7 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
             count = len(self._listeners[event_name])
             self._listeners[event_name].clear()
 
-            # 清除缓存
-            self._invalidate_cache_for_event(event_name)
+            self._bump_listener_version(event_name)
 
             if self.logger:
                 self.logger.log_audio_event(
@@ -410,15 +414,10 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
 
     def _get_sorted_listeners(self, event_name: str) -> List[EventListener]:
         """获取排序后的监听器列表（带缓存）"""
-        # 检查缓存
-        cache_key = f"{event_name}_{len(self._listeners.get(event_name, []))}"
+        version = self._listener_version.get(event_name, 0)
+        cache_key = f"{event_name}_{version}"
 
-        if (
-            cache_key in self._sorted_listeners_cache
-            and event_name in self._listener_version
-            and self._listener_version[event_name]
-            == len(self._listeners.get(event_name, []))
-        ):
+        if cache_key in self._sorted_listeners_cache:
             return self._sorted_listeners_cache[cache_key].copy()
 
         # 排序监听器
@@ -431,6 +430,13 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
 
         return listeners
 
+    def _bump_listener_version(self, event_name: str) -> None:
+        """Advance listener cache version after subscription changes."""
+        self._listener_version[event_name] = (
+            self._listener_version.get(event_name, 0) + 1
+        )
+        self._invalidate_cache_for_event(event_name)
+
     def _invalidate_cache_for_event(self, event_name: str) -> None:
         """清除指定事件的缓存"""
         keys_to_remove = [
@@ -440,9 +446,6 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
         ]
         for key in keys_to_remove:
             del self._sorted_listeners_cache[key]
-
-        if event_name in self._listener_version:
-            del self._listener_version[event_name]
 
     def get_registered_events(self, namespace: Optional[str] = None) -> List[str]:
         """获取已注册的事件列表
@@ -480,6 +483,7 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
                 "events_with_listeners": len(
                     [e for e in self._listeners if self._listeners[e]]
                 ),
+                "listener_failures": self._listener_failure_count,
             }
 
     def enable(self) -> None:

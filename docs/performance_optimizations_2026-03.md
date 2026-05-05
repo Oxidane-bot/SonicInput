@@ -15,7 +15,7 @@ and history workflows.
 ### 1) Chunked stop-path timeout no longer scales linearly with chunk count
 
 File:
-- `src/sonicinput/core/services/transcription_service_refactored.py`
+- `src/sonicinput/core/services/transcription_service.py`
 
 What changed:
 - Replaced per-chunk sequential timeout waits with a shared timeout budget.
@@ -41,7 +41,8 @@ User impact:
 
 Files:
 - `src/sonicinput/core/services/storage/history_storage_service.py`
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- `src/sonicinput/ui/qml/FluentSettingsWindow.qml`
+- `src/sonicinput/ui/qml_bridge.py`
 
 What changed:
 - Added keyset APIs (`get_records_keyset`, `search_records_keyset`).
@@ -54,7 +55,7 @@ User impact:
 ### 4) History statistics query moved off UI thread
 
 File:
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- Legacy QWidget history tab was removed in favor of the Fluent/QML settings surface.
 
 What changed:
 - Added `HistoryStatsWorker` to fetch aggregate stats asynchronously.
@@ -66,7 +67,7 @@ User impact:
 ### 5) Batch reprocessing now uses keyset read + batch insert
 
 File:
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- Legacy QWidget history tab was removed in favor of the Fluent/QML settings surface.
 
 What changed:
 - Batch worker reads source records via keyset (`ASC`) traversal.
@@ -78,7 +79,7 @@ User impact:
 ### 6) History diagnostics moved out of crowded main columns
 
 File:
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- Legacy QWidget history tab was removed in favor of the Fluent/QML settings surface.
 
 What changed:
 - Main history table is simplified to core columns only:
@@ -106,7 +107,6 @@ uv run pytest -q \
   tests/core/test_transcription_service_chunk_boundary_fix.py \
   tests/core/test_history_storage_schema_upgrade.py \
   tests/core/test_history_storage_keyset_pagination.py \
-  tests/core/test_history_batch_reprocessing_worker.py \
   tests/core/test_history_storage_order_by.py \
   tests/core/test_transcription_controller_chunked_fallback.py \
   tests/core/test_transcription_history_diagnostics.py

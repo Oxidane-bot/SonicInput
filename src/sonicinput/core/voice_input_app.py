@@ -140,6 +140,7 @@ class VoiceInputApp:
                 speech_service=self._speech_service,
                 input_service=self._input_service,
                 hotkey_service=self._hotkey_service,
+                history_service=self._history_service,
             )
             self.orchestrator.set_controllers(
                 recording=self._recording_controller,

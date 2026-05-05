@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ....utils import ConfigurationError, app_logger
+from ....utils.secure_storage import get_secure_storage
 
 
 class ConfigWriter:
@@ -96,10 +97,10 @@ class ConfigWriter:
                 if self._save_timer is not None:
                     self._save_timer.cancel()
                     self._save_timer = None
-                self._dirty = False
 
             # 确保目录存在
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_to_save = get_secure_storage().secure_store_dict(self._config)
 
             # 保存配置
             temp_path: Optional[Path] = None
@@ -112,12 +113,14 @@ class ConfigWriter:
                     prefix=f"{self.config_path.name}.",
                     suffix=".tmp",
                 ) as f:
-                    json.dump(self._config, f, indent=2, ensure_ascii=False)
+                    json.dump(config_to_save, f, indent=2, ensure_ascii=False)
                     f.flush()
                     os.fsync(f.fileno())
                     temp_path = Path(f.name)
 
                 os.replace(temp_path, self.config_path)
+                with self._timer_lock:
+                    self._dirty = False
             finally:
                 if temp_path and temp_path.exists():
                     try:

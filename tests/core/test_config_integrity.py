@@ -4,8 +4,8 @@ import copy
 import json
 
 from sonicinput.core.services.config.config_reader import ConfigReader
-from sonicinput.core.services.config.config_service_refactored import (
-    RefactoredConfigService,
+from sonicinput.core.services.config.config_service import (
+    ConfigService,
 )
 
 
@@ -46,7 +46,7 @@ def test_get_all_settings_returns_deep_copy(tmp_path):
 
 def test_config_service_default_config_is_isolated(tmp_path):
     config_path = tmp_path / "config.json"
-    service = RefactoredConfigService(config_path=str(config_path))
+    service = ConfigService(config_path=str(config_path))
 
     defaults = service.get_default_config()
     defaults["logging"]["level"] = "DEBUG"

@@ -30,7 +30,7 @@ SPEECH_SERVICE_RELOAD_TRIGGERS = [
 ]
 
 
-class RefactoredConfigService(LifecycleComponent, IConfigService):
+class ConfigService(LifecycleComponent, IConfigService):
     """重构后的配置服务 - 门面模式
 
     协调多个专职服务提供统一的配置管理接口，保持与原ConfigService完全兼容。
@@ -889,11 +889,11 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
             if isinstance(base_service, NullSpeechService):
                 return base_service
 
-            from ..transcription_service_refactored import (
-                RefactoredTranscriptionService,
+            from ..transcription_service import (
+                TranscriptionService,
             )
 
-            wrapped_service = RefactoredTranscriptionService(
+            wrapped_service = TranscriptionService(
                 speech_service_factory=lambda: base_service,
                 event_service=self._event_service,
                 config_service=self,

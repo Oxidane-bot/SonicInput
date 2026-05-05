@@ -6,8 +6,8 @@ from unittest.mock import Mock
 import numpy as np
 
 from sonicinput.core.base.lifecycle_component import ComponentState
-from sonicinput.core.services.transcription_service_refactored import (
-    RefactoredTranscriptionService,
+from sonicinput.core.services.transcription_service import (
+    TranscriptionService,
 )
 
 
@@ -23,7 +23,7 @@ def _make_chunk(chunk_id: int, audio: np.ndarray, text: str) -> SimpleNamespace:
 
 
 def test_stop_streaming_chunked_adds_context_overlap_and_dedupes_text() -> None:
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service = TranscriptionService.__new__(TranscriptionService)
     service.task_queue_manager = Mock()
     service.streaming_coordinator = Mock()
 
@@ -56,7 +56,7 @@ def test_stop_streaming_chunked_adds_context_overlap_and_dedupes_text() -> None:
 
 
 def test_stop_streaming_chunked_includes_chunks_completed_before_stop() -> None:
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service = TranscriptionService.__new__(TranscriptionService)
     service.task_queue_manager = Mock()
     service.streaming_coordinator = Mock()
 
@@ -83,7 +83,7 @@ def test_stop_streaming_chunked_includes_chunks_completed_before_stop() -> None:
 def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat() -> (
     None
 ):
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service = TranscriptionService.__new__(TranscriptionService)
     service._TEXT_OVERLAP_MAX_CHARS = 60
 
     merged_overlap = service._merge_chunk_texts_with_boundary_dedup(
@@ -96,7 +96,7 @@ def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat(
 
 
 def test_wait_for_chunk_results_uses_shared_timeout_budget() -> None:
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service = TranscriptionService.__new__(TranscriptionService)
     service._CHUNK_RESULT_MIN_TIMEOUT_SECONDS = 0.05
     service._CHUNK_WAIT_POLL_INTERVAL_SECONDS = 0.005
 
@@ -121,7 +121,7 @@ def test_wait_for_chunk_results_uses_shared_timeout_budget() -> None:
 
 
 def test_add_streaming_chunk_submits_immediate_transcription_task() -> None:
-    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+    service = TranscriptionService.__new__(TranscriptionService)
     service._state = ComponentState.RUNNING
     service._CHUNK_CONTEXT_OVERLAP_SECONDS = 0.6
     service._streaming_chunk_prev_tail = np.array([8.0, 9.0], dtype=np.float32)

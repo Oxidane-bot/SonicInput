@@ -11,10 +11,10 @@
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
 
-## What’s New (v0.7.3)
-- Migrated the settings window to Qt Quick / QML FluentWinUI3, keeping the main settings surfaces for language, hotkeys, transcription, AI, audio input, and history
-- Migrated the recording overlay to Fluent QML, redesigning it as a compact waveform capsule with persisted drag position
-- Filled the about window migration and polished provider switching, prompt scrolling, and multilingual settings details
+## What’s New (v0.7.4)
+- Hardened runtime security: API keys are protected with Windows DPAPI, and config writes no longer silently fall back to plaintext on encryption failure
+- Improved recording reliability: fixed chunked-mode audio accounting when device reads return short buffers, and synchronized start/stop state access
+- Unified the codebase: removed the old QWidget settings window, legacy recording overlay, and duplicate refactored modules; Fluent QML is now the only desktop UI
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -25,7 +25,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.7.3-win64.exe` from [v0.7.3 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.3)
+1. Download `SonicInput-v0.7.4-win64.exe` from [v0.7.4 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.4)
 2. Run the exe; default hotkey is F12 (use Alt+H or customize if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

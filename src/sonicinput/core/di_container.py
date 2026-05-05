@@ -287,14 +287,14 @@ def create_container() -> "DIContainer":
     from .services.application_orchestrator import ApplicationOrchestrator
 
     # 服务实现
-    from .services.config.config_service_refactored import RefactoredConfigService
+    from .services.config.config_service import ConfigService
     from .services.dynamic_event_system import DynamicEventSystem
     from .services.hot_reload_manager import HotReloadManager
     from .services.hotkey_service import HotkeyService
     from .services.launch_at_login_service import LaunchAtLoginService
     from .services.state_manager import StateManager
-    from .services.transcription_service_refactored import (
-        RefactoredTranscriptionService,
+    from .services.transcription_service import (
+        TranscriptionService,
     )
     from .services.ui_event_bridge import UIEventBridge
 
@@ -309,7 +309,7 @@ def create_container() -> "DIContainer":
     # 配置服务 - 单例（需要 EventService 和 Container）
     def create_config_service(container):
         event_service = container.resolve(IEventService)
-        return RefactoredConfigService(
+        return ConfigService(
             config_path=None, event_service=event_service, container=container
         )
 
@@ -422,14 +422,14 @@ def create_container() -> "DIContainer":
             if isinstance(base_service, NullSpeechService):
                 return base_service
 
-            # 使用RefactoredTranscriptionService包装,提供线程隔离和流式转录（传递 config 用于流式模式配置）
-            transcription_service = RefactoredTranscriptionService(
+            # 使用TranscriptionService包装,提供线程隔离和流式转录（传递 config 用于流式模式配置）
+            transcription_service = TranscriptionService(
                 speech_service_factory=lambda: base_service,
                 event_service=event_service,
                 config_service=config,
             )
 
-            # 启动RefactoredTranscriptionService
+            # 启动TranscriptionService
             if not transcription_service.start():
                 app_logger.log_audio_event(
                     "Local transcription service failed to start",
@@ -453,7 +453,7 @@ def create_container() -> "DIContainer":
                 cloud_service.load_model()
 
             app_logger.log_audio_event(
-                "Cloud speech service created (no RefactoredTranscriptionService wrapper)",
+                "Cloud speech service created (no TranscriptionService wrapper)",
                 {
                     "provider": provider,
                     "service_type": type(cloud_service).__name__,
@@ -656,50 +656,5 @@ def create_container() -> "DIContainer":
     # NOTE: cleanup priorities removed in NEW DIContainer API
     # The NEW API manages cleanup automatically based on dependency order
     # ========================================================================
-
-    # ========================================================================
-    # Phase 4 Bug Fix: Start LifecycleComponent services after registration
-    # ========================================================================
-    from ..utils import app_logger
-
-    # Services that need to be started (in dependency order)
-    lifecycle_services = [
-        (IConfigService, "ConfigService"),
-        (IStateManager, "StateManager"),
-        (IHotkeyService, "HotkeyService"),
-        (HistoryStorageService, "HistoryStorageService"),
-    ]
-
-    for service_interface, service_name in lifecycle_services:
-        try:
-            app_logger.log_audio_event(
-                f"Attempting to start {service_name}",
-                {"component": "di_container", "service": service_name},
-            )
-            service = container.resolve(service_interface)
-            has_start_method = hasattr(service, "start")
-            app_logger.log_audio_event(
-                f"{service_name} resolved",
-                {"component": "di_container", "has_start": has_start_method},
-            )
-            if has_start_method:
-                start_result = service.start()
-                if not start_result:
-                    app_logger.log_error(
-                        Exception(f"{service_name} failed to start"),
-                        f"di_container_start_{service_name}",
-                    )
-                else:
-                    app_logger.log_audio_event(
-                        f"{service_name} started successfully",
-                        {"component": "di_container"},
-                    )
-            else:
-                app_logger.log_audio_event(
-                    f"{service_name} has no start() method",
-                    {"component": "di_container"},
-                )
-        except Exception as e:
-            app_logger.log_error(e, f"di_container_start_{service_name}")
 
     return container

@@ -82,6 +82,7 @@ class ApplicationOrchestrator:
         self._speech_service: Optional[ISpeechService] = None
         self._input_service: Optional[IInputService] = None
         self._hotkey_service: Optional[IHotkeyService] = None
+        self._history_service: Optional[Any] = None
 
         # 控制器引用（运行时设置）
         self._controllers: Dict[str, Any] = {}
@@ -97,12 +98,14 @@ class ApplicationOrchestrator:
         speech_service: ISpeechService,
         input_service: IInputService,
         hotkey_service: IHotkeyService,
+        history_service: Optional[Any] = None,
     ) -> None:
         """设置服务引用并注册到热重载管理器"""
         self._audio_service = audio_service
         self._speech_service = speech_service
         self._input_service = input_service
         self._hotkey_service = hotkey_service
+        self._history_service = history_service
 
         # 注册支持热重载的服务
         self._register_hot_reload_services()
@@ -254,7 +257,14 @@ class ApplicationOrchestrator:
 
         logger.set_config_service(self.config)
 
-        # 核心服务已在DI容器中初始化，这里只需验证
+        self._start_lifecycle_service(self.config, "ConfigService")
+        self._start_lifecycle_service(self.state, "StateManager")
+        if self._history_service is not None:
+            self._start_lifecycle_service(
+                self._history_service, "HistoryStorageService"
+            )
+
+        # 核心服务已解析，这里验证运行时依赖
         if not all(
             [
                 self._audio_service,
@@ -263,6 +273,14 @@ class ApplicationOrchestrator:
             ]
         ):
             raise VoiceInputError("Core services not properly initialized")
+
+    def _start_lifecycle_service(self, service: Any, service_name: str) -> None:
+        if not hasattr(service, "start"):
+            return
+        if getattr(service, "is_running", False):
+            return
+        if not service.start():
+            raise VoiceInputError(f"{service_name} failed to start")
 
     def _init_controllers(self) -> None:
         """初始化控制器阶段"""
