@@ -101,13 +101,11 @@ class UIEventBridge:
         self._execute_custom_handler(Events.AI_PROCESSING_STARTED, data)
 
     def handle_ai_processing_completed(self, data: Any = None) -> None:
-        """处理AI处理完成事件"""
-        if self._overlay:
-            from ...ui.overlay import StatusIndicator
+        """处理AI处理完成事件
 
-            self._overlay.status_indicator.set_state(StatusIndicator.STATE_COMPLETED)
-
-        # 执行自定义处理器
+        Visual transition is handled when TEXT_INPUT_COMPLETED fires next; this
+        handler only forwards to any custom handler registered for the event.
+        """
         self._execute_custom_handler(Events.AI_PROCESSING_COMPLETED, data)
 
     def handle_text_input_completed(self, text: str) -> None:

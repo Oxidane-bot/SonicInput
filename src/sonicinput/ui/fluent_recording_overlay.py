@@ -1,6 +1,6 @@
 """Fluent QML recording overlay host."""
 
-from PySide6.QtCore import QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QWidget
@@ -90,6 +90,13 @@ class FluentRecordingOverlay(QWidget):
         self.root.setX(x)
         self.root.setY(y)
 
+    def _present_overlay(self) -> None:
+        """Show the overlay and reassert topmost window state."""
+        self.root.setFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.root.setFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+        self.root.show()
+        self.root.raise_()
+
     def _clamp_to_screen(self, x: int, y: int) -> tuple[int, int]:
         screen = self.root.screen()
         if screen is None:
@@ -136,7 +143,7 @@ class FluentRecordingOverlay(QWidget):
         self.recording_duration = 0
         self.view_model.showRecording()
         self.restore_position()
-        self.root.show()
+        self._present_overlay()
         self._timer.start(1000)
 
     def hide_recording(self) -> None:
@@ -153,14 +160,14 @@ class FluentRecordingOverlay(QWidget):
     def _show_processing_impl(self) -> None:
         self._timer.stop()
         self.view_model.showProcessing()
-        self.root.show()
+        self._present_overlay()
 
     def show_completed(self, delay_ms: int = 500) -> None:
         self.show_completed_requested.emit(delay_ms)
 
     def _show_completed_impl(self, delay_ms: int = 500) -> None:
         self.view_model.showCompleted()
-        self.root.show()
+        self._present_overlay()
         QTimer.singleShot(delay_ms, self.hide_recording)
 
     def show_warning(self, delay_ms: int = 1500) -> None:
@@ -168,7 +175,7 @@ class FluentRecordingOverlay(QWidget):
 
     def _show_warning_impl(self, delay_ms: int = 1500) -> None:
         self.view_model.showWarning()
-        self.root.show()
+        self._present_overlay()
         QTimer.singleShot(delay_ms, self.hide_recording)
 
     def show_error(self, delay_ms: int = 2000) -> None:
@@ -176,7 +183,7 @@ class FluentRecordingOverlay(QWidget):
 
     def _show_error_impl(self, delay_ms: int = 2000) -> None:
         self.view_model.showError()
-        self.root.show()
+        self._present_overlay()
         QTimer.singleShot(delay_ms, self.hide_recording)
 
     def set_status_text(self, text: str) -> None:

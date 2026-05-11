@@ -1,7 +1,7 @@
 """Tests for the Fluent QML UI layer."""
 
 import pytest
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from unittest.mock import Mock
@@ -408,6 +408,8 @@ class TestFluentRecordingOverlayHost:
         assert "model: 11" in qml_source
         assert "width: 232" in qml_source
         assert "height: 52" in qml_source
+        assert "Qt.WindowStaysOnTopHint" in qml_source
+        assert "Qt.WindowDoesNotAcceptFocus" in qml_source
         assert "anchors.leftMargin: 7" in qml_source
         assert "anchors.rightMargin: 7" in qml_source
         assert "Layout.preferredWidth: 48" in qml_source
@@ -449,6 +451,40 @@ class TestFluentRecordingOverlayHost:
 
         assert calls == [QApplication.instance().thread()]
         overlay.hide_recording()
+
+    def test_show_recording_reasserts_topmost_window_state(
+        self, qapp, mock_config_service, monkeypatch
+    ):
+        from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay
+
+        overlay = FluentRecordingOverlay()
+        overlay.set_config_service(mock_config_service)
+
+        calls = {"set_flag": [], "raise": 0, "activate": 0}
+
+        def record_set_flag(flag, enabled=True):
+            calls["set_flag"].append((flag, enabled))
+
+        def record_raise():
+            calls["raise"] += 1
+
+        def record_activate():
+            calls["activate"] += 1
+
+        monkeypatch.setattr(overlay.root, "setFlag", record_set_flag, raising=False)
+        monkeypatch.setattr(overlay.root, "raise_", record_raise, raising=False)
+        monkeypatch.setattr(
+            overlay.root, "requestActivate", record_activate, raising=False
+        )
+
+        overlay.show_recording()
+
+        assert calls["set_flag"] == [
+            (Qt.WindowType.WindowStaysOnTopHint, True),
+            (Qt.WindowType.WindowDoesNotAcceptFocus, True),
+        ]
+        assert calls["raise"] == 1
+        assert calls["activate"] == 0
 
     def test_overlay_drag_position_is_persisted(self, qapp, mock_config_service):
         from sonicinput.ui.fluent_recording_overlay import FluentRecordingOverlay

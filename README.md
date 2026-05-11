@@ -11,10 +11,10 @@
 - 双模式录制：Realtime 低延迟；Chunked 精度高（AI 后处理）
 - 云端/本地切换：Groq / OpenRouter / NVIDIA / OpenAI / 本地 sherpa-onnx
 
-## v0.7.3 更新
-- 设置窗口迁移到 Qt Quick / QML FluentWinUI3，保留语言、快捷键、转写、AI、音频输入和历史等主要配置入口
-- 录音悬浮窗迁移到 Fluent QML，改为更紧凑的波形胶囊并支持拖动后保存位置
-- 补齐 about 页面迁移与设置页多语言、提供商切换、提示词滚动等细节修复
+## v0.7.5 更新
+- 录音悬浮窗显示时重新置顶并保持不抢焦点，避免被其他窗口盖住
+- 收紧悬浮窗显示路径，补齐回归测试，确保录音状态切换时窗口层级稳定
+- 同步修正事件流转，避免 AI 处理完成状态过早覆盖后续文本输入完成态
 
 ## 性能优化记录
 - 2026-03：分块停止路径、历史搜索/分页、批量重处理等性能整理见  
@@ -25,7 +25,7 @@
 - 内存 4GB+，磁盘 500MB
 
 ## 快速开始
-1. 下载 [v0.7.3 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.3) 中的 `SonicInput-v0.7.3-win64.exe`
+1. 下载 [v0.7.5 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.5) 中的 `SonicInput-v0.7.5-win64.exe`
 2. 双击运行，默认热键 F12（若冲突可改用 Alt+H 或自定义）
 3. 在设置中填写需要的云端 API Key（可选），或直接使用本地模型
 

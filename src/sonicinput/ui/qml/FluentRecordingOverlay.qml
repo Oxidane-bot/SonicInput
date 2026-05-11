@@ -8,7 +8,7 @@ Window {
     width: 232
     height: 52
     visible: viewModel ? viewModel.visible : false
-    flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+    flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus
     color: "transparent"
     property var viewModel: overlayViewModel
     property int dragStartX: 0
