@@ -43,6 +43,7 @@ from .dynamic_event_system import (
     DynamicEventSystem,
     EventMetadata,
 )
+from .events import Events
 
 # 主要API - 直接使用动态事件系统
 EventBus = DynamicEventSystem
@@ -54,4 +55,5 @@ __all__ = [
     "EventBus",
     "DynamicEventSystem",
     "EventMetadata",
+    "Events",
 ]

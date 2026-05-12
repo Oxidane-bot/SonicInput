@@ -2,9 +2,38 @@
 
 import pytest
 from PySide6.QtCore import Qt, QUrl
+from PySide6.QtWidgets import QDialog
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from unittest.mock import Mock
+from datetime import datetime
+
+from sonicinput.core.interfaces import HistoryRecord
+
+
+def _make_history_record(record_id: str, text: str) -> HistoryRecord:
+    return HistoryRecord(
+        id=record_id,
+        timestamp=datetime(2026, 5, 12, 10, 30),
+        audio_file_path=f"C:/{record_id}.wav",
+        duration=2.5,
+        transcription_text=text,
+        transcription_provider="local",
+        transcription_status="success",
+        streaming_mode="chunked",
+        transcription_duration=0.2,
+        used_fallback=False,
+        fallback_type="none",
+        fallback_reason=None,
+        diagnostics_collected=True,
+        reprocess_parent_id=None,
+        transcription_error=None,
+        ai_optimized_text=f"{text} polished",
+        ai_provider="groq",
+        ai_status="success",
+        ai_error=None,
+        final_text=f"{text} final",
+    )
 
 
 @pytest.mark.gui
@@ -32,6 +61,116 @@ class TestFluentSettingsViewModel:
         assert view_model.sectionCount == 6
         assert view_model.sectionLabel(0) == "Application"
         assert view_model.sectionLabel(3) == "AI Processing"
+
+    def test_history_refresh_uses_history_service_and_updates_stats(
+        self, mock_config_service
+    ):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        records = [_make_history_record("h-1", "hello history")]
+        history_service = Mock()
+        history_service.get_records_keyset.return_value = records
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("")
+
+        mock_config_service.get_history_service.assert_called_once()
+        history_service.get_records_keyset.assert_called_once()
+        assert view_model.historyRecords[0]["id"] == "h-1"
+        assert view_model.historyRecords[0]["primaryText"] == "hello history final"
+        assert view_model.historyTotalText == "Total Records: 1"
+        assert view_model.historyDurationText == "Total Duration: 2.5s"
+        assert view_model.historySuccessRateText == "Success Rate: 100.0%"
+
+    def test_history_search_uses_keyset_search_and_query_stats(
+        self, mock_config_service
+    ):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        history_service = Mock()
+        history_service.search_records_keyset.return_value = [
+            _make_history_record("h-2", "needle")
+        ]
+        history_service.get_aggregate_stats.return_value = (3, 7.5, 2)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("needle")
+
+        history_service.search_records_keyset.assert_called_once()
+        assert history_service.search_records_keyset.call_args.kwargs["query"] == (
+            "needle"
+        )
+        history_service.get_aggregate_stats.assert_called_once_with(query="needle")
+        assert len(view_model.historyRecords) == 1
+        assert view_model.historySuccessRateText == "Success Rate: 66.7%"
+
+    def test_history_load_more_appends_next_keyset_page(self, mock_config_service):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        first = _make_history_record("h-1", "first")
+        second = _make_history_record("h-2", "second")
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [[first], [second]]
+        history_service.get_aggregate_stats.return_value = (2, 5.0, 2)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model._history_page_size = 1
+        view_model.refreshHistory("")
+        view_model.loadMoreHistory()
+
+        assert [item["id"] for item in view_model.historyRecords] == ["h-1", "h-2"]
+        second_call = history_service.get_records_keyset.call_args_list[1]
+        assert second_call.kwargs["cursor_timestamp"] == first.timestamp
+        assert second_call.kwargs["cursor_id"] == "h-1"
+
+    def test_history_detail_refreshes_after_dialog_accepts(
+        self, mock_config_service, monkeypatch
+    ):
+        import sonicinput.ui.qml_bridge as qml_bridge
+
+        record = _make_history_record("h-1", "detail")
+        history_service = Mock()
+        history_service.get_records_keyset.return_value = [record]
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+        created = []
+
+        class FakeDialog:
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+
+            def exec(self):
+                return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(qml_bridge, "HistoryDetailDialog", FakeDialog)
+
+        view_model = qml_bridge.FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("")
+        view_model.openHistoryDetail(0)
+
+        assert created[0]["record"] is record
+        assert history_service.get_records_keyset.call_count == 2
+
+    def test_history_delete_refreshes_model(self, mock_config_service):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        record = _make_history_record("h-1", "delete me")
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [[record], []]
+        history_service.get_aggregate_stats.return_value = (0, 0.0, 0)
+        history_service.delete_record.return_value = True
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("")
+
+        assert view_model.deleteHistoryRecord(0) is True
+        history_service.delete_record.assert_called_once_with("h-1")
+        assert view_model.historyRecords == []
 
 
 @pytest.mark.gui
@@ -372,6 +511,72 @@ class TestFluentSettingsParity:
             "nvidiaAiCard": False,
             "openAiCompatibleAiCard": True,
         }
+
+    def test_settings_qml_binds_history_page_to_view_model(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtCore import QObject, QUrl
+        from PySide6.QtQml import QQmlApplicationEngine
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel, qml_path
+
+        history_service = Mock()
+        history_service.get_records_keyset.return_value = [
+            _make_history_record("h-1", "qml record")
+        ]
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("settingsViewModel", view_model)
+        engine.rootContext().setContextProperty("settingsHost", None)
+        engine.load(QUrl.fromLocalFile(str(qml_path("FluentSettingsWindow.qml"))))
+        root = engine.rootObjects()[0]
+
+        root.setProperty("selectedSection", 5)
+        view_model.refreshHistory("")
+        qapp.processEvents()
+
+        history_list = root.findChild(QObject, "historyList")
+        empty_state = root.findChild(QObject, "historyEmptyState")
+        total_label = root.findChild(QObject, "historyTotalLabel")
+
+        assert history_list.property("count") == 1
+        assert empty_state.property("visible") is False
+        assert total_label.property("text") == "Total Records: 1"
+
+    def test_settings_qml_shows_history_empty_state_only_without_records(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtCore import QObject, QUrl
+        from PySide6.QtQml import QQmlApplicationEngine
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel, qml_path
+
+        history_service = Mock()
+        history_service.get_records_keyset.return_value = []
+        history_service.get_aggregate_stats.return_value = (0, 0.0, 0)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("settingsViewModel", view_model)
+        engine.rootContext().setContextProperty("settingsHost", None)
+        engine.load(QUrl.fromLocalFile(str(qml_path("FluentSettingsWindow.qml"))))
+        root = engine.rootObjects()[0]
+
+        root.setProperty("selectedSection", 5)
+        view_model.refreshHistory("")
+        qapp.processEvents()
+
+        history_list = root.findChild(QObject, "historyList")
+        empty_state = root.findChild(QObject, "historyEmptyState")
+
+        assert history_list.property("count") == 0
+        assert empty_state.property("visible") is True
 
 
 @pytest.mark.gui

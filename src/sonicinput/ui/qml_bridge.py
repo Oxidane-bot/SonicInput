@@ -1,9 +1,16 @@
 """Python bridge objects for the Fluent QML UI layer."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, Signal, Slot, Qt
+from PySide6.QtWidgets import QDialog, QMessageBox, QProgressDialog
+
+from .dialogs.batch_reprocess_dialog import BatchReprocessDialog
+from .settings_tabs.history_detail_dialog import HistoryDetailDialog
+from .settings_tabs.history_tab import HistoryTab
+from .settings_tabs.history_workers import BatchReprocessingWorker
 
 
 def qml_path(filename: str) -> Path:
@@ -145,6 +152,20 @@ class FluentSettingsViewModel(QObject):
         super().__init__(parent)
         self._settings_service = settings_service
         self._pending: dict[str, Any] = {}
+        self._history_service = None
+        self._history_records: list[Any] = []
+        self._history_rows: list[dict[str, Any]] = []
+        self._history_query = ""
+        self._history_page_size = 200
+        self._history_page_cursor_timestamp: datetime | None = None
+        self._history_page_cursor_id: str | None = None
+        self._history_has_more_pages = True
+        self._history_total_text = "Total Records: 0"
+        self._history_duration_text = "Total Duration: 0.0s"
+        self._history_success_rate_text = "Success Rate: 0%"
+        self._batch_worker = None
+        self._batch_progress_dialog = None
+        self._batch_cancel_requested = False
 
     def _get(self, key: str, default: Any = None) -> Any:
         if key in self._pending:
@@ -274,6 +295,128 @@ class FluentSettingsViewModel(QObject):
         self._pending[key] = value
         self.changed.emit()
 
+    def _get_history_service(self):
+        if self._history_service is None:
+            get_history_service = getattr(
+                self._settings_service, "get_history_service", None
+            )
+            if callable(get_history_service):
+                self._history_service = get_history_service()
+        return self._history_service
+
+    def _set_history_stats(
+        self, total_count: int, total_duration: float, success_count: int
+    ) -> None:
+        success_rate = (success_count / total_count * 100) if total_count > 0 else 0.0
+        self._history_total_text = f"Total Records: {total_count}"
+        self._history_duration_text = f"Total Duration: {total_duration:.1f}s"
+        self._history_success_rate_text = f"Success Rate: {success_rate:.1f}%"
+
+    def _update_history_stats(self) -> None:
+        service = self._get_history_service()
+        if not service:
+            self._set_history_stats(0, 0.0, 0)
+            return
+
+        try:
+            query = self._history_query or None
+            total_count, total_duration, success_count = service.get_aggregate_stats(
+                query=query
+            )
+            self._set_history_stats(
+                int(total_count),
+                float(total_duration),
+                int(success_count),
+            )
+        except Exception:
+            self._set_history_stats(0, 0.0, 0)
+
+    @staticmethod
+    def _history_status_display(record: Any) -> str:
+        return HistoryTab._get_ai_status_display(record)
+
+    @staticmethod
+    def _history_primary_text(record: Any) -> str:
+        final_text = getattr(record, "final_text", "") or ""
+        if final_text:
+            return final_text
+        ai_text = getattr(record, "ai_optimized_text", "") or ""
+        if getattr(record, "ai_status", "") == "success" and ai_text:
+            return ai_text
+        return getattr(record, "transcription_text", "") or ""
+
+    def _record_to_history_row(self, record: Any) -> dict[str, Any]:
+        timestamp = getattr(record, "timestamp", None)
+        if hasattr(timestamp, "strftime"):
+            display_time = timestamp.strftime("%m-%d %H:%M")
+            full_time = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            display_time = ""
+            full_time = ""
+
+        duration = float(getattr(record, "duration", 0.0) or 0.0)
+        transcription_text = getattr(record, "transcription_text", "") or ""
+        primary_text = self._history_primary_text(record)
+        return {
+            "id": getattr(record, "id", ""),
+            "displayTime": display_time,
+            "fullTime": full_time,
+            "durationText": f"{duration:.1f}s",
+            "transcriptionText": transcription_text,
+            "primaryText": primary_text,
+            "statusText": self._history_status_display(record),
+            "aiStatus": getattr(record, "ai_status", "") or "",
+            "tooltip": HistoryTab._build_diagnostic_tooltip(record),
+        }
+
+    def _load_history_page(self, append: bool) -> None:
+        service = self._get_history_service()
+        if not service:
+            if not append:
+                self._history_records = []
+                self._history_rows = []
+                self._set_history_stats(0, 0.0, 0)
+                self.changed.emit()
+            return
+
+        query = self._history_query
+        if query:
+            page_records = service.search_records_keyset(
+                query=query,
+                limit=self._history_page_size,
+                cursor_timestamp=self._history_page_cursor_timestamp,
+                cursor_id=self._history_page_cursor_id,
+            )
+        else:
+            page_records = service.get_records_keyset(
+                limit=self._history_page_size,
+                cursor_timestamp=self._history_page_cursor_timestamp,
+                cursor_id=self._history_page_cursor_id,
+            )
+
+        if not page_records:
+            self._history_has_more_pages = False
+            if not append:
+                self._history_records = []
+                self._history_rows = []
+            return
+
+        if append:
+            self._history_records.extend(page_records)
+            self._history_rows.extend(
+                self._record_to_history_row(record) for record in page_records
+            )
+        else:
+            self._history_records = list(page_records)
+            self._history_rows = [
+                self._record_to_history_row(record) for record in page_records
+            ]
+
+        last_record = page_records[-1]
+        self._history_page_cursor_timestamp = getattr(last_record, "timestamp", None)
+        self._history_page_cursor_id = getattr(last_record, "id", None)
+        self._history_has_more_pages = len(page_records) >= self._history_page_size
+
     @Slot(str, "QVariant", result="QVariant")
     def value(self, key: str, default: Any = None) -> Any:
         return self._get(key, default)
@@ -281,6 +424,22 @@ class FluentSettingsViewModel(QObject):
     @Property("QVariantList", notify=changed)
     def hotkeyList(self) -> list[str]:
         return self._get_hotkeys()
+
+    @Property("QVariantList", notify=changed)
+    def historyRecords(self) -> list[dict[str, Any]]:
+        return self._history_rows
+
+    @Property(str, notify=changed)
+    def historyTotalText(self) -> str:
+        return self._history_total_text
+
+    @Property(str, notify=changed)
+    def historyDurationText(self) -> str:
+        return self._history_duration_text
+
+    @Property(str, notify=changed)
+    def historySuccessRateText(self) -> str:
+        return self._history_success_rate_text
 
     @Property(int, notify=changed)
     def hotkeyCount(self) -> int:
@@ -477,6 +636,226 @@ class FluentSettingsViewModel(QObject):
         self._set_hotkeys(keys)
         self.changed.emit()
         return self._hotkey_result(True, "")
+
+    @Slot(str)
+    def refreshHistory(self, query: str = "") -> None:
+        self._history_query = str(query or "").strip()
+        self._history_page_cursor_timestamp = None
+        self._history_page_cursor_id = None
+        self._history_has_more_pages = True
+        self._load_history_page(append=False)
+        self._update_history_stats()
+        self.changed.emit()
+
+    @Slot()
+    def loadMoreHistory(self) -> None:
+        if not self._history_has_more_pages:
+            return
+        self._load_history_page(append=True)
+        self.changed.emit()
+
+    @Slot(int)
+    def openHistoryDetail(self, index: int) -> None:
+        if index < 0 or index >= len(self._history_records):
+            return
+
+        service = self._get_history_service()
+        if not service:
+            return
+
+        dialog = HistoryDetailDialog(
+            record=self._history_records[index],
+            parent_window=None,
+            settings_service=self._settings_service,
+            history_service=service,
+            parent=None,
+        )
+        result = dialog.exec()
+        if result == QDialog.DialogCode.Accepted:
+            self.refreshHistory(self._history_query)
+
+    @Slot(int)
+    def retryHistoryRecord(self, index: int) -> None:
+        self.openHistoryDetail(index)
+
+    @Slot(int, result=bool)
+    def deleteHistoryRecord(self, index: int) -> bool:
+        if index < 0 or index >= len(self._history_records):
+            return False
+
+        service = self._get_history_service()
+        if not service:
+            return False
+
+        record = self._history_records[index]
+        success = bool(service.delete_record(getattr(record, "id", "")))
+        if success:
+            self.refreshHistory(self._history_query)
+        return success
+
+    @Slot()
+    def startBatchReprocess(self) -> None:
+        service = self._get_history_service()
+        if not service:
+            QMessageBox.warning(
+                None,
+                "Error",
+                "History service not available. Please restart the application.",
+            )
+            return
+
+        try:
+            total_records = int(service.get_total_count())
+            if total_records <= 0:
+                QMessageBox.information(
+                    None,
+                    "No Records",
+                    "No history records found to reprocess.",
+                )
+                return
+
+            dialog = BatchReprocessDialog(total_records, None)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+
+            cd_seconds = dialog.get_cd_seconds()
+            reply = QMessageBox.question(
+                None,
+                "Confirm Batch Reprocessing",
+                (
+                    f"You are about to re-transcribe {total_records} records.\n\n"
+                    f"Cooldown: {cd_seconds} seconds between records\n"
+                    "Each successful retry will create a new history record.\n"
+                    "Original records will be preserved.\n"
+                    "This operation may take a long time and consume API quota.\n\n"
+                    "Are you sure you want to continue?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            self._start_batch_reprocessing(total_records, cd_seconds)
+        except Exception as exc:
+            QMessageBox.critical(
+                None,
+                "Error",
+                f"Failed to start batch reprocessing: {exc}",
+            )
+
+    def _start_batch_reprocessing(self, total_records: int, cd_seconds: int) -> None:
+        self._batch_cancel_requested = False
+        get_transcription_service = getattr(
+            self._settings_service, "get_transcription_service", None
+        )
+        get_ai_processing_controller = getattr(
+            self._settings_service, "get_ai_processing_controller", None
+        )
+        transcription_service = (
+            get_transcription_service() if callable(get_transcription_service) else None
+        )
+        ai_processing_controller = (
+            get_ai_processing_controller()
+            if callable(get_ai_processing_controller)
+            else None
+        )
+        history_service = self._get_history_service()
+
+        if not transcription_service or not history_service:
+            QMessageBox.critical(
+                None,
+                "Error",
+                "Required services not available. Please restart the application.",
+            )
+            return
+
+        self._batch_progress_dialog = QProgressDialog(
+            "Starting batch reprocessing...",
+            "Cancel",
+            0,
+            total_records,
+            None,
+        )
+        self._batch_progress_dialog.setWindowTitle("Batch Reprocessing")
+        self._batch_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self._batch_progress_dialog.setMinimumDuration(0)
+        self._batch_progress_dialog.setValue(0)
+
+        self._batch_worker = BatchReprocessingWorker(
+            total_records=total_records,
+            cd_seconds=cd_seconds,
+            transcription_service=transcription_service,
+            ai_processing_controller=ai_processing_controller,
+            config_service=self._settings_service,
+            history_service=history_service,
+        )
+        self._batch_worker.progress_updated.connect(self._on_batch_progress_updated)
+        self._batch_worker.batch_completed.connect(self._on_batch_completed)
+        self._batch_progress_dialog.canceled.connect(self._on_batch_canceled)
+        self._batch_worker.start()
+
+    def _on_batch_progress_updated(
+        self, current: int, total: int, record_id: str
+    ) -> None:
+        if self._batch_progress_dialog:
+            self._batch_progress_dialog.setValue(current)
+            self._batch_progress_dialog.setLabelText(
+                f"Processing {current}/{total} records...\n"
+                f"Current record: {record_id[:16]}..."
+            )
+
+    def _on_batch_completed(self, stats: dict) -> None:
+        if self._batch_progress_dialog:
+            self._batch_progress_dialog.close()
+            self._batch_progress_dialog = None
+
+        if self._batch_worker:
+            self._batch_worker.wait()
+            self._batch_worker = None
+
+        self.refreshHistory(self._history_query)
+
+        if self._batch_cancel_requested:
+            self._batch_cancel_requested = False
+            QMessageBox.information(
+                None,
+                "Batch Reprocessing Canceled",
+                "Batch reprocessing was canceled. Completed work has been kept, and remaining records were skipped.",
+            )
+            return
+
+        report_lines = [
+            "Batch Reprocessing Complete!",
+            "",
+            f"Total records: {stats.get('total', 0)}",
+            f"Successful: {stats.get('success', 0)}",
+            f"Skipped: {stats.get('skipped', 0)}",
+            f"Failed: {stats.get('failed', 0)}",
+        ]
+        errors = stats.get("errors", [])
+        if errors:
+            report_lines.append("")
+            report_lines.append(f"First {min(5, len(errors))} errors:")
+            report_lines.extend(f"  {error}" for error in errors[:5])
+            if len(errors) > 5:
+                report_lines.append(f"... and {len(errors) - 5} more errors")
+
+        QMessageBox.information(
+            None,
+            "Batch Reprocessing Complete",
+            "\n".join(report_lines),
+        )
+
+    def _on_batch_canceled(self) -> None:
+        self._batch_cancel_requested = True
+        if self._batch_progress_dialog:
+            self._batch_progress_dialog.setLabelText(
+                "Cancel requested...\nWaiting for the current record to finish safely."
+            )
+            self._batch_progress_dialog.setCancelButton(None)
+        if self._batch_worker:
+            self._batch_worker.stop()
 
     @Slot()
     def reload(self) -> None:

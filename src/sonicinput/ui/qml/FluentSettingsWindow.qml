@@ -1022,6 +1022,13 @@ ApplicationWindow {
 
                     SettingsCard {
                         title: root.t("history", "History")
+                        Timer {
+                            id: historySearchDebounce
+                            interval: 250
+                            repeat: false
+                            onTriggered: root.viewModel && root.viewModel.refreshHistory(historySearchField.text)
+                        }
+
                         RowLayout {
                             Layout.fillWidth: true
                             TextField {
@@ -1029,25 +1036,152 @@ ApplicationWindow {
                                 objectName: "historySearchField"
                                 placeholderText: root.t("search_history", "Search in transcription or AI text")
                                 Layout.fillWidth: true
+                                onTextChanged: historySearchDebounce.restart()
+                                onAccepted: root.viewModel && root.viewModel.refreshHistory(text)
                             }
-                            Button { text: root.t("refresh", "Refresh") }
-                            Button { text: root.t("batch_reprocess", "Batch Reprocess") }
+                            Button {
+                                objectName: "historyRefreshButton"
+                                text: root.t("refresh", "Refresh")
+                                onClicked: root.viewModel && root.viewModel.refreshHistory(historySearchField.text)
+                            }
+                            Button {
+                                objectName: "historyBatchReprocessButton"
+                                text: root.t("batch_reprocess", "Batch Reprocess")
+                                onClicked: root.viewModel && root.viewModel.startBatchReprocess()
+                            }
                         }
 
-                        ListView {
-                            objectName: "historyList"
+                        Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 320
+                            Layout.preferredHeight: 360
+                            radius: 8
+                            color: palette.base
+                            border.color: palette.mid
+                            border.width: 1
                             clip: true
-                            model: [root.t("no_history_records_loaded", "No history records loaded")]
-                            delegate: ItemDelegate { width: parent ? parent.width : 0; text: modelData }
+
+                            Label {
+                                id: historyEmptyState
+                                objectName: "historyEmptyState"
+                                anchors.centerIn: parent
+                                text: root.t("no_history_records_loaded", "No history records loaded")
+                                opacity: 0.62
+                                visible: historyList.count === 0
+                            }
+
+                            ListView {
+                                id: historyList
+                                objectName: "historyList"
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 6
+                                clip: true
+                                model: root.viewModel ? root.viewModel.historyRecords : []
+                                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                onMovementEnded: {
+                                    if (atYEnd && root.viewModel) {
+                                        root.viewModel.loadMoreHistory()
+                                    }
+                                }
+
+                                delegate: Rectangle {
+                                    width: ListView.view.width
+                                    height: 86
+                                    radius: 8
+                                    color: palette.window
+                                    border.color: palette.mid
+                                    border.width: 1
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.LeftButton
+                                        onDoubleClicked: root.viewModel && root.viewModel.openHistoryDetail(index)
+                                    }
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 10
+
+                                        ColumnLayout {
+                                            Layout.preferredWidth: 88
+                                            Layout.fillHeight: true
+                                            spacing: 3
+                                            Label {
+                                                text: modelData.displayTime
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: modelData.durationText
+                                                opacity: 0.7
+                                                font.pixelSize: 12
+                                                Layout.fillWidth: true
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            spacing: 4
+                                            Label {
+                                                text: modelData.primaryText
+                                                font.pixelSize: 13
+                                                font.weight: Font.Medium
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: modelData.transcriptionText
+                                                opacity: 0.68
+                                                font.pixelSize: 12
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                            Label {
+                                                text: modelData.fullTime
+                                                opacity: 0.52
+                                                font.pixelSize: 11
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                        }
+
+                                        Label {
+                                            text: modelData.statusText
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 12
+                                            Layout.preferredWidth: 74
+                                        }
+
+                                        Button {
+                                            objectName: "historyDetailButton"
+                                            text: root.t("detail", "Detail")
+                                            Layout.preferredWidth: 76
+                                            onClicked: root.viewModel && root.viewModel.openHistoryDetail(index)
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: root.t("total_records_zero", "Total Records: 0") }
-                            Label { text: root.t("total_duration_zero", "Total Duration: 0.0s") }
-                            Label { text: root.t("success_rate_zero", "Success Rate: 0%") }
+                            Label {
+                                objectName: "historyTotalLabel"
+                                text: root.viewModel ? root.viewModel.historyTotalText : root.t("total_records_zero", "Total Records: 0")
+                            }
+                            Label {
+                                objectName: "historyDurationLabel"
+                                text: root.viewModel ? root.viewModel.historyDurationText : root.t("total_duration_zero", "Total Duration: 0.0s")
+                            }
+                            Label {
+                                objectName: "historySuccessRateLabel"
+                                text: root.viewModel ? root.viewModel.historySuccessRateText : root.t("success_rate_zero", "Success Rate: 0%")
+                            }
                             Item { Layout.fillWidth: true }
                         }
                     }
