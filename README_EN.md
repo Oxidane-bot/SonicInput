@@ -11,10 +11,10 @@
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
 
-## What’s New (v0.7.6)
-- Fixed the Fluent settings History page so it loads real records, search results, statistics, and paginated data again
-- Reconnected history detail, delete, retry, and batch reprocess actions to the existing history workflows
-- Added Fluent History regression and QML E2E coverage so the page cannot silently regress to a static placeholder
+## What's New (v0.7.7)
+- Upgraded the Fluent History page and detail panel to match the latest settings UI surfaces
+- Fixed narrow-window text overflow, row crowding, and action-button pressure in the history list and detail view
+- Made the history list frame grow with the window height and added bilingual visual-audit screenshots
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -25,7 +25,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.7.6-win64.exe` from [v0.7.6 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.6)
+1. Download `SonicInput-v0.7.7-win64.exe` from [v0.7.7 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.7)
 2. Run the exe; default hotkey is F12 (use Alt+H or customize if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

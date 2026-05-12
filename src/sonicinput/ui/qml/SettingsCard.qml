@@ -9,6 +9,7 @@ Frame {
     font.family: "Microsoft YaHei UI"
 
     property string title: ""
+    property bool fillBody: false
     default property alias content: body.data
 
     ColumnLayout {
@@ -26,6 +27,7 @@ Frame {
         ColumnLayout {
             id: body
             Layout.fillWidth: true
+            Layout.fillHeight: card.fillBody
             spacing: 10
         }
     }

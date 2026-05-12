@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Property, Signal, Slot, Qt
-from PySide6.QtWidgets import QDialog, QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QProgressDialog
 
 from .dialogs.batch_reprocess_dialog import BatchReprocessDialog
-from .settings_tabs.history_detail_dialog import HistoryDetailDialog
 from .settings_tabs.history_tab import HistoryTab
-from .settings_tabs.history_workers import BatchReprocessingWorker
+from .settings_tabs.history_workers import BatchReprocessingWorker, ReprocessingWorker
 
 
 def qml_path(filename: str) -> Path:
@@ -70,11 +69,20 @@ class FluentSettingsViewModel(QObject):
         "chunk_duration": "分块时长",
         "clipboard_restore_delay_ms": "剪贴板恢复延迟 (ms)",
         "dashscope_default": "留空则使用 DashScope 默认地址",
+        "audio_file": "音频文件",
+        "close": "关闭",
+        "copy_to_clipboard": "复制",
+        "delete_record": "删除记录",
+        "detail": "详情",
+        "diagnostics": "诊断",
         "enable_ai_streaming_output": "启用 AI 流式输出",
         "enable_ai_optimization": "启用 AI 文本优化",
         "enable_fallback": "启用备用输入方法",
         "enable_itn": "启用逆文本归一化",
         "enable_sentence_split": "启用句子切分",
+        "fallback": "备用输入",
+        "fallback_reason": "备用原因",
+        "final_text": "最终文本",
         "filter_thinking_tags": "过滤思考标签",
         "history": "历史",
         "hotkey_backend": "快捷键后端",
@@ -103,6 +111,8 @@ class FluentSettingsViewModel(QObject):
         "local_sherpa": "本地 sherpa-onnx",
         "max_log_file_size": "最大日志文件大小 (MB)",
         "max_retries": "最大重试次数",
+        "duration": "时长",
+        "mode": "模式",
         "model": "模型",
         "model_id": "模型 ID",
         "no_hotkeys": "未配置快捷键",
@@ -113,13 +123,17 @@ class FluentSettingsViewModel(QObject):
         "press_shortcut": "按下快捷键",
         "preferred_method": "首选方法",
         "preset_position": "预设位置",
+        "provider": "提供商",
         "provider_credentials": "提供商凭据",
         "recording_overlay": "录音悬浮窗",
+        "recording_details": "录音详情",
         "refresh": "刷新",
         "registered_hotkeys": "已注册快捷键",
         "remove": "移除",
         "remove_shortcut": "移除快捷键",
+        "reprocess_of": "重处理来源",
         "revert": "还原",
+        "retry": "重试",
         "search_history": "搜索转写或 AI 文本",
         "seconds": "秒",
         "selected_hotkey": "已选快捷键",
@@ -138,13 +152,18 @@ class FluentSettingsViewModel(QObject):
         "theme_accent": "主题强调色",
         "time_stats": "总记录: 0  总时长: 0.0 秒  成功率: 0%",
         "timeout": "超时",
+        "time": "时间",
+        "total_duration_format": "总时长: {duration:.1f}秒",
         "total_duration_zero": "总时长: 0.0 秒",
+        "total_records_format": "总记录: {count}",
         "total_records_zero": "总记录: 0",
         "transcription": "转写",
         "transcription_provider": "转写提供商",
+        "transcribe_time": "转写耗时",
         "typing_delay_ms": "输入延迟 (ms)",
         "unload": "卸载",
         "shortcut_count": "已绑定 {count} 个",
+        "success_rate_format": "成功率: {rate:.1f}%",
         "success_rate_zero": "成功率: 0%",
     }
 
@@ -163,9 +182,15 @@ class FluentSettingsViewModel(QObject):
         self._history_total_text = "Total Records: 0"
         self._history_duration_text = "Total Duration: 0.0s"
         self._history_success_rate_text = "Success Rate: 0%"
+        self._selected_history_index = -1
+        self._selected_history_record = None
+        self._selected_history_detail: dict[str, Any] = {}
+        self._history_detail_visible = False
         self._batch_worker = None
         self._batch_progress_dialog = None
         self._batch_cancel_requested = False
+        self._retry_worker = None
+        self._retry_progress_dialog = None
 
     def _get(self, key: str, default: Any = None) -> Any:
         if key in self._pending:
@@ -308,9 +333,15 @@ class FluentSettingsViewModel(QObject):
         self, total_count: int, total_duration: float, success_count: int
     ) -> None:
         success_rate = (success_count / total_count * 100) if total_count > 0 else 0.0
-        self._history_total_text = f"Total Records: {total_count}"
-        self._history_duration_text = f"Total Duration: {total_duration:.1f}s"
-        self._history_success_rate_text = f"Success Rate: {success_rate:.1f}%"
+        self._history_total_text = self.translate(
+            "total_records_format", "Total Records: {count}"
+        ).format(count=total_count)
+        self._history_duration_text = self.translate(
+            "total_duration_format", "Total Duration: {duration:.1f}s"
+        ).format(duration=total_duration)
+        self._history_success_rate_text = self.translate(
+            "success_rate_format", "Success Rate: {rate:.1f}%"
+        ).format(rate=success_rate)
 
     def _update_history_stats(self) -> None:
         service = self._get_history_service()
@@ -368,6 +399,40 @@ class FluentSettingsViewModel(QObject):
             "aiStatus": getattr(record, "ai_status", "") or "",
             "tooltip": HistoryTab._build_diagnostic_tooltip(record),
         }
+
+    def _record_to_history_detail(self, record: Any) -> dict[str, Any]:
+        row = self._record_to_history_row(record)
+        ai_text = getattr(record, "ai_optimized_text", "") or ""
+        transcription_error = getattr(record, "transcription_error", None) or ""
+        ai_error = getattr(record, "ai_error", None) or ""
+        reprocess_parent_id = getattr(record, "reprocess_parent_id", None) or ""
+        return {
+            **row,
+            "audioPath": getattr(record, "audio_file_path", "") or "N/A",
+            "reprocessParentId": reprocess_parent_id or "N/A",
+            "transcriptionProvider": getattr(record, "transcription_provider", "")
+            or "N/A",
+            "transcriptionStatusText": HistoryTab._get_ai_status_display(
+                type("StatusRecord", (), {"ai_status": record.transcription_status})()
+            ),
+            "streamingMode": HistoryTab._format_mode_for_table(record),
+            "transcribeTime": HistoryTab._format_transcribe_for_table(record),
+            "fallbackUsed": HistoryTab._format_fallback_for_table(record),
+            "fallbackReason": getattr(record, "fallback_reason", None) or "None",
+            "transcriptionError": transcription_error,
+            "aiOptimizedText": ai_text,
+            "aiProvider": getattr(record, "ai_provider", None) or "N/A",
+            "aiError": ai_error,
+            "diagnosticsText": "Captured"
+            if getattr(record, "diagnostics_collected", False)
+            else "Legacy defaults",
+        }
+
+    def _clear_history_detail(self) -> None:
+        self._selected_history_index = -1
+        self._selected_history_record = None
+        self._selected_history_detail = {}
+        self._history_detail_visible = False
 
     def _load_history_page(self, append: bool) -> None:
         service = self._get_history_service()
@@ -440,6 +505,14 @@ class FluentSettingsViewModel(QObject):
     @Property(str, notify=changed)
     def historySuccessRateText(self) -> str:
         return self._history_success_rate_text
+
+    @Property(bool, notify=changed)
+    def historyDetailVisible(self) -> bool:
+        return self._history_detail_visible
+
+    @Property("QVariantMap", notify=changed)
+    def selectedHistoryDetail(self) -> dict[str, Any]:
+        return self._selected_history_detail
 
     @Property(int, notify=changed)
     def hotkeyCount(self) -> int:
@@ -659,24 +732,30 @@ class FluentSettingsViewModel(QObject):
         if index < 0 or index >= len(self._history_records):
             return
 
-        service = self._get_history_service()
-        if not service:
-            return
-
-        dialog = HistoryDetailDialog(
-            record=self._history_records[index],
-            parent_window=None,
-            settings_service=self._settings_service,
-            history_service=service,
-            parent=None,
+        self._selected_history_index = index
+        self._selected_history_record = self._history_records[index]
+        self._selected_history_detail = self._record_to_history_detail(
+            self._selected_history_record
         )
-        result = dialog.exec()
-        if result == QDialog.DialogCode.Accepted:
-            self.refreshHistory(self._history_query)
+        self._history_detail_visible = True
+        self.changed.emit()
+
+    @Slot()
+    def closeHistoryDetail(self) -> None:
+        self._clear_history_detail()
+        self.changed.emit()
 
     @Slot(int)
     def retryHistoryRecord(self, index: int) -> None:
-        self.openHistoryDetail(index)
+        if index < 0 or index >= len(self._history_records):
+            return
+        self._retry_history_record(self._history_records[index])
+
+    @Slot()
+    def retrySelectedHistoryRecord(self) -> None:
+        if self._selected_history_record is None:
+            return
+        self._retry_history_record(self._selected_history_record)
 
     @Slot(int, result=bool)
     def deleteHistoryRecord(self, index: int) -> bool:
@@ -692,6 +771,181 @@ class FluentSettingsViewModel(QObject):
         if success:
             self.refreshHistory(self._history_query)
         return success
+
+    @Slot(result=bool)
+    def deleteSelectedHistoryRecord(self) -> bool:
+        if self._selected_history_index < 0:
+            return False
+        success = self.deleteHistoryRecord(self._selected_history_index)
+        if success:
+            self._clear_history_detail()
+            self.changed.emit()
+        return success
+
+    @Slot()
+    def copySelectedHistoryText(self) -> None:
+        if not self._selected_history_detail:
+            return
+        text = str(self._selected_history_detail.get("primaryText", ""))
+        QApplication.clipboard().setText(text)
+
+    def _retry_history_record(self, record: Any) -> None:
+        from ..utils import app_logger
+
+        get_transcription_service = getattr(
+            self._settings_service, "get_transcription_service", None
+        )
+        get_ai_processing_controller = getattr(
+            self._settings_service, "get_ai_processing_controller", None
+        )
+        transcription_service = (
+            get_transcription_service() if callable(get_transcription_service) else None
+        )
+        ai_processing_controller = (
+            get_ai_processing_controller()
+            if callable(get_ai_processing_controller)
+            else None
+        )
+        history_service = self._get_history_service()
+
+        app_logger.log_audio_event(
+            "Fluent history retry requested",
+            {
+                "has_transcription_service": transcription_service is not None,
+                "has_ai_controller": ai_processing_controller is not None,
+                "record_id": getattr(record, "id", ""),
+            },
+        )
+
+        if not transcription_service or not history_service:
+            QMessageBox.warning(
+                None,
+                "Service Unavailable",
+                "Retry processing requires transcription service.",
+            )
+            return
+
+        reply = QMessageBox.question(
+            None,
+            "Retry Processing",
+            (
+                "This will reprocess the recording using current configuration.\n\n"
+                "A new history record will be created and the original record will be kept.\n\n"
+                "Continue?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._retry_progress_dialog = QProgressDialog(
+            "Initializing reprocessing...",
+            "Cancel",
+            0,
+            0,
+            None,
+        )
+        self._retry_progress_dialog.setWindowTitle("Reprocessing Recording")
+        self._retry_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self._retry_progress_dialog.setMinimumDuration(0)
+        self._retry_progress_dialog.setValue(0)
+        self._retry_progress_dialog.show()
+
+        self._retry_worker = ReprocessingWorker(
+            record_id=getattr(record, "id", ""),
+            audio_file_path=getattr(record, "audio_file_path", ""),
+            transcription_service=transcription_service,
+            ai_processing_controller=ai_processing_controller,
+            config_service=self._settings_service,
+            history_service=history_service,
+        )
+        self._retry_worker.progress_updated.connect(self._on_retry_progress_updated)
+        self._retry_worker.reprocessing_completed.connect(
+            self._on_retry_reprocessing_completed
+        )
+        self._retry_worker.reprocessing_failed.connect(
+            self._on_retry_reprocessing_failed
+        )
+        self._retry_progress_dialog.canceled.connect(
+            self._on_retry_reprocessing_canceled
+        )
+        self._retry_worker.start()
+
+    def _on_retry_progress_updated(self, message: str) -> None:
+        if self._retry_progress_dialog:
+            self._retry_progress_dialog.setLabelText(message)
+
+    def _on_retry_reprocessing_completed(self, result: dict) -> None:
+        if self._retry_progress_dialog:
+            try:
+                self._retry_progress_dialog.canceled.disconnect(
+                    self._on_retry_reprocessing_canceled
+                )
+            except RuntimeError:
+                pass
+            self._retry_progress_dialog.close()
+            self._retry_progress_dialog = None
+
+        if self._retry_worker:
+            if self._retry_worker.isRunning():
+                self._retry_worker.wait(1000)
+            self._retry_worker = None
+
+        new_record_id = result.get("new_record_id")
+        history_service = self._get_history_service()
+        if new_record_id and history_service:
+            fresh_record = history_service.get_record_by_id(new_record_id)
+            if fresh_record:
+                self._selected_history_record = fresh_record
+                self._selected_history_detail = self._record_to_history_detail(
+                    fresh_record
+                )
+                self._history_detail_visible = True
+
+        self.refreshHistory(self._history_query)
+        QMessageBox.information(
+            None,
+            "Reprocessing Complete",
+            "Recording has been successfully reprocessed.",
+        )
+
+    def _on_retry_reprocessing_failed(self, error_message: str) -> None:
+        if self._retry_progress_dialog:
+            try:
+                self._retry_progress_dialog.canceled.disconnect(
+                    self._on_retry_reprocessing_canceled
+                )
+            except RuntimeError:
+                pass
+            self._retry_progress_dialog.close()
+            self._retry_progress_dialog = None
+
+        if self._retry_worker:
+            if self._retry_worker.isRunning():
+                self._retry_worker.wait(1000)
+            self._retry_worker = None
+
+        QMessageBox.critical(
+            None,
+            "Reprocessing Failed",
+            f"Failed to reprocess the recording:\n\n{error_message}",
+        )
+
+    def _on_retry_reprocessing_canceled(self) -> None:
+        if self._retry_worker:
+            self._retry_worker.stop()
+            self._retry_worker.wait(2000)
+            if self._retry_worker.isRunning():
+                self._retry_worker.terminate()
+                self._retry_worker.wait()
+            self._retry_worker = None
+
+        QMessageBox.information(
+            None,
+            "Reprocessing Canceled",
+            "Reprocessing operation has been canceled.",
+        )
 
     @Slot()
     def startBatchReprocess(self) -> None:

@@ -11,10 +11,10 @@
 - 双模式录制：Realtime 低延迟；Chunked 精度高（AI 后处理）
 - 云端/本地切换：Groq / OpenRouter / NVIDIA / OpenAI / 本地 sherpa-onnx
 
-## v0.7.6 更新
-- 修复 Fluent 设置窗口的历史页面，恢复真实历史记录加载、搜索、统计和分页
-- 重新接通历史详情、删除、重试入口，以及批量重新处理流程
-- 补充 Fluent History 回归测试和 QML E2E 覆盖，防止页面退回静态占位
+## v0.7.7 更新
+- 升级 Fluent 历史记录页面和详情面板，统一到最新设置窗口视觉规范
+- 修正历史列表、统计栏和详情内容在窄窗口下的文字溢出与按钮挤压问题
+- 让历史列表框体随窗口高度自适应，并补充中英文视觉审计截图覆盖
 
 ## 性能优化记录
 - 2026-03：分块停止路径、历史搜索/分页、批量重处理等性能整理见  
@@ -25,7 +25,7 @@
 - 内存 4GB+，磁盘 500MB
 
 ## 快速开始
-1. 下载 [v0.7.6 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.6) 中的 `SonicInput-v0.7.6-win64.exe`
+1. 下载 [v0.7.7 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.7) 中的 `SonicInput-v0.7.7-win64.exe`
 2. 双击运行，默认热键 F12（若冲突可改用 Alt+H 或自定义）
 3. 在设置中填写需要的云端 API Key（可选），或直接使用本地模型
 

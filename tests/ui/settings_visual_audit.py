@@ -4,19 +4,101 @@ from __future__ import annotations
 
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from sonicinput.core.interfaces import HistoryRecord
 from sonicinput.ui.qml_bridge import FluentSettingsViewModel, qml_path
+
+
+def _history_record(record_id: str, text: str, duration: float = 3.2) -> HistoryRecord:
+    return HistoryRecord(
+        id=record_id,
+        timestamp=datetime(2026, 5, 13, 9, 30),
+        audio_file_path=f"C:/Recordings/{record_id}.wav",
+        duration=duration,
+        transcription_text=text,
+        transcription_provider="local",
+        transcription_status="success",
+        streaming_mode="chunked",
+        transcription_duration=0.42,
+        used_fallback=False,
+        fallback_type="none",
+        fallback_reason=None,
+        diagnostics_collected=True,
+        reprocess_parent_id=None,
+        transcription_error=None,
+        ai_optimized_text=f"{text} polished",
+        ai_provider="openrouter",
+        ai_status="success",
+        ai_error=None,
+        final_text=f"{text} final",
+    )
+
+
+class VisualAuditHistoryService:
+    def __init__(self, records: list[HistoryRecord]):
+        self.records = records
+
+    def get_records_keyset(
+        self, limit, cursor_timestamp=None, cursor_id=None, order="DESC"
+    ):
+        return self.records[:limit]
+
+    def search_records_keyset(
+        self, query, limit, cursor_timestamp=None, cursor_id=None
+    ):
+        query_lower = str(query).lower()
+        matches = [
+            record
+            for record in self.records
+            if query_lower in record.transcription_text.lower()
+            or query_lower in record.final_text.lower()
+        ]
+        return matches[:limit]
+
+    def get_aggregate_stats(self, query=None):
+        if query:
+            records = self.search_records_keyset(query=query, limit=len(self.records))
+        else:
+            records = self.records
+        return (
+            len(records),
+            sum(record.duration for record in records),
+            sum(1 for record in records if record.ai_status == "success"),
+        )
+
+    def get_total_count(self):
+        return len(self.records)
+
+    def delete_record(self, record_id):
+        self.records = [record for record in self.records if record.id != record_id]
+        return True
 
 
 class VisualAuditConfig:
     def __init__(self, data: dict[str, object]):
         self._data = dict(data)
+        long_text = " ".join(
+            [
+                "This is a long history transcript segment that should stay readable",
+                "without pushing action buttons or status labels out of the row",
+            ]
+            * 4
+        )
+        self._history_service = VisualAuditHistoryService(
+            [
+                _history_record("audit-001", "Short transcript with AI cleanup"),
+                _history_record("audit-002", long_text, duration=12.8),
+                _history_record("audit-003", "Mixed 中文 English transcript sample"),
+            ]
+        )
 
     def get_setting(self, key: str, default=None):
         return self._data.get(key, default)
@@ -29,6 +111,15 @@ class VisualAuditConfig:
 
     def get_all_settings(self):
         return dict(self._data)
+
+    def get_history_service(self):
+        return self._history_service
+
+    def get_transcription_service(self):
+        return None
+
+    def get_ai_processing_controller(self):
+        return None
 
 
 def _base_config(language: str) -> dict[str, object]:
@@ -124,6 +215,7 @@ def _base_config(language: str) -> dict[str, object]:
 
 def _grab(root, app: QApplication, output: Path, name: str) -> None:
     app.processEvents()
+    app.processEvents()
     image = root.grabWindow()
     if image.isNull():
         raise RuntimeError(f"Failed to grab screenshot: {name}")
@@ -165,7 +257,32 @@ def main() -> int:
 
         for name, index in sections:
             root.setProperty("selectedSection", index)
+            if name == "history":
+                view_model.refreshHistory("")
             _grab(root, app, output, f"{language}-{name}")
+
+        root.setProperty("selectedSection", 5)
+        view_model.refreshHistory("")
+        root.setWidth(900)
+        root.setHeight(760)
+        _grab(root, app, output, f"{language}-history-narrow")
+        root.setWidth(1080)
+        root.setHeight(760)
+
+        view_model.openHistoryDetail(1)
+        app.processEvents()
+        _grab(root, app, output, f"{language}-history-detail")
+        view_model.closeHistoryDetail()
+        app.processEvents()
+        detail_panel = root.findChild(QObject, "historyDetailPanel")
+        if detail_panel is not None:
+            detail_panel.setProperty("visible", False)
+        QTest.qWait(250)
+        app.processEvents()
+
+        config.get_history_service().records = []
+        view_model.refreshHistory("")
+        _grab(root, app, output, f"{language}-history-empty")
 
         root.setProperty("selectedSection", 1)
         root.setProperty("hotkeyCaptureVisible", True)

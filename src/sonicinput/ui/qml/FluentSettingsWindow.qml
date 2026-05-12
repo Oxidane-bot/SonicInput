@@ -221,6 +221,17 @@ ApplicationWindow {
         return String(result)
     }
 
+    function historyDetailValue(key, fallback) {
+        if (!root.viewModel || !root.viewModel.selectedHistoryDetail) {
+            return fallback
+        }
+        var value = root.viewModel.selectedHistoryDetail[key]
+        if (value === undefined || value === null) {
+            return fallback
+        }
+        return String(value)
+    }
+
     header: ToolBar {
         height: 48
         RowLayout {
@@ -1009,19 +1020,21 @@ ApplicationWindow {
                 }
             }
 
-            Flickable {
+            Item {
                 objectName: "historyPage"
-                contentWidth: width
-                contentHeight: historyColumn.implicitHeight
-                clip: true
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
                 ColumnLayout {
                     id: historyColumn
-                    width: parent.width
+                    anchors.fill: parent
                     spacing: 14
 
                     SettingsCard {
                         title: root.t("history", "History")
+                        fillBody: true
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         Timer {
                             id: historySearchDebounce
                             interval: 250
@@ -1031,29 +1044,35 @@ ApplicationWindow {
 
                         RowLayout {
                             Layout.fillWidth: true
+                            spacing: 8
                             TextField {
                                 id: historySearchField
                                 objectName: "historySearchField"
                                 placeholderText: root.t("search_history", "Search in transcription or AI text")
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 220
                                 onTextChanged: historySearchDebounce.restart()
                                 onAccepted: root.viewModel && root.viewModel.refreshHistory(text)
                             }
                             Button {
                                 objectName: "historyRefreshButton"
                                 text: root.t("refresh", "Refresh")
+                                Layout.preferredWidth: 96
                                 onClicked: root.viewModel && root.viewModel.refreshHistory(historySearchField.text)
                             }
                             Button {
                                 objectName: "historyBatchReprocessButton"
                                 text: root.t("batch_reprocess", "Batch Reprocess")
+                                Layout.preferredWidth: 148
                                 onClicked: root.viewModel && root.viewModel.startBatchReprocess()
                             }
                         }
 
                         Rectangle {
+                            objectName: "historyListFrame"
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 360
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 280
                             radius: 8
                             color: palette.base
                             border.color: palette.mid
@@ -1077,6 +1096,9 @@ ApplicationWindow {
                                 spacing: 6
                                 clip: true
                                 model: root.viewModel ? root.viewModel.historyRecords : []
+                                property int delegateTextMinimumWidth: 260
+                                property int delegateStatusWidth: 74
+                                property int delegateActionWidth: 76
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                 onMovementEnded: {
                                     if (atYEnd && root.viewModel) {
@@ -1086,7 +1108,7 @@ ApplicationWindow {
 
                                 delegate: Rectangle {
                                     width: ListView.view.width
-                                    height: 86
+                                    height: 82
                                     radius: 8
                                     color: palette.window
                                     border.color: palette.mid
@@ -1101,10 +1123,12 @@ ApplicationWindow {
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.margins: 10
-                                        spacing: 10
+                                        spacing: 8
 
                                         ColumnLayout {
                                             Layout.preferredWidth: 88
+                                            Layout.minimumWidth: 76
+                                            Layout.maximumWidth: 96
                                             Layout.fillHeight: true
                                             spacing: 3
                                             Label {
@@ -1123,7 +1147,9 @@ ApplicationWindow {
                                         }
 
                                         ColumnLayout {
+                                            objectName: "historyDelegateTextColumn"
                                             Layout.fillWidth: true
+                                            Layout.minimumWidth: historyList.delegateTextMinimumWidth
                                             Layout.fillHeight: true
                                             spacing: 4
                                             Label {
@@ -1150,17 +1176,22 @@ ApplicationWindow {
                                         }
 
                                         Label {
+                                            objectName: "historyDelegateStatusLabel"
                                             text: modelData.statusText
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 12
-                                            Layout.preferredWidth: 74
+                                            elide: Text.ElideRight
+                                            Layout.preferredWidth: historyList.delegateStatusWidth
+                                            Layout.minimumWidth: 68
+                                            Layout.maximumWidth: 82
                                         }
 
                                         Button {
                                             objectName: "historyDetailButton"
                                             text: root.t("detail", "Detail")
-                                            Layout.preferredWidth: 76
+                                            Layout.preferredWidth: historyList.delegateActionWidth
+                                            Layout.minimumWidth: 72
                                             onClicked: root.viewModel && root.viewModel.openHistoryDetail(index)
                                         }
                                     }
@@ -1173,16 +1204,176 @@ ApplicationWindow {
                             Label {
                                 objectName: "historyTotalLabel"
                                 text: root.viewModel ? root.viewModel.historyTotalText : root.t("total_records_zero", "Total Records: 0")
+                                elide: Text.ElideRight
+                                Layout.preferredWidth: 150
                             }
                             Label {
                                 objectName: "historyDurationLabel"
                                 text: root.viewModel ? root.viewModel.historyDurationText : root.t("total_duration_zero", "Total Duration: 0.0s")
+                                elide: Text.ElideRight
+                                Layout.preferredWidth: 190
                             }
                             Label {
                                 objectName: "historySuccessRateLabel"
                                 text: root.viewModel ? root.viewModel.historySuccessRateText : root.t("success_rate_zero", "Success Rate: 0%")
+                                elide: Text.ElideRight
+                                Layout.preferredWidth: 160
                             }
                             Item { Layout.fillWidth: true }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: historyDetailPanel
+        objectName: "historyDetailPanel"
+        modal: true
+        visible: root.viewModel ? root.viewModel.historyDetailVisible : false
+        title: root.t("recording_details", "Recording Details")
+        anchors.centerIn: parent
+        width: Math.min(root.width - 48, 860)
+        height: Math.min(root.height - 64, 680)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: {
+            if (root.viewModel && root.viewModel.historyDetailVisible) {
+                root.viewModel.closeHistoryDetail()
+            }
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                objectName: "historyDetailCopyButton"
+                text: root.t("copy_to_clipboard", "Copy")
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: root.viewModel && root.viewModel.copySelectedHistoryText()
+            }
+            Button {
+                objectName: "historyDetailRetryButton"
+                text: root.t("retry", "Retry")
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: root.viewModel && root.viewModel.retrySelectedHistoryRecord()
+            }
+            Button {
+                objectName: "historyDetailDeleteButton"
+                text: root.t("delete_record", "Delete")
+                DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+                onClicked: root.viewModel && root.viewModel.deleteSelectedHistoryRecord()
+            }
+            Button {
+                objectName: "historyDetailCloseButton"
+                text: root.t("close", "Close")
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: root.viewModel && root.viewModel.closeHistoryDetail()
+            }
+        }
+
+        contentItem: ScrollView {
+            objectName: "historyDetailScrollView"
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+            ColumnLayout {
+                width: historyDetailPanel.availableWidth
+                spacing: 12
+
+                Frame {
+                    Layout.fillWidth: true
+                    padding: 14
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+                        Label {
+                            text: root.historyDetailValue("primaryText", "")
+                            font.pixelSize: 15
+                            font.weight: Font.Medium
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        GridLayout {
+                            columns: 2
+                            rowSpacing: 6
+                            columnSpacing: 14
+                            Layout.fillWidth: true
+                            Label { text: root.t("time", "Time"); opacity: 0.65 }
+                            Label { text: root.historyDetailValue("fullTime", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                            Label { text: root.t("duration", "Duration"); opacity: 0.65 }
+                            Label { text: root.historyDetailValue("durationText", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                            Label { text: root.t("audio_file", "Audio File"); opacity: 0.65 }
+                            Label { text: root.historyDetailValue("audioPath", ""); elide: Text.ElideMiddle; Layout.fillWidth: true }
+                            Label { text: root.t("reprocess_of", "Reprocess Of"); opacity: 0.65 }
+                            Label { text: root.historyDetailValue("reprocessParentId", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        }
+                    }
+                }
+
+                Frame {
+                    objectName: "historyDetailDiagnosticsCard"
+                    Layout.fillWidth: true
+                    padding: 14
+                    GridLayout {
+                        anchors.fill: parent
+                        columns: 4
+                        rowSpacing: 8
+                        columnSpacing: 14
+                        Label { text: root.t("diagnostics", "Diagnostics"); opacity: 0.65 }
+                        Label { text: root.historyDetailValue("diagnosticsText", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("mode", "Mode"); opacity: 0.65 }
+                        Label { text: root.historyDetailValue("streamingMode", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("provider", "Provider"); opacity: 0.65 }
+                        Label { text: root.historyDetailValue("transcriptionProvider", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("transcribe_time", "Transcribe Time"); opacity: 0.65 }
+                        Label { text: root.historyDetailValue("transcribeTime", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("fallback", "Fallback"); opacity: 0.65 }
+                        Label { text: root.historyDetailValue("fallbackUsed", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("fallback_reason", "Fallback Reason"); opacity: 0.65 }
+                        Label { text: root.historyDetailValue("fallbackReason", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                    }
+                }
+
+                Frame {
+                    Layout.fillWidth: true
+                    padding: 14
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+                        Label {
+                            text: root.t("transcription", "Transcription")
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                        }
+                        TextArea {
+                            objectName: "historyDetailTranscriptionText"
+                            text: root.historyDetailValue("transcriptionText", "")
+                            readOnly: true
+                            wrapMode: TextEdit.WordWrap
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 150
+                        }
+                    }
+                }
+
+                Frame {
+                    Layout.fillWidth: true
+                    padding: 14
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+                        Label {
+                            text: root.t("final_text", "Final Text")
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                        }
+                        TextArea {
+                            objectName: "historyDetailFinalText"
+                            text: root.historyDetailValue("primaryText", "")
+                            readOnly: true
+                            wrapMode: TextEdit.WordWrap
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 170
                         }
                     }
                 }
