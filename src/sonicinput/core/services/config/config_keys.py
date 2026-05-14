@@ -99,6 +99,9 @@ class ConfigKeys:
     AI_PROMPT = "ai.prompt"
     """AI系统提示词 (str)"""
 
+    AI_MAX_OUTPUT_TOKENS = "ai.max_output_tokens"
+    """AI最大输出 token 数 (int)"""
+
     AI_SENTENCE_SPLIT_ENABLED = "ai.sentence_split.enabled"
     """AI分句与分组开关 (bool): 启用3-5句分组的分句处理"""
 
@@ -410,6 +413,7 @@ class ConfigKeyGroups:
         ConfigKeys.AI_ENABLED,
         ConfigKeys.AI_FILTER_THINKING,
         ConfigKeys.AI_PROMPT,
+        ConfigKeys.AI_MAX_OUTPUT_TOKENS,
         ConfigKeys.AI_SENTENCE_SPLIT_ENABLED,
         ConfigKeys.AI_FIRST_CHUNK_OUTPUT_ENABLED,
         ConfigKeys.AI_STREAMING_ENABLED,

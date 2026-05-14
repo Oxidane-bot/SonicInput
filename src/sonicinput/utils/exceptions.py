@@ -275,6 +275,26 @@ class OpenAICompatibleAPIError(VoiceInputError):
         )
 
 
+class AIOutputTruncatedError(VoiceInputError):
+    """AI 输出被服务端截断。"""
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(
+            message=message,
+            category=ErrorCategory.AI_SERVICE,
+            severity=kwargs.pop("severity", ErrorSeverity.MEDIUM),
+            recovery_suggestions=kwargs.pop(
+                "recovery_suggestions",
+                [
+                    "Increase AI max output tokens",
+                    "Use sentence splitting for long recordings",
+                    "Fallback to the original transcription",
+                ],
+            ),
+            **kwargs,
+        )
+
+
 # =============================================================================
 # UI and Input Exceptions
 # =============================================================================

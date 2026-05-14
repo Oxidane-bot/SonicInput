@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 import requests
 
 from ..core.interfaces import IAIService
-from ..utils import app_logger
+from ..utils import AIOutputTruncatedError, app_logger
 from ..utils.request_error_handler import RequestErrorHandler
 from .http_client_manager import HTTPClientManager
 from .performance_monitor import AIPerformanceMonitor
@@ -139,6 +139,32 @@ class BaseAIClient(IAIService):
             raise self._create_api_error("No choices returned in response")
 
         return choices[0].get("message", {}).get("content", "").strip()
+
+    def _extract_finish_reason(self, result: Dict[str, Any]) -> Optional[str]:
+        choices = result.get("choices", [])
+        if not choices:
+            raise self._create_api_error("No choices returned in response")
+        reason = choices[0].get("finish_reason")
+        return str(reason) if reason is not None else None
+
+    def _raise_if_output_truncated(
+        self,
+        finish_reason: Optional[str],
+        *,
+        max_tokens: int,
+        response_length: int,
+    ) -> None:
+        if finish_reason != "length":
+            return
+        raise AIOutputTruncatedError(
+            "AI output reached max_tokens before completion",
+            context={
+                "provider": self.get_provider_name(),
+                "finish_reason": finish_reason,
+                "max_tokens": max_tokens,
+                "response_length": response_length,
+            },
+        )
 
     def _filter_thinking_tags(self, text: str) -> str:
         """过滤 AI 思考标签 (<think>...</think>)
@@ -575,6 +601,7 @@ class BaseAIClient(IAIService):
 
                     # 提取文本
                     refined_text = self._extract_response_text(result)
+                    finish_reason = self._extract_finish_reason(result)
 
                     # 过滤思考标签（如果启用）
                     if self.filter_thinking:
@@ -592,6 +619,12 @@ class BaseAIClient(IAIService):
                                     - len(refined_text),
                                 },
                             )
+
+                    self._raise_if_output_truncated(
+                        finish_reason,
+                        max_tokens=max_tokens,
+                        response_length=len(refined_text),
+                    )
 
                     # 提取 token 统计
                     token_stats = self._extract_token_stats(result, response_time)
@@ -615,6 +648,8 @@ class BaseAIClient(IAIService):
                             "response_time": response_time,
                             "attempt": attempt + 1,
                             "filter_thinking_enabled": self.filter_thinking,
+                            "finish_reason": finish_reason,
+                            "max_tokens": max_tokens,
                             **token_stats,
                         },
                     )
@@ -746,6 +781,7 @@ class BaseAIClient(IAIService):
                 # 解析 SSE 流
                 full_text_parts: list[str] = []
                 token_count = 0
+                finish_reason: Optional[str] = None
 
                 for line in response.iter_lines():
                     if not line:
@@ -763,6 +799,9 @@ class BaseAIClient(IAIService):
                         choices = chunk.get("choices", [])
                         if not choices:
                             continue
+                        reason = choices[0].get("finish_reason")
+                        if reason is not None:
+                            finish_reason = str(reason)
                         delta = choices[0].get("delta", {})
                         content = delta.get("content", "")
                         if content:
@@ -780,6 +819,12 @@ class BaseAIClient(IAIService):
                 # 过滤思考标签（如果启用）
                 if self.filter_thinking and refined_text:
                     refined_text = self._filter_thinking_tags(refined_text)
+
+                self._raise_if_output_truncated(
+                    finish_reason,
+                    max_tokens=max_tokens,
+                    response_length=len(refined_text),
+                )
 
                 total_time = time.time() - start_time
                 tps = token_count / total_time if total_time > 0 else 0.0
@@ -799,6 +844,8 @@ class BaseAIClient(IAIService):
                         "original_length": len(text),
                         "refined_length": len(refined_text),
                         "token_count": token_count,
+                        "finish_reason": finish_reason,
+                        "max_tokens": max_tokens,
                         "tps": round(tps, 2),
                         "total_time": round(total_time, 3),
                     },

@@ -14,7 +14,7 @@
 uv run pytest -m "not gui"
 
 # 或者
-uv run pytest --ignore=tests/ui/ --ignore=tests/test_recording_overlay.py
+uv run pytest --ignore=tests/ui/
 ```
 
 ### 2. GUI测试
@@ -27,8 +27,8 @@ uv run pytest --ignore=tests/ui/ --ignore=tests/test_recording_overlay.py
 uv run pytest -m gui
 
 # 运行特定GUI测试文件
-uv run pytest tests/ui/test_recording_overlay.py -v
-uv run pytest tests/test_recording_overlay.py -v
+uv run pytest tests/ui/test_fluent_qml_ui.py -v
+uv run pytest tests/ui/test_desktop_ui_e2e.py -v
 ```
 
 ### 3. GPU测试
@@ -76,9 +76,9 @@ uv run pytest -m "not gui and not gpu and not slow" -v
 
 ### GUI测试文件
 
-- `tests/ui/test_recording_overlay.py` - RecordingOverlay单元测试（27个测试）
-- `tests/test_recording_overlay.py` - RecordingOverlay集成测试（11个测试）
-- `tests/test_basic_functionality.py::test_recording_overlay_creation` - 基本创建测试
+- `tests/ui/test_fluent_qml_ui.py` - Fluent QML 设置与历史页面测试
+- `tests/ui/test_desktop_ui_e2e.py` - Fluent 设置窗与录音悬浮窗 E2E 流程
+- `tests/ui/test_desktop_ui_redesign.py` - Fluent 视觉结构与布局约束
 
 ### 如何在CI中运行GUI测试
 
@@ -144,13 +144,13 @@ uv run pytest -m gui --timeout=30
 A: 使用pytest的文件/目录选择：
 ```bash
 # 测试overlay组件
-uv run pytest tests/ui/test_recording_overlay.py
+uv run pytest tests/ui/test_fluent_qml_ui.py
 
 # 测试所有UI组件
 uv run pytest tests/ui/
 
 # 测试特定函数
-uv run pytest tests/ui/test_recording_overlay.py::TestRecordingOverlayDisplay::test_display_capability
+uv run pytest tests/ui/test_desktop_ui_e2e.py::test_fluent_settings_and_overlay_hosts_flow
 ```
 
 ### Q: CI中如何跳过GUI测试？

@@ -195,7 +195,7 @@ def mock_ui_services():
     return services
 
 
-# ============= RecordingOverlay Fixtures =============
+# ============= Fluent Recording Overlay Fixtures =============
 
 
 @pytest.fixture
@@ -214,7 +214,7 @@ def recording_overlay(qtbot, mock_config_service):
     overlay.deleteLater()
 
 
-# ============= SettingsWindow Fixtures =============
+# ============= Fluent Settings Window Fixtures =============
 
 
 @pytest.fixture
@@ -254,6 +254,8 @@ def settings_window(qtbot, mock_config_service):
     mock_history_service = MagicMock()
     mock_history_service.get_records = Mock(return_value=[])
     mock_history_service.search_records = Mock(return_value=[])
+    mock_history_service.get_records_keyset = Mock(return_value=[])
+    mock_history_service.search_records_keyset = Mock(return_value=[])
     mock_history_service.get_total_count = Mock(return_value=0)
     mock_history_service.get_aggregate_stats = Mock(return_value=(0, 0.0, 0))
     mock_ui_settings_service.get_history_service = Mock(

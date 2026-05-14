@@ -33,7 +33,7 @@ uv run python build_nuitka.py
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小：~66MB（v0.7.7，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
+- 文件大小：~66MB（v0.7.8，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
 
 ## 构建说明
 
@@ -239,7 +239,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 ---
 
 **最后更新**：2026-05-04
-**适用版本**：v0.7.7+
+**适用版本**：v0.7.8+
 
 
 ## Release Script

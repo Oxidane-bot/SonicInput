@@ -11,10 +11,10 @@
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
 
-## What's New (v0.7.7)
-- Upgraded the Fluent History page and detail panel to match the latest settings UI surfaces
-- Fixed narrow-window text overflow, row crowding, and action-button pressure in the history list and detail view
-- Made the history list frame grow with the window height and added bilingual visual-audit screenshots
+## What's New (v0.7.8)
+- Completed the Fluent-only desktop UI migration and removed legacy QWidget settings, history, and overlay surfaces
+- Moved history batch reprocess confirmation, progress, and result reporting into Fluent/QML panels
+- Fixed long Chinese history rows so text elides within its own column instead of crowding status and action controls
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -25,7 +25,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.7.7-win64.exe` from [v0.7.7 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.7)
+1. Download `SonicInput-v0.7.8-win64.exe` from [v0.7.8 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.8)
 2. Run the exe; default hotkey is F12 (use Alt+H or customize if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

@@ -110,7 +110,7 @@ class InputController(LifecycleComponent, BaseController, IInputController):
                 self._input_service.stop_recording_mode()
 
             # 关键修复：即使跳过文本输入，也要触发完成事件和设置状态
-            # 让 RecordingOverlay 能够正常隐藏
+            # 让当前悬浮窗能够正常隐藏
             self._events.emit(Events.TEXT_INPUT_COMPLETED, "")
             self._state_manager.set_app_state(AppState.IDLE)
 

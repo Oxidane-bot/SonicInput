@@ -4,12 +4,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, Signal, Slot, Qt
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QProgressDialog
+from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtWidgets import QApplication
 
-from .dialogs.batch_reprocess_dialog import BatchReprocessDialog
-from .settings_tabs.history_tab import HistoryTab
-from .settings_tabs.history_workers import BatchReprocessingWorker, ReprocessingWorker
+from .history_formatters import (
+    build_diagnostic_tooltip,
+    format_fallback_for_table,
+    format_mode_for_table,
+    format_transcribe_for_table,
+    get_ai_status_display,
+    get_status_display,
+)
+from .history_workers import BatchReprocessingWorker, ReprocessingWorker
 
 
 def qml_path(filename: str) -> Path:
@@ -187,10 +193,19 @@ class FluentSettingsViewModel(QObject):
         self._selected_history_detail: dict[str, Any] = {}
         self._history_detail_visible = False
         self._batch_worker = None
-        self._batch_progress_dialog = None
         self._batch_cancel_requested = False
+        self._batch_reprocess_visible = False
+        self._batch_reprocess_stage = "idle"
+        self._batch_reprocess_total = 0
+        self._batch_reprocess_cooldown_seconds = 0
+        self._batch_reprocess_progress_value = 0
+        self._batch_reprocess_progress_total = 0
+        self._batch_reprocess_message = ""
+        self._batch_reprocess_result: dict[str, Any] = {}
         self._retry_worker = None
-        self._retry_progress_dialog = None
+        self._history_action_busy = False
+        self._history_action_message = ""
+        self._history_action_stage = "idle"
 
     def _get(self, key: str, default: Any = None) -> Any:
         if key in self._pending:
@@ -364,7 +379,7 @@ class FluentSettingsViewModel(QObject):
 
     @staticmethod
     def _history_status_display(record: Any) -> str:
-        return HistoryTab._get_ai_status_display(record)
+        return get_ai_status_display(record)
 
     @staticmethod
     def _history_primary_text(record: Any) -> str:
@@ -397,7 +412,7 @@ class FluentSettingsViewModel(QObject):
             "primaryText": primary_text,
             "statusText": self._history_status_display(record),
             "aiStatus": getattr(record, "ai_status", "") or "",
-            "tooltip": HistoryTab._build_diagnostic_tooltip(record),
+            "tooltip": build_diagnostic_tooltip(record),
         }
 
     def _record_to_history_detail(self, record: Any) -> dict[str, Any]:
@@ -412,12 +427,12 @@ class FluentSettingsViewModel(QObject):
             "reprocessParentId": reprocess_parent_id or "N/A",
             "transcriptionProvider": getattr(record, "transcription_provider", "")
             or "N/A",
-            "transcriptionStatusText": HistoryTab._get_ai_status_display(
-                type("StatusRecord", (), {"ai_status": record.transcription_status})()
+            "transcriptionStatusText": get_status_display(
+                str(getattr(record, "transcription_status", "") or "")
             ),
-            "streamingMode": HistoryTab._format_mode_for_table(record),
-            "transcribeTime": HistoryTab._format_transcribe_for_table(record),
-            "fallbackUsed": HistoryTab._format_fallback_for_table(record),
+            "streamingMode": format_mode_for_table(record),
+            "transcribeTime": format_transcribe_for_table(record),
+            "fallbackUsed": format_fallback_for_table(record),
             "fallbackReason": getattr(record, "fallback_reason", None) or "None",
             "transcriptionError": transcription_error,
             "aiOptimizedText": ai_text,
@@ -513,6 +528,54 @@ class FluentSettingsViewModel(QObject):
     @Property("QVariantMap", notify=changed)
     def selectedHistoryDetail(self) -> dict[str, Any]:
         return self._selected_history_detail
+
+    @Property(bool, notify=changed)
+    def batchReprocessVisible(self) -> bool:
+        return self._batch_reprocess_visible
+
+    @Property(str, notify=changed)
+    def batchReprocessStage(self) -> str:
+        return self._batch_reprocess_stage
+
+    @Property(bool, notify=changed)
+    def batchReprocessRunning(self) -> bool:
+        return self._batch_reprocess_stage == "running"
+
+    @Property(int, notify=changed)
+    def batchReprocessTotal(self) -> int:
+        return self._batch_reprocess_total
+
+    @Property(int, notify=changed)
+    def batchReprocessCooldownSeconds(self) -> int:
+        return self._batch_reprocess_cooldown_seconds
+
+    @Property(int, notify=changed)
+    def batchReprocessProgressValue(self) -> int:
+        return self._batch_reprocess_progress_value
+
+    @Property(int, notify=changed)
+    def batchReprocessProgressTotal(self) -> int:
+        return self._batch_reprocess_progress_total
+
+    @Property(str, notify=changed)
+    def batchReprocessMessage(self) -> str:
+        return self._batch_reprocess_message
+
+    @Property("QVariantMap", notify=changed)
+    def batchReprocessResult(self) -> dict[str, Any]:
+        return self._batch_reprocess_result
+
+    @Property(bool, notify=changed)
+    def historyActionBusy(self) -> bool:
+        return self._history_action_busy
+
+    @Property(str, notify=changed)
+    def historyActionMessage(self) -> str:
+        return self._history_action_message
+
+    @Property(str, notify=changed)
+    def historyActionStage(self) -> str:
+        return self._history_action_stage
 
     @Property(int, notify=changed)
     def hotkeyCount(self) -> int:
@@ -818,39 +881,13 @@ class FluentSettingsViewModel(QObject):
         )
 
         if not transcription_service or not history_service:
-            QMessageBox.warning(
-                None,
-                "Service Unavailable",
-                "Retry processing requires transcription service.",
+            self._history_action_stage = "failed"
+            self._history_action_busy = False
+            self._history_action_message = (
+                "Retry processing requires transcription service."
             )
+            self.changed.emit()
             return
-
-        reply = QMessageBox.question(
-            None,
-            "Retry Processing",
-            (
-                "This will reprocess the recording using current configuration.\n\n"
-                "A new history record will be created and the original record will be kept.\n\n"
-                "Continue?"
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self._retry_progress_dialog = QProgressDialog(
-            "Initializing reprocessing...",
-            "Cancel",
-            0,
-            0,
-            None,
-        )
-        self._retry_progress_dialog.setWindowTitle("Reprocessing Recording")
-        self._retry_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self._retry_progress_dialog.setMinimumDuration(0)
-        self._retry_progress_dialog.setValue(0)
-        self._retry_progress_dialog.show()
 
         self._retry_worker = ReprocessingWorker(
             record_id=getattr(record, "id", ""),
@@ -867,26 +904,17 @@ class FluentSettingsViewModel(QObject):
         self._retry_worker.reprocessing_failed.connect(
             self._on_retry_reprocessing_failed
         )
-        self._retry_progress_dialog.canceled.connect(
-            self._on_retry_reprocessing_canceled
-        )
+        self._history_action_stage = "running"
+        self._history_action_busy = True
+        self._history_action_message = "Initializing reprocessing..."
+        self.changed.emit()
         self._retry_worker.start()
 
     def _on_retry_progress_updated(self, message: str) -> None:
-        if self._retry_progress_dialog:
-            self._retry_progress_dialog.setLabelText(message)
+        self._history_action_message = message
+        self.changed.emit()
 
     def _on_retry_reprocessing_completed(self, result: dict) -> None:
-        if self._retry_progress_dialog:
-            try:
-                self._retry_progress_dialog.canceled.disconnect(
-                    self._on_retry_reprocessing_canceled
-                )
-            except RuntimeError:
-                pass
-            self._retry_progress_dialog.close()
-            self._retry_progress_dialog = None
-
         if self._retry_worker:
             if self._retry_worker.isRunning():
                 self._retry_worker.wait(1000)
@@ -904,99 +932,106 @@ class FluentSettingsViewModel(QObject):
                 self._history_detail_visible = True
 
         self.refreshHistory(self._history_query)
-        QMessageBox.information(
-            None,
-            "Reprocessing Complete",
-            "Recording has been successfully reprocessed.",
-        )
+        self._history_action_stage = "complete"
+        self._history_action_busy = False
+        self._history_action_message = "Recording has been successfully reprocessed."
+        self.changed.emit()
 
     def _on_retry_reprocessing_failed(self, error_message: str) -> None:
-        if self._retry_progress_dialog:
-            try:
-                self._retry_progress_dialog.canceled.disconnect(
-                    self._on_retry_reprocessing_canceled
-                )
-            except RuntimeError:
-                pass
-            self._retry_progress_dialog.close()
-            self._retry_progress_dialog = None
-
         if self._retry_worker:
             if self._retry_worker.isRunning():
                 self._retry_worker.wait(1000)
             self._retry_worker = None
 
-        QMessageBox.critical(
-            None,
-            "Reprocessing Failed",
-            f"Failed to reprocess the recording:\n\n{error_message}",
+        self._history_action_stage = "failed"
+        self._history_action_busy = False
+        self._history_action_message = (
+            f"Failed to reprocess the recording: {error_message}"
         )
+        self.changed.emit()
 
+    @Slot()
     def _on_retry_reprocessing_canceled(self) -> None:
         if self._retry_worker:
             self._retry_worker.stop()
             self._retry_worker.wait(2000)
-            if self._retry_worker.isRunning():
-                self._retry_worker.terminate()
-                self._retry_worker.wait()
             self._retry_worker = None
 
-        QMessageBox.information(
-            None,
-            "Reprocessing Canceled",
-            "Reprocessing operation has been canceled.",
-        )
+        self._history_action_stage = "canceled"
+        self._history_action_busy = False
+        self._history_action_message = "Reprocessing operation has been canceled."
+        self.changed.emit()
+
+    @Slot()
+    def cancelHistoryAction(self) -> None:
+        if self._retry_worker:
+            self._on_retry_reprocessing_canceled()
+            return
+        self._history_action_stage = "idle"
+        self._history_action_busy = False
+        self._history_action_message = ""
+        self.changed.emit()
 
     @Slot()
     def startBatchReprocess(self) -> None:
         service = self._get_history_service()
         if not service:
-            QMessageBox.warning(
-                None,
-                "Error",
+            self._set_batch_message(
+                "failed",
                 "History service not available. Please restart the application.",
+                visible=True,
             )
             return
 
         try:
             total_records = int(service.get_total_count())
             if total_records <= 0:
-                QMessageBox.information(
-                    None,
-                    "No Records",
+                self._set_batch_message(
+                    "empty",
                     "No history records found to reprocess.",
+                    visible=True,
                 )
                 return
 
-            dialog = BatchReprocessDialog(total_records, None)
-            if dialog.exec() != QDialog.DialogCode.Accepted:
-                return
-
-            cd_seconds = dialog.get_cd_seconds()
-            reply = QMessageBox.question(
-                None,
-                "Confirm Batch Reprocessing",
-                (
-                    f"You are about to re-transcribe {total_records} records.\n\n"
-                    f"Cooldown: {cd_seconds} seconds between records\n"
-                    "Each successful retry will create a new history record.\n"
-                    "Original records will be preserved.\n"
-                    "This operation may take a long time and consume API quota.\n\n"
-                    "Are you sure you want to continue?"
-                ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+            self._batch_reprocess_visible = True
+            self._batch_reprocess_stage = "confirm"
+            self._batch_reprocess_total = total_records
+            self._batch_reprocess_progress_value = 0
+            self._batch_reprocess_progress_total = 0
+            self._batch_reprocess_message = (
+                f"You are about to re-transcribe {total_records} records."
             )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
-            self._start_batch_reprocessing(total_records, cd_seconds)
+            self._batch_reprocess_result = {}
+            self.changed.emit()
         except Exception as exc:
-            QMessageBox.critical(
-                None,
-                "Error",
+            self._set_batch_message(
+                "failed",
                 f"Failed to start batch reprocessing: {exc}",
+                visible=True,
             )
+
+    @Slot(int)
+    def confirmBatchReprocess(self, cd_seconds: int = 0) -> None:
+        total_records = self._batch_reprocess_total
+        if total_records <= 0:
+            return
+        self._start_batch_reprocessing(total_records, max(0, int(cd_seconds or 0)))
+
+    @Slot()
+    def closeBatchReprocess(self) -> None:
+        if self._batch_reprocess_stage in {"running", "canceling"}:
+            return
+        self._batch_reprocess_visible = False
+        self._batch_reprocess_stage = "idle"
+        self._batch_reprocess_message = ""
+        self._batch_reprocess_result = {}
+        self.changed.emit()
+
+    def _set_batch_message(self, stage: str, message: str, visible: bool) -> None:
+        self._batch_reprocess_visible = visible
+        self._batch_reprocess_stage = stage
+        self._batch_reprocess_message = message
+        self.changed.emit()
 
     def _start_batch_reprocessing(self, total_records: int, cd_seconds: int) -> None:
         self._batch_cancel_requested = False
@@ -1017,24 +1052,12 @@ class FluentSettingsViewModel(QObject):
         history_service = self._get_history_service()
 
         if not transcription_service or not history_service:
-            QMessageBox.critical(
-                None,
-                "Error",
+            self._set_batch_message(
+                "failed",
                 "Required services not available. Please restart the application.",
+                visible=True,
             )
             return
-
-        self._batch_progress_dialog = QProgressDialog(
-            "Starting batch reprocessing...",
-            "Cancel",
-            0,
-            total_records,
-            None,
-        )
-        self._batch_progress_dialog.setWindowTitle("Batch Reprocessing")
-        self._batch_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self._batch_progress_dialog.setMinimumDuration(0)
-        self._batch_progress_dialog.setValue(0)
 
         self._batch_worker = BatchReprocessingWorker(
             total_records=total_records,
@@ -1046,42 +1069,44 @@ class FluentSettingsViewModel(QObject):
         )
         self._batch_worker.progress_updated.connect(self._on_batch_progress_updated)
         self._batch_worker.batch_completed.connect(self._on_batch_completed)
-        self._batch_progress_dialog.canceled.connect(self._on_batch_canceled)
+        self._batch_reprocess_visible = True
+        self._batch_reprocess_stage = "running"
+        self._batch_reprocess_total = total_records
+        self._batch_reprocess_cooldown_seconds = cd_seconds
+        self._batch_reprocess_progress_value = 0
+        self._batch_reprocess_progress_total = total_records
+        self._batch_reprocess_message = "Starting batch reprocessing..."
+        self._batch_reprocess_result = {}
+        self.changed.emit()
         self._batch_worker.start()
 
     def _on_batch_progress_updated(
         self, current: int, total: int, record_id: str
     ) -> None:
-        if self._batch_progress_dialog:
-            self._batch_progress_dialog.setValue(current)
-            self._batch_progress_dialog.setLabelText(
-                f"Processing {current}/{total} records...\n"
-                f"Current record: {record_id[:16]}..."
-            )
+        self._batch_reprocess_progress_value = int(current)
+        self._batch_reprocess_progress_total = int(total)
+        self._batch_reprocess_message = f"Processing {current}/{total} records...\nCurrent record: {record_id[:16]}..."
+        self.changed.emit()
 
     def _on_batch_completed(self, stats: dict) -> None:
-        if self._batch_progress_dialog:
-            self._batch_progress_dialog.close()
-            self._batch_progress_dialog = None
-
         if self._batch_worker:
             self._batch_worker.wait()
             self._batch_worker = None
 
         self.refreshHistory(self._history_query)
+        self._batch_reprocess_result = dict(stats)
 
         if self._batch_cancel_requested:
             self._batch_cancel_requested = False
-            QMessageBox.information(
-                None,
-                "Batch Reprocessing Canceled",
+            self._set_batch_message(
+                "canceled",
                 "Batch reprocessing was canceled. Completed work has been kept, and remaining records were skipped.",
+                visible=True,
             )
             return
 
         report_lines = [
             "Batch Reprocessing Complete!",
-            "",
             f"Total records: {stats.get('total', 0)}",
             f"Successful: {stats.get('success', 0)}",
             f"Skipped: {stats.get('skipped', 0)}",
@@ -1095,21 +1120,18 @@ class FluentSettingsViewModel(QObject):
             if len(errors) > 5:
                 report_lines.append(f"... and {len(errors) - 5} more errors")
 
-        QMessageBox.information(
-            None,
-            "Batch Reprocessing Complete",
-            "\n".join(report_lines),
-        )
+        self._set_batch_message("complete", "\n".join(report_lines), visible=True)
 
-    def _on_batch_canceled(self) -> None:
+    @Slot()
+    def cancelBatchReprocess(self) -> None:
         self._batch_cancel_requested = True
-        if self._batch_progress_dialog:
-            self._batch_progress_dialog.setLabelText(
-                "Cancel requested...\nWaiting for the current record to finish safely."
-            )
-            self._batch_progress_dialog.setCancelButton(None)
+        self._batch_reprocess_stage = "canceling"
+        self._batch_reprocess_message = (
+            "Cancel requested...\nWaiting for the current record to finish safely."
+        )
         if self._batch_worker:
             self._batch_worker.stop()
+        self.changed.emit()
 
     @Slot()
     def reload(self) -> None:

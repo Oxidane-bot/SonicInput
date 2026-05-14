@@ -42,8 +42,8 @@
    - 时间分析
    - 事件顺序验证
 
-### 2. `test_recording_overlay.py` - 悬浮窗集成测试
-**技术预览** - 包含 Qt UI 组件测试，需要更多的 Mock 配置。
+### 2. `tests/ui/test_fluent_qml_ui.py` - Fluent 悬浮窗与设置窗测试
+**当前入口** - 覆盖 Fluent 录音悬浮窗、设置窗、历史页及相关 QML 交互。
 
 #### 测试用例：
 

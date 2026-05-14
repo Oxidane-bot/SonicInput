@@ -38,7 +38,11 @@ class NullSpeechService(ISpeechService):
         raise RuntimeError(self._reason)
 
     def transcribe_sync(
-        self, audio_data: np.ndarray, language: Optional[str] = None
+        self,
+        audio_data: np.ndarray,
+        language: Optional[str] = None,
+        temperature: float = 0.0,
+        emit_event: bool = False,
     ) -> Dict[str, Any]:
         return self.transcribe(audio_data, language=language)
 

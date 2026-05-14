@@ -1,7 +1,7 @@
-"""用户界面模块初始化"""
+"""User interface exports."""
 
+from .fluent_recording_overlay import FluentRecordingOverlay
+from .fluent_settings_window import FluentSettingsWindow
 from .main_window import MainWindow
-from .recording_overlay import RecordingOverlay
-from .settings_window import SettingsWindow
 
-__all__ = ["SettingsWindow", "RecordingOverlay", "MainWindow"]
+__all__ = ["FluentSettingsWindow", "FluentRecordingOverlay", "MainWindow"]

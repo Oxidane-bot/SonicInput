@@ -1096,9 +1096,13 @@ ApplicationWindow {
                                 spacing: 6
                                 clip: true
                                 model: root.viewModel ? root.viewModel.historyRecords : []
-                                property int delegateTextMinimumWidth: 260
+                                property int delegateTimeWidth: 88
+                                property int delegateTextMinimumWidth: 120
                                 property int delegateStatusWidth: 74
                                 property int delegateActionWidth: 76
+                                property int delegateControlHeight: 32
+                                property int delegateInnerPadding: 10
+                                property int delegateColumnSpacing: 8
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                 onMovementEnded: {
                                     if (atYEnd && root.viewModel) {
@@ -1113,6 +1117,17 @@ ApplicationWindow {
                                     color: palette.window
                                     border.color: palette.mid
                                     border.width: 1
+                                    clip: true
+
+                                    property int textColumnWidth: Math.max(
+                                        historyList.delegateTextMinimumWidth,
+                                        width
+                                        - historyList.delegateInnerPadding * 2
+                                        - historyList.delegateColumnSpacing * 3
+                                        - historyList.delegateTimeWidth
+                                        - historyList.delegateStatusWidth
+                                        - historyList.delegateActionWidth
+                                    )
 
                                     MouseArea {
                                         anchors.fill: parent
@@ -1120,78 +1135,102 @@ ApplicationWindow {
                                         onDoubleClicked: root.viewModel && root.viewModel.openHistoryDetail(index)
                                     }
 
-                                    RowLayout {
+                                    Row {
                                         anchors.fill: parent
                                         anchors.margins: 10
                                         spacing: 8
 
-                                        ColumnLayout {
-                                            Layout.preferredWidth: 88
-                                            Layout.minimumWidth: 76
-                                            Layout.maximumWidth: 96
-                                            Layout.fillHeight: true
-                                            spacing: 3
-                                            Label {
-                                                text: modelData.displayTime
-                                                font.pixelSize: 12
-                                                font.weight: Font.Medium
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-                                            Label {
-                                                text: modelData.durationText
-                                                opacity: 0.7
-                                                font.pixelSize: 12
-                                                Layout.fillWidth: true
+                                        Item {
+                                            width: historyList.delegateTimeWidth
+                                            height: parent.height
+
+                                            Column {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                spacing: 3
+
+                                                Label {
+                                                    width: parent.width
+                                                    text: modelData.displayTime
+                                                    font.pixelSize: 12
+                                                    font.weight: Font.Medium
+                                                    wrapMode: Text.NoWrap
+                                                    maximumLineCount: 1
+                                                    elide: Text.ElideRight
+                                                    clip: true
+                                                }
+                                                Label {
+                                                    width: parent.width
+                                                    text: modelData.durationText
+                                                    opacity: 0.7
+                                                    font.pixelSize: 12
+                                                    wrapMode: Text.NoWrap
+                                                    maximumLineCount: 1
+                                                    elide: Text.ElideRight
+                                                    clip: true
+                                                }
                                             }
                                         }
 
-                                        ColumnLayout {
+                                        Item {
                                             objectName: "historyDelegateTextColumn"
-                                            Layout.fillWidth: true
-                                            Layout.minimumWidth: historyList.delegateTextMinimumWidth
-                                            Layout.fillHeight: true
-                                            spacing: 4
-                                            Label {
-                                                text: modelData.primaryText
-                                                font.pixelSize: 13
-                                                font.weight: Font.Medium
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-                                            Label {
-                                                text: modelData.transcriptionText
-                                                opacity: 0.68
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-                                            Label {
-                                                text: modelData.fullTime
-                                                opacity: 0.52
-                                                font.pixelSize: 11
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
+                                            width: textColumnWidth
+                                            height: parent.height
+                                            clip: true
+
+                                            Column {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                spacing: 4
+
+                                                Label {
+                                                    objectName: "historyDelegatePrimaryLabel"
+                                                    width: parent.width
+                                                    text: modelData.primaryText
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.Medium
+                                                    wrapMode: Text.NoWrap
+                                                    maximumLineCount: 1
+                                                    elide: Text.ElideRight
+                                                    clip: true
+                                                }
+                                                Label {
+                                                    objectName: "historyDelegateTimestampLabel"
+                                                    width: parent.width
+                                                    text: modelData.fullTime
+                                                    opacity: 0.52
+                                                    font.pixelSize: 11
+                                                    wrapMode: Text.NoWrap
+                                                    maximumLineCount: 1
+                                                    elide: Text.ElideRight
+                                                    clip: true
+                                                }
                                             }
                                         }
 
                                         Label {
                                             objectName: "historyDelegateStatusLabel"
+                                            width: historyList.delegateStatusWidth
+                                            height: historyList.delegateControlHeight
+                                            anchors.verticalCenter: parent.verticalCenter
                                             text: modelData.statusText
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 12
+                                            wrapMode: Text.NoWrap
+                                            maximumLineCount: 1
                                             elide: Text.ElideRight
-                                            Layout.preferredWidth: historyList.delegateStatusWidth
-                                            Layout.minimumWidth: 68
-                                            Layout.maximumWidth: 82
+                                            clip: true
                                         }
 
                                         Button {
                                             objectName: "historyDetailButton"
+                                            width: historyList.delegateActionWidth
+                                            height: historyList.delegateControlHeight
+                                            anchors.verticalCenter: parent.verticalCenter
                                             text: root.t("detail", "Detail")
-                                            Layout.preferredWidth: historyList.delegateActionWidth
-                                            Layout.minimumWidth: 72
                                             onClicked: root.viewModel && root.viewModel.openHistoryDetail(index)
                                         }
                                     }
@@ -1378,6 +1417,142 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    Dialog {
+        id: historyBatchConfirmDialog
+        objectName: "historyBatchConfirmDialog"
+        modal: true
+        visible: root.viewModel && root.viewModel.batchReprocessVisible && root.viewModel.batchReprocessStage === "confirm"
+        title: root.t("batch_reprocess", "Batch Reprocess")
+        anchors.centerIn: parent
+        width: Math.min(root.width - 64, 520)
+        closePolicy: Popup.NoAutoClose
+
+        footer: DialogButtonBox {
+            Button {
+                text: root.t("close", "Close")
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: root.viewModel && root.viewModel.closeBatchReprocess()
+            }
+            Button {
+                text: root.t("confirm", "Confirm")
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: root.viewModel && root.viewModel.confirmBatchReprocess(historyBatchCooldownSpin.value)
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: root.viewModel ? root.viewModel.batchReprocessMessage : ""
+            }
+            Label {
+                text: "Each successful retry creates a new history record and preserves the original record."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                opacity: 0.72
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+                Label {
+                    text: root.t("seconds", "Seconds")
+                }
+                SpinBox {
+                    id: historyBatchCooldownSpin
+                    objectName: "historyBatchCooldownSpin"
+                    from: 0
+                    to: 60
+                    value: 0
+                    editable: true
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: historyBatchProgressDialog
+        objectName: "historyBatchProgressDialog"
+        modal: true
+        visible: root.viewModel && root.viewModel.batchReprocessVisible && root.viewModel.batchReprocessStage !== "confirm" && root.viewModel.batchReprocessStage !== "idle"
+        title: root.t("batch_reprocess", "Batch Reprocess")
+        anchors.centerIn: parent
+        width: Math.min(root.width - 64, 560)
+        closePolicy: Popup.NoAutoClose
+
+        footer: DialogButtonBox {
+            Button {
+                visible: root.viewModel && root.viewModel.batchReprocessStage === "running"
+                text: root.t("cancel", "Cancel")
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: root.viewModel && root.viewModel.cancelBatchReprocess()
+            }
+            Button {
+                visible: root.viewModel && root.viewModel.batchReprocessStage !== "running" && root.viewModel.batchReprocessStage !== "canceling"
+                text: root.t("close", "Close")
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: root.viewModel && root.viewModel.closeBatchReprocess()
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                id: historyBatchProgressLabel
+                objectName: "historyBatchProgressLabel"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: root.viewModel ? root.viewModel.batchReprocessMessage : ""
+            }
+            ProgressBar {
+                id: historyBatchProgressBar
+                objectName: "historyBatchProgressBar"
+                Layout.fillWidth: true
+                from: 0
+                to: Math.max(1, root.viewModel ? root.viewModel.batchReprocessProgressTotal : 1)
+                value: root.viewModel ? root.viewModel.batchReprocessProgressValue : 0
+                visible: root.viewModel && root.viewModel.batchReprocessStage === "running"
+            }
+        }
+    }
+
+    Dialog {
+        id: historyActionDialog
+        objectName: "historyActionDialog"
+        modal: true
+        visible: root.viewModel && (root.viewModel.historyActionBusy || root.viewModel.historyActionStage === "complete" || root.viewModel.historyActionStage === "failed" || root.viewModel.historyActionStage === "canceled")
+        title: root.t("retry", "Retry")
+        anchors.centerIn: parent
+        width: Math.min(root.width - 64, 520)
+        closePolicy: Popup.NoAutoClose
+
+        footer: DialogButtonBox {
+            Button {
+                visible: root.viewModel && root.viewModel.historyActionBusy
+                text: root.t("cancel", "Cancel")
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: root.viewModel && root.viewModel.cancelHistoryAction()
+            }
+            Button {
+                visible: root.viewModel && !root.viewModel.historyActionBusy
+                text: root.t("close", "Close")
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: root.viewModel && root.viewModel.cancelHistoryAction()
+            }
+        }
+
+        contentItem: Label {
+            objectName: "historyActionMessageLabel"
+            width: parent ? parent.width : 420
+            wrapMode: Text.WordWrap
+            text: root.viewModel ? root.viewModel.historyActionMessage : ""
         }
     }
 }

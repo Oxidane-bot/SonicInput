@@ -23,6 +23,8 @@ def test_settings_window_opens_with_null_speech_service(
     history_service.get_records = Mock(return_value=[])
     history_service.get_record_by_id = Mock(return_value=None)
     history_service.search_records = Mock(return_value=[])
+    history_service.get_records_keyset = Mock(return_value=[])
+    history_service.search_records_keyset = Mock(return_value=[])
     history_service.get_total_count = Mock(return_value=0)
     history_service.get_aggregate_stats = Mock(return_value=(0, 0.0, 0))
 
@@ -52,4 +54,4 @@ def test_settings_window_opens_with_null_speech_service(
 
     settings_window = getattr(window, "_settings_window", None)
     assert settings_window is not None
-    qtbot.addWidget(settings_window)
+    assert settings_window.isVisible() is True

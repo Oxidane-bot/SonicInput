@@ -122,6 +122,7 @@ __all__ = [  # noqa: F405
     "GroqAPIError",
     "NVIDIAAPIError",
     "OpenAICompatibleAPIError",
+    "AIOutputTruncatedError",
     "TextInputError",
     "ConfigurationError",
     "HotkeyRegistrationError",

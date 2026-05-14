@@ -73,11 +73,20 @@ class IAIProcessingController(ABC):
     """
 
     @abstractmethod
-    def process_with_ai(self, text: str) -> str:
+    def process_with_ai(
+        self,
+        text: str,
+        record_id: Optional[str] = None,
+        update_history: bool = True,
+        emit_events: bool = True,
+    ) -> str:
         """使用AI优化文本
 
         Args:
             text: 原始文本
+            record_id: 历史记录ID（可选）
+            update_history: 是否更新历史记录
+            emit_events: 是否发送实时 UI 事件
 
         Returns:
             优化后的文本

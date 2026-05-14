@@ -207,6 +207,94 @@ class TestFluentSettingsViewModel:
         assert view_model.historyDetailVisible is False
         assert view_model.historyRecords == []
 
+    def test_history_batch_reprocess_opens_qml_confirmation_without_widget_dialogs(
+        self, mock_config_service
+    ):
+        history_service = Mock()
+        history_service.get_total_count.return_value = 12
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model.startBatchReprocess()
+
+        assert view_model.batchReprocessVisible is True
+        assert view_model.batchReprocessStage == "confirm"
+        assert view_model.batchReprocessTotal == 12
+        assert view_model.batchReprocessProgressValue == 0
+
+    def test_history_batch_reprocess_confirm_starts_worker_with_qml_progress(
+        self, mock_config_service, monkeypatch
+    ):
+        import sonicinput.ui.qml_bridge as qml_bridge
+
+        history_service = Mock()
+        history_service.get_total_count.return_value = 2
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+        mock_config_service.get_transcription_service = Mock(return_value=object())
+        mock_config_service.get_ai_processing_controller = Mock(return_value=None)
+
+        started_workers = []
+
+        class FakeWorker:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.progress_updated = Mock()
+                self.batch_completed = Mock()
+                started_workers.append(self)
+
+            def start(self):
+                self.started = True
+
+        monkeypatch.setattr(qml_bridge, "BatchReprocessingWorker", FakeWorker)
+
+        view_model = qml_bridge.FluentSettingsViewModel(mock_config_service)
+        view_model.startBatchReprocess()
+        view_model.confirmBatchReprocess(3)
+
+        assert view_model.batchReprocessStage == "running"
+        assert view_model.batchReprocessRunning is True
+        assert view_model.batchReprocessProgressTotal == 2
+        assert started_workers[0].kwargs["cd_seconds"] == 3
+
+    def test_retry_history_record_uses_qml_action_state(
+        self, mock_config_service, monkeypatch
+    ):
+        import sonicinput.ui.qml_bridge as qml_bridge
+
+        record = _make_history_record("h-1", "retry me")
+        history_service = Mock()
+        history_service.get_records_keyset.return_value = [record]
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        history_service.get_record_by_id.return_value = record
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+        mock_config_service.get_transcription_service = Mock(return_value=object())
+        mock_config_service.get_ai_processing_controller = Mock(return_value=None)
+
+        started_workers = []
+
+        class FakeWorker:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.progress_updated = Mock()
+                self.reprocessing_completed = Mock()
+                self.reprocessing_failed = Mock()
+                started_workers.append(self)
+
+            def start(self):
+                self.started = True
+
+        monkeypatch.setattr(qml_bridge, "ReprocessingWorker", FakeWorker)
+
+        view_model = qml_bridge.FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("")
+        view_model.retryHistoryRecord(0)
+
+        assert view_model.historyActionBusy is True
+        assert view_model.historyActionStage == "running"
+        assert started_workers[0].kwargs["record_id"] == "h-1"
+
 
 @pytest.mark.gui
 class TestFluentSettingsParity:
@@ -652,14 +740,40 @@ class TestFluentSettingsParity:
         history_list = root.findChild(QObject, "historyList")
 
         reserved_width = (
-            history_list.property("delegateTextMinimumWidth")
+            history_list.property("delegateTimeWidth")
+            + history_list.property("delegateTextMinimumWidth")
             + history_list.property("delegateStatusWidth")
             + history_list.property("delegateActionWidth")
         )
 
         assert history_list.property("count") == 1
-        assert history_list.property("delegateTextMinimumWidth") >= 260
+        assert history_list.property("delegateTextMinimumWidth") >= 120
         assert reserved_width < history_list.property("width")
+
+    def test_settings_qml_history_labels_are_forced_to_single_line_elide(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        for object_name in [
+            "historyDelegatePrimaryLabel",
+            "historyDelegateTimestampLabel",
+            "historyDelegateStatusLabel",
+        ]:
+            assert f'objectName: "{object_name}"' in qml_source
+
+        assert 'objectName: "historyDelegateTranscriptionLabel"' not in qml_source
+        assert qml_source.count("wrapMode: Text.NoWrap") >= 5
+        assert qml_source.count("maximumLineCount: 1") >= 5
+
+    def test_settings_qml_history_detail_button_matches_status_height(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        assert "property int delegateControlHeight:" in qml_source
+        assert "height: historyList.delegateControlHeight" in qml_source
+        assert "anchors.verticalCenter: parent.verticalCenter" in qml_source
 
     def test_settings_qml_history_detail_panel_uses_fluent_surface(
         self, qapp, mock_config_service
@@ -690,6 +804,20 @@ class TestFluentSettingsParity:
         assert panel.property("visible") is True
         assert final_text.property("text") == "detail panel final"
         assert diagnostics.property("visible") is True
+
+    def test_settings_qml_history_has_batch_confirm_and_progress_surfaces(self):
+        from sonicinput.ui.qml_bridge import qml_path
+
+        qml_source = qml_path("FluentSettingsWindow.qml").read_text(encoding="utf-8")
+
+        for object_name in [
+            "historyBatchConfirmDialog",
+            "historyBatchCooldownSpin",
+            "historyBatchProgressDialog",
+            "historyBatchProgressBar",
+            "historyBatchProgressLabel",
+        ]:
+            assert f'objectName: "{object_name}"' in qml_source
 
 
 @pytest.mark.gui

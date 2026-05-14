@@ -56,17 +56,9 @@ def test_main_window_uses_only_fluent_settings(qapp, monkeypatch, mock_config_se
         def activateWindow(self):
             return None
 
-    def legacy_settings_window_forbidden(*_args, **_kwargs):
-        raise AssertionError("legacy SettingsWindow must not be used as fallback")
-
     monkeypatch.setattr(
         "sonicinput.ui.fluent_settings_window.FluentSettingsWindow",
         FakeFluentSettings,
-    )
-    monkeypatch.setattr(
-        "sonicinput.ui.settings_window.SettingsWindow",
-        legacy_settings_window_forbidden,
-        raising=False,
     )
 
     window = MainWindow(

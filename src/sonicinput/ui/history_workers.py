@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import QCoreApplication, QThread, Signal
 
-from ...core.interfaces import HistoryRecord
+from ..core.interfaces import HistoryRecord
 
 
 def build_reprocessed_record(
@@ -48,6 +48,34 @@ def build_reprocessed_record(
     )
 
 
+def _process_ai_for_history_retry(ai_processing_controller, transcription_text: str):
+    """Run AI for history retry without driving live recording UI events."""
+    try:
+        optimized_text = ai_processing_controller.process_with_ai(
+            transcription_text,
+            record_id="",
+            update_history=False,
+            emit_events=False,
+        )
+    except TypeError as e:
+        if "emit_events" not in str(e):
+            raise
+        optimized_text = ai_processing_controller.process_with_ai(
+            transcription_text,
+            record_id="",
+            update_history=False,
+        )
+
+    status = getattr(ai_processing_controller, "last_ai_status", None)
+    error = getattr(ai_processing_controller, "last_ai_error", None)
+    provider = getattr(ai_processing_controller, "last_ai_provider", None)
+
+    if status in {"failed", "skipped"}:
+        return None, provider, status, error
+
+    return optimized_text, provider, status, error
+
+
 class ReprocessingWorker(QThread):
     """Background worker for reprocessing a single history record."""
 
@@ -76,8 +104,8 @@ class ReprocessingWorker(QThread):
     def run(self):
         """Execute the reprocessing flow in the background."""
         try:
-            from ...audio.recorder import AudioRecorder
-            from ...utils import app_logger
+            from ..audio.recorder import AudioRecorder
+            from ..utils import app_logger
 
             self.progress_updated.emit(
                 QCoreApplication.translate("HistoryTab", "Loading audio file...")
@@ -138,6 +166,7 @@ class ReprocessingWorker(QThread):
                     audio_data=audio_data,
                     language=language if language != "auto" else None,
                     temperature=0.0,
+                    emit_event=False,
                 )
                 transcription_duration = time.time() - transcribe_start
 
@@ -197,17 +226,22 @@ class ReprocessingWorker(QThread):
                     )
                 else:
                     try:
-                        ai_optimized_text = (
-                            self.ai_processing_controller.process_with_ai(
-                                transcription_text,
-                                record_id="",
-                            )
+                        (
+                            ai_optimized_text,
+                            controller_ai_provider,
+                            controller_ai_status,
+                            controller_ai_error,
+                        ) = _process_ai_for_history_retry(
+                            self.ai_processing_controller, transcription_text
                         )
-                        ai_provider = self.config_service.get_setting(
-                            "ai.provider", "groq"
+                        ai_provider = controller_ai_provider or (
+                            self.config_service.get_setting("ai.provider", "groq")
                         )
 
-                        if ai_optimized_text and ai_optimized_text.strip():
+                        if controller_ai_status in {"failed", "skipped"}:
+                            ai_status = controller_ai_status
+                            ai_error = controller_ai_error
+                        elif ai_optimized_text and ai_optimized_text.strip():
                             ai_status = "success"
                         else:
                             ai_status = "failed"
@@ -292,7 +326,7 @@ class ReprocessingWorker(QThread):
                 }
             )
         except Exception as e:
-            from ...utils import app_logger
+            from ..utils import app_logger
 
             app_logger.log_error(e, "reprocessing_worker")
             self.reprocessing_failed.emit(
@@ -336,7 +370,7 @@ class BatchReprocessingWorker(QThread):
 
     def run(self):
         """Execute batch reprocessing."""
-        from ...utils import app_logger
+        from ..utils import app_logger
 
         total_records = max(int(self.total_records or 0), 0)
         self.stats["total"] = total_records
@@ -404,7 +438,7 @@ class BatchReprocessingWorker(QThread):
         if not pending_records:
             return
 
-        from ...utils import app_logger
+        from ..utils import app_logger
 
         try:
             saved_count = self.history_service.save_records_batch(pending_records)
@@ -439,8 +473,8 @@ class BatchReprocessingWorker(QThread):
 
     def _process_single_record(self, record) -> Optional[HistoryRecord]:
         """Process a single history record."""
-        from ...audio.recorder import AudioRecorder
-        from ...utils import app_logger
+        from ..audio.recorder import AudioRecorder
+        from ..utils import app_logger
 
         try:
             audio_file_path = record.audio_file_path
@@ -497,6 +531,7 @@ class BatchReprocessingWorker(QThread):
                     audio_data=audio_data,
                     language=language if language != "auto" else None,
                     temperature=0.0,
+                    emit_event=False,
                 )
                 transcription_duration = time.time() - transcribe_start
 
@@ -548,16 +583,22 @@ class BatchReprocessingWorker(QThread):
                     )
                 else:
                     try:
-                        ai_optimized_text = (
-                            self.ai_processing_controller.process_with_ai(
-                                transcription_text, record_id=""
-                            )
+                        (
+                            ai_optimized_text,
+                            controller_ai_provider,
+                            controller_ai_status,
+                            controller_ai_error,
+                        ) = _process_ai_for_history_retry(
+                            self.ai_processing_controller, transcription_text
                         )
-                        ai_provider = self.config_service.get_setting(
-                            "ai.provider", "groq"
+                        ai_provider = controller_ai_provider or (
+                            self.config_service.get_setting("ai.provider", "groq")
                         )
 
-                        if ai_optimized_text and ai_optimized_text.strip():
+                        if controller_ai_status in {"failed", "skipped"}:
+                            ai_status = controller_ai_status
+                            ai_error = controller_ai_error
+                        elif ai_optimized_text and ai_optimized_text.strip():
                             ai_status = "success"
                         else:
                             ai_status = "failed"
@@ -589,7 +630,7 @@ class BatchReprocessingWorker(QThread):
                 transcription_error=None,
             )
         except Exception as e:
-            from ...utils import app_logger
+            from ..utils import app_logger
 
             app_logger.log_error(e, "batch_reprocessing_worker")
             self.stats["failed"] += 1

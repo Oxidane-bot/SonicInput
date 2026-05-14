@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from ...ai import AIClientFactory
-from ...utils import OpenRouterAPIError, app_logger
+from ...utils import AIOutputTruncatedError, OpenRouterAPIError, app_logger
 from ..base.lifecycle_component import LifecycleComponent
 from ..interfaces import (
     IAIProcessingController,
@@ -86,6 +86,9 @@ class AIProcessingController(
         self._sentence_splitter_error: Optional[str] = None
         self._last_incremental_output_used = False
         self._last_streaming_output_used = False
+        self.last_ai_status = "idle"
+        self.last_ai_error: Optional[str] = None
+        self.last_ai_provider: Optional[str] = None
         self._chunk_text_by_id: Dict[int, str] = {}
         self._chunk_ai_refined_parts: List[str] = []
         self._chunk_ai_pending_sentences: List[str] = []
@@ -658,12 +661,61 @@ class AIProcessingController(
         payload["ai_tps"] = self._last_ai_tps
         self._events.emit(Events.AI_INCREMENTAL_TEXT_UPDATED, payload)
 
+    def _get_ai_max_output_tokens(self) -> int:
+        raw_value = self._config.get_setting(ConfigKeys.AI_MAX_OUTPUT_TOKENS, 4096)
+        try:
+            return max(256, int(raw_value))
+        except (TypeError, ValueError):
+            return 4096
+
+    def _call_refine_text(
+        self,
+        ai_service: IAIService,
+        text: str,
+        prompt_template: str,
+        model: str,
+        max_output_tokens: int,
+    ) -> str:
+        try:
+            return ai_service.refine_text(
+                text, prompt_template, model, max_tokens=max_output_tokens
+            )
+        except TypeError as e:
+            if "max_tokens" not in str(e):
+                raise
+            return ai_service.refine_text(text, prompt_template, model)
+
+    def _call_refine_text_streaming(
+        self,
+        ai_service: IAIService,
+        text: str,
+        prompt_template: str,
+        model: str,
+        on_token: Any,
+        max_output_tokens: int,
+    ) -> str:
+        try:
+            return ai_service.refine_text_streaming(
+                text,
+                prompt_template,
+                model,
+                on_token=on_token,
+                max_tokens=max_output_tokens,
+            )
+        except TypeError as e:
+            if "max_tokens" not in str(e):
+                raise
+            return ai_service.refine_text_streaming(
+                text, prompt_template, model, on_token=on_token
+            )
+
     def process_with_ai(
         self,
         text: str,
         record_id: Optional[str] = None,
         incremental_event_data: Optional[Dict[str, Any]] = None,
         update_history: bool = True,
+        emit_events: bool = True,
     ) -> str:
         """使用AI优化文本
 
@@ -679,18 +731,25 @@ class AIProcessingController(
             record_id if record_id is not None else self._current_record_id
         )
         streaming_output_used = False
+        provider = "unknown"
+        self.last_ai_status = "pending"
+        self.last_ai_error = None
+        self.last_ai_provider = None
 
         try:
-            self._events.emit(Events.AI_PROCESSING_STARTED)
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_STARTED)
 
             # 获取配置
             provider = self._config.get_setting(ConfigKeys.AI_PROVIDER, "openrouter")
+            self.last_ai_provider = provider
             model_key = f"ai.{provider}.model_id"
             model = self._config.get_setting(model_key, "anthropic/claude-3-sonnet")
             prompt_template = self._config.get_setting(
                 ConfigKeys.AI_PROMPT,
                 "Please improve and correct the following text: {text}",
             )
+            max_output_tokens = self._get_ai_max_output_tokens()
 
             # 动态获取AI服务
             ai_service = self._get_current_ai_service()
@@ -698,6 +757,8 @@ class AIProcessingController(
                 app_logger.log_audio_event(
                     "AI service not available, skipping optimization", {}
                 )
+                self.last_ai_status = "skipped"
+                self.last_ai_error = "AI service not available"
                 return text
 
             sentence_split_enabled = self._is_sentence_split_enabled()
@@ -725,15 +786,16 @@ class AIProcessingController(
                             streaming_text = self._join_refined_groups(
                                 [*refined_parts, "".join(accumulated)]
                             )
-                            self._events.emit(
-                                Events.AI_STREAMING_TOKEN_RECEIVED,
-                                {
-                                    "token": token,
-                                    "group_index": group_idx,
-                                    "accumulated": "".join(accumulated),
-                                    "streaming_text": streaming_text,
-                                },
-                            )
+                            if emit_events:
+                                self._events.emit(
+                                    Events.AI_STREAMING_TOKEN_RECEIVED,
+                                    {
+                                        "token": token,
+                                        "group_index": group_idx,
+                                        "accumulated": "".join(accumulated),
+                                        "streaming_text": streaming_text,
+                                    },
+                                )
 
                         return on_token
 
@@ -745,24 +807,31 @@ class AIProcessingController(
                         if not group_text:
                             continue
                         if use_streaming:
-                            refined_part = ai_service.refine_text_streaming(
+                            refined_part = self._call_refine_text_streaming(
+                                ai_service,
                                 group_text,
                                 prompt_template,
                                 model,
                                 on_token=make_streaming_callback(idx),
+                                max_output_tokens=max_output_tokens,
                             )
                         else:
-                            refined_part = ai_service.refine_text(
-                                group_text, prompt_template, model
+                            refined_part = self._call_refine_text(
+                                ai_service,
+                                group_text,
+                                prompt_template,
+                                model,
+                                max_output_tokens,
                             )
                         refined_parts.append(refined_part)
                         self._last_ai_tps = getattr(ai_service, "_last_tps", 0.0)
                         cumulative_text = self._join_refined_groups(refined_parts)
-                        self._emit_incremental_ai_text(
-                            cumulative_text,
-                            incremental_event_data,
-                            streaming_output_used=use_streaming,
-                        )
+                        if emit_events:
+                            self._emit_incremental_ai_text(
+                                cumulative_text,
+                                incremental_event_data,
+                                streaming_output_used=use_streaming,
+                            )
                         incremental_output_used = True
                     refined_text = (
                         self._join_refined_groups(refined_parts)
@@ -776,22 +845,32 @@ class AIProcessingController(
 
                         def single_token_callback(token: str) -> None:
                             accumulated_tokens.append(token)
-                            self._events.emit(
-                                Events.AI_STREAMING_TOKEN_RECEIVED,
-                                {
-                                    "token": token,
-                                    "group_index": 0,
-                                    "accumulated": "".join(accumulated_tokens),
-                                    "streaming_text": "".join(accumulated_tokens),
-                                },
-                            )
+                            if emit_events:
+                                self._events.emit(
+                                    Events.AI_STREAMING_TOKEN_RECEIVED,
+                                    {
+                                        "token": token,
+                                        "group_index": 0,
+                                        "accumulated": "".join(accumulated_tokens),
+                                        "streaming_text": "".join(accumulated_tokens),
+                                    },
+                                )
 
-                        refined_text = ai_service.refine_text_streaming(
-                            text, prompt_template, model, on_token=single_token_callback
+                        refined_text = self._call_refine_text_streaming(
+                            ai_service,
+                            text,
+                            prompt_template,
+                            model,
+                            on_token=single_token_callback,
+                            max_output_tokens=max_output_tokens,
                         )
                     else:
-                        refined_text = ai_service.refine_text(
-                            text, prompt_template, model
+                        refined_text = self._call_refine_text(
+                            ai_service,
+                            text,
+                            prompt_template,
+                            model,
+                            max_output_tokens,
                         )
             else:
                 if self._is_streaming_enabled():
@@ -800,21 +879,33 @@ class AIProcessingController(
 
                     def plain_token_callback(token: str) -> None:
                         accumulated_tokens.append(token)
-                        self._events.emit(
-                            Events.AI_STREAMING_TOKEN_RECEIVED,
-                            {
-                                "token": token,
-                                "group_index": -1,
-                                "accumulated": "".join(accumulated_tokens),
-                                "streaming_text": "".join(accumulated_tokens),
-                            },
-                        )
+                        if emit_events:
+                            self._events.emit(
+                                Events.AI_STREAMING_TOKEN_RECEIVED,
+                                {
+                                    "token": token,
+                                    "group_index": -1,
+                                    "accumulated": "".join(accumulated_tokens),
+                                    "streaming_text": "".join(accumulated_tokens),
+                                },
+                            )
 
-                    refined_text = ai_service.refine_text_streaming(
-                        text, prompt_template, model, on_token=plain_token_callback
+                    refined_text = self._call_refine_text_streaming(
+                        ai_service,
+                        text,
+                        prompt_template,
+                        model,
+                        on_token=plain_token_callback,
+                        max_output_tokens=max_output_tokens,
                     )
                 else:
-                    refined_text = ai_service.refine_text(text, prompt_template, model)
+                    refined_text = self._call_refine_text(
+                        ai_service,
+                        text,
+                        prompt_template,
+                        model,
+                        max_output_tokens,
+                    )
 
             app_logger.log_audio_event(
                 "AI sentence split status",
@@ -833,6 +924,9 @@ class AIProcessingController(
 
             # 保存TPS到实例变量
             self._last_ai_tps = getattr(ai_service, "_last_tps", 0.0)
+            self.last_ai_status = "success"
+            self.last_ai_error = None
+            self.last_ai_provider = provider
 
             # 更新历史记录（AI成功）
             if update_history and actual_record_id:
@@ -845,10 +939,11 @@ class AIProcessingController(
                 )
 
             # 发送AI处理完成事件
-            self._events.emit(
-                Events.AI_PROCESSING_COMPLETED,
-                {"original": text, "refined": refined_text},
-            )
+            if emit_events:
+                self._events.emit(
+                    Events.AI_PROCESSING_COMPLETED,
+                    {"original": text, "refined": refined_text},
+                )
 
             app_logger.log_audio_event(
                 "AI refine completed",
@@ -856,13 +951,43 @@ class AIProcessingController(
                     "model": model,
                     "original_length": len(text),
                     "refined_length": len(refined_text),
+                    "max_tokens": max_output_tokens,
                 },
             )
 
             return refined_text
 
+        except AIOutputTruncatedError as e:
+            error_msg = (
+                "AI output reached max_tokens before completion; using original text"
+            )
+            self.last_ai_status = "failed"
+            self.last_ai_error = error_msg
+            self.last_ai_provider = provider
+            app_logger.log_audio_event(
+                "AI output truncated - AI optimization skipped, using original text",
+                {"error": str(e), "provider": provider},
+            )
+            app_logger.log_error(e, "process_with_ai")
+
+            if update_history and actual_record_id:
+                self._update_ai_status(
+                    record_id=actual_record_id,
+                    ai_text=None,
+                    status="failed",
+                    error=error_msg,
+                    final_text=text,
+                )
+
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            return text
+
         except requests.exceptions.Timeout as e:
             error_msg = "AI request timeout - API response too slow"
+            self.last_ai_status = "failed"
+            self.last_ai_error = error_msg
+            self.last_ai_provider = provider
             app_logger.log_audio_event(
                 f"{error_msg} - AI optimization skipped, using original text",
                 {"error": str(e), "provider": provider},
@@ -879,11 +1004,15 @@ class AIProcessingController(
                     final_text=text,
                 )
 
-            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text  # 回退到原文本
 
         except requests.exceptions.ConnectionError as e:
             error_msg = "Network connection failed - check internet connection"
+            self.last_ai_status = "failed"
+            self.last_ai_error = error_msg
+            self.last_ai_provider = provider
             app_logger.log_audio_event(
                 f"{error_msg} - AI optimization skipped, using original text",
                 {"error": str(e), "provider": provider},
@@ -900,7 +1029,8 @@ class AIProcessingController(
                     final_text=text,
                 )
 
-            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text
 
         except OpenRouterAPIError as e:
@@ -913,6 +1043,9 @@ class AIProcessingController(
                 error_msg = "AI API key invalid or unauthorized"
             else:
                 error_msg = "AI API error"
+            self.last_ai_status = "failed"
+            self.last_ai_error = error_msg
+            self.last_ai_provider = provider
 
             # 明确日志：AI 优化已跳过
             app_logger.log_audio_event(
@@ -931,11 +1064,15 @@ class AIProcessingController(
                     final_text=text,
                 )
 
-            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text
 
         except Exception as e:
             error_msg = f"Unknown AI processing error: {type(e).__name__}"
+            self.last_ai_status = "failed"
+            self.last_ai_error = error_msg
+            self.last_ai_provider = provider
             app_logger.log_audio_event(
                 f"{error_msg} - AI optimization skipped, using original text",
                 {"error": str(e), "provider": provider},
@@ -952,7 +1089,8 @@ class AIProcessingController(
                     final_text=text,
                 )
 
-            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text
         finally:
             self._last_streaming_output_used = streaming_output_used
