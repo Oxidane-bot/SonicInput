@@ -80,6 +80,24 @@ markers = [
 ]
 addopts = "-v"
 
+# mypy config: strict on what we've already cleaned, baselined for the rest.
+# Adding a new error in any module NOT listed below will fail CI (no `|| true`).
+# To remove a module from the baseline, fix its errors and delete its override.
+[tool.mypy]
+ignore_missing_imports = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "sonicinput.ui.apply_transaction",
+    "sonicinput.ui.history_formatters",
+    "sonicinput.ui.history_workers",
+    "sonicinput.ui.qml_bridge",
+    "sonicinput.ui.components.system_tray.tray_controller",
+    "sonicinput.ui.components.system_tray.tray_widget",
+]
+ignore_errors = true
+
 [dependency-groups]
 dev = [
     "fonttools>=4.55.0",

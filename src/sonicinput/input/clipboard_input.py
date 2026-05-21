@@ -1,6 +1,7 @@
 """剪贴板输入方法"""
 
 import ctypes
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple, Union
@@ -16,6 +17,8 @@ from ..utils import TextInputError, app_logger
 
 
 RPC_E_CHANGED_MODE_HRESULT = -2147417850  # 0x80010106
+# OLE refuses calls from inside a SendMessage handler (e.g. pynput keyboard hook).
+RPC_E_CANTCALLOUT_ININPUTSYNCCALL_HRESULT = -2147418861  # 0x8001010D
 
 
 @dataclass
@@ -97,6 +100,18 @@ class ClipboardInput:
         self._recording_mode = False  # 录音模式标志（禁用中途restore）
 
         app_logger.log_audio_event("Clipboard input initialized", {})
+
+    @staticmethod
+    def _on_main_thread() -> bool:
+        """True only when we're running on the process main thread.
+
+        OLE clipboard operations and several Win32 clipboard formats require an STA
+        with a message pump. Worker threads (post-transcription paste) and the
+        pynput keyboard-hook thread satisfy neither, which manifests as
+        RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010D) or heap corruption
+        (0xC0000374) in SetClipboardData. Gate the unsafe paths off this check.
+        """
+        return threading.current_thread() is threading.main_thread()
 
     def _open_clipboard_with_retry(
         self, hwnd=None, max_attempts=10, delay=0.05
@@ -267,6 +282,15 @@ class ClipboardInput:
         self, fallback_formats: Optional[Dict[int, Any]] = None
     ) -> Optional[ClipboardOleSnapshot]:
         """备份 OLE IDataObject 快照，用于高保真恢复。"""
+        if not self._on_main_thread():
+            # OleGetClipboard from a worker thread or hook thread is unsafe.
+            # Fall back to the win32clipboard path the caller already gathered.
+            app_logger.log_audio_event(
+                "Skipping OLE snapshot (non-main thread)",
+                {"thread": threading.current_thread().name},
+            )
+            return None
+
         need_uninitialize = False
         try:
             need_uninitialize = self._initialize_ole()
@@ -282,6 +306,19 @@ class ClipboardInput:
                 marshaled_data_object=stream,
                 fallback_formats=dict(fallback_formats or {}),
             )
+        except pythoncom.com_error as exc:
+            hresult = self._extract_hresult(exc)
+            if hresult == RPC_E_CANTCALLOUT_ININPUTSYNCCALL_HRESULT:
+                app_logger.log_audio_event(
+                    "OLE clipboard snapshot rejected by input-sync call",
+                    {"hresult": hex(hresult & 0xFFFFFFFF)},
+                )
+            else:
+                app_logger.log_audio_event(
+                    "OLE clipboard snapshot backup failed (COM error)",
+                    {"error": str(exc), "hresult": hex((hresult or 0) & 0xFFFFFFFF)},
+                )
+            return None
         except Exception as exc:
             app_logger.log_audio_event(
                 "OLE clipboard snapshot backup failed",
@@ -298,6 +335,15 @@ class ClipboardInput:
     def _restore_ole_snapshot(self, snapshot: ClipboardOleSnapshot) -> bool:
         """恢复 OLE IDataObject 快照。"""
         if snapshot.marshaled_data_object is None:
+            return False
+
+        if not self._on_main_thread():
+            # OleSetClipboard from a worker thread crashes COM. The caller falls
+            # back to fallback_formats (win32clipboard path) when this returns False.
+            app_logger.log_audio_event(
+                "Skipping OLE snapshot restore (non-main thread)",
+                {"thread": threading.current_thread().name},
+            )
             return False
 
         need_uninitialize = False
@@ -696,6 +742,25 @@ class ClipboardInput:
         Args:
             formats: 字典，键为格式ID，值为该格式的数据（bytes）
         """
+        # 非主线程: 限制为 CF_UNICODETEXT, 避免 SetClipboardData 在 worker thread
+        # 上对 registered/DIB 格式触发 0xC0000374 堆损坏。文本是 STT 输出的核心,
+        # 牺牲图像/RTF 恢复保住进程。
+        if not self._on_main_thread() and 13 in formats:
+            formats = {13: formats[13]}
+            app_logger.log_audio_event(
+                "Restricting clipboard restore to CF_UNICODETEXT (non-main thread)",
+                {"thread": threading.current_thread().name},
+            )
+        elif not self._on_main_thread():
+            app_logger.log_audio_event(
+                "Skipping clipboard restore (non-main thread, no text format)",
+                {
+                    "thread": threading.current_thread().name,
+                    "available_formats": list(formats.keys()),
+                },
+            )
+            return
+
         try:
             # 关键优化：按格式依赖关系排序
             sorted_formats = self._sort_formats_by_dependency(formats)

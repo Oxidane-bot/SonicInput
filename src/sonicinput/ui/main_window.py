@@ -164,6 +164,9 @@ class MainWindow(QMainWindow):
         self.ui_main_service = ui_main_service
         self.ui_settings_service = ui_settings_service
         self.ui_model_service = ui_model_service
+        self._settings_window: Optional[Any] = (
+            None  # FluentSettingsWindow, lazy-init in show_settings
+        )
 
         self.setup_window()
         self.setup_ui()
@@ -390,12 +393,37 @@ class MainWindow(QMainWindow):
                         self._on_model_test_requested
                     )
 
+                # 进程退出时主动释放 QML engine, 防止 root window/engine 泄漏。
+                # closeEvent 只 hide() 主窗口, 不会触发 settings 清理。
+                qapp = QApplication.instance()
+                if qapp is not None:
+                    qapp.aboutToQuit.connect(self._release_settings_window)
+
             self._settings_window.show()
             self._settings_window.raise_()
             self._settings_window.activateWindow()
 
         except Exception as e:
             app_logger.log_error(e, "show_settings")
+
+    def _release_settings_window(self) -> None:
+        """Drop the cached FluentSettingsWindow so its QML engine can be GC'd.
+
+        Called from QApplication.aboutToQuit. FluentSettingsWindow is a QObject
+        hosting a QQmlApplicationEngine + root window; without this the engine
+        survives process shutdown long enough to log Qt warnings.
+        """
+        settings = getattr(self, "_settings_window", None)
+        if settings is None:
+            return
+        try:
+            if hasattr(settings, "close"):
+                settings.close()
+            settings.deleteLater()
+        except Exception as e:
+            app_logger.log_error(e, "_release_settings_window")
+        finally:
+            self._settings_window = None
 
     def _on_model_load_requested(self, model_name: str) -> None:
         """Handle model load request from settings window."""

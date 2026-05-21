@@ -6,23 +6,26 @@ Provides user-friendly error dialogs with actionable suggestions
 from typing import List, Optional
 
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QPushButton, QWidget
 
 
 def show_hotkey_conflict_error(
     parent: Optional[QWidget],
     conflicting_hotkey: str,
     suggestions: List[str],
-) -> None:
+) -> bool:
     """Show user-friendly hotkey conflict error dialog
 
     Args:
         parent: Parent widget
         conflicting_hotkey: The hotkey that conflicted
         suggestions: List of suggested alternative hotkeys
+
+    Returns:
+        True if the user clicked "Open Settings", False otherwise.
     """
     msg_box = QMessageBox(parent)
-    msg_box.setIcon(QMessageBox.Warning)
+    msg_box.setIcon(QMessageBox.Icon.Warning)
     msg_box.setWindowTitle(
         QCoreApplication.translate("ErrorDialogs", "Hotkey Conflict")
     )
@@ -75,15 +78,17 @@ def show_hotkey_conflict_error(
     msg_box.setText("\n".join(message_lines))
 
     # Add buttons
-    msg_box.addButton(
+    open_settings_btn = msg_box.addButton(
         QCoreApplication.translate("ErrorDialogs", "Open Settings"),
-        QMessageBox.AcceptRole,
+        QMessageBox.ButtonRole.AcceptRole,
     )
     msg_box.addButton(
-        QCoreApplication.translate("ErrorDialogs", "Close"), QMessageBox.RejectRole
+        QCoreApplication.translate("ErrorDialogs", "Close"),
+        QMessageBox.ButtonRole.RejectRole,
     )
 
-    msg_box.setDefaultButton(msg_box.button(QMessageBox.AcceptRole))
+    if isinstance(open_settings_btn, QPushButton):
+        msg_box.setDefaultButton(open_settings_btn)
 
     # Show dialog
     result = msg_box.exec()
@@ -91,7 +96,7 @@ def show_hotkey_conflict_error(
     # If user chose to open settings, emit signal or return value
     # (Implementation depends on how settings are opened)
     # For now, we'll just show the dialog
-    return result == QMessageBox.AcceptRole
+    return result == QMessageBox.ButtonRole.AcceptRole
 
 
 def show_hotkey_registration_error(
@@ -107,7 +112,7 @@ def show_hotkey_registration_error(
         recovery_suggestions: Optional list of recovery suggestions
     """
     msg_box = QMessageBox(parent)
-    msg_box.setIcon(QMessageBox.Warning)
+    msg_box.setIcon(QMessageBox.Icon.Warning)
     msg_box.setWindowTitle(
         QCoreApplication.translate("ErrorDialogs", "Hotkey Registration Error")
     )
@@ -121,7 +126,7 @@ def show_hotkey_registration_error(
             message += f"\n{i}. {suggestion}"
 
     msg_box.setText(message)
-    msg_box.setStandardButtons(QMessageBox.Ok)
+    msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
     msg_box.exec()
 
 
@@ -140,12 +145,12 @@ def show_error_with_details(
         detailed_text: Optional detailed technical information
     """
     msg_box = QMessageBox(parent)
-    msg_box.setIcon(QMessageBox.Critical)
+    msg_box.setIcon(QMessageBox.Icon.Critical)
     msg_box.setWindowTitle(title)
     msg_box.setText(message)
 
     if detailed_text:
         msg_box.setDetailedText(detailed_text)
 
-    msg_box.setStandardButtons(QMessageBox.Ok)
+    msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
     msg_box.exec()

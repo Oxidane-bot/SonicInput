@@ -17,6 +17,7 @@ Recommended for users running the application in administrator mode.
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
+import win32api
 from pynput import keyboard
 from pynput.keyboard import HotKey, Key, KeyCode
 
@@ -442,6 +443,38 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
         # 清空被抑制键的跟踪（使用实例变量，让 on_press/on_release 可以访问）
         self._suppressed_vk_keys.clear()
 
+        # 修饰键 VK 列表，用于状态对账（修复 Win/Alt sticky 残留导致快捷键无法匹配）
+        MODIFIER_VKS = (
+            VK_LMENU,
+            VK_RMENU,
+            VK_LCONTROL,
+            VK_RCONTROL,
+            VK_LSHIFT,
+            VK_RSHIFT,
+            VK_LWIN,
+            VK_RWIN,
+        )
+
+        def _reconcile_modifier_state() -> None:
+            """Drop any tracked modifier whose physical key is NOT pressed.
+
+            Low-level hooks occasionally miss a KeyUp (UAC focus changes,
+            elevated-window UIPI gaps, fast switches). The stale VK then poisons
+            every later combo check (e.g. user holds h alone but `0x5B` is still
+            in current_vk_keys, so alt+h never matches). GetAsyncKeyState reads
+            the real OS key state; high bit set = currently held.
+            """
+            for vk in MODIFIER_VKS:
+                if vk in current_vk_keys and not (
+                    win32api.GetAsyncKeyState(vk) & 0x8000
+                ):
+                    if app_logger.is_debug_enabled():
+                        app_logger.log_audio_event(
+                            "Dropping stale modifier (not physically pressed)",
+                            {"vk": hex(vk), "age": time.time() - current_vk_keys[vk]},
+                        )
+                    del current_vk_keys[vk]
+
         # win32 事件过滤器 - 在 Windows 消息循环中最早执行
         def win32_event_filter(msg, data):
             """Windows message-level keyboard event filter
@@ -498,6 +531,10 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
                     ]
                     for vk in timeout_keys:
                         del current_vk_keys[vk]
+
+                    # 对账修饰键状态：丢弃任何不再物理按下的 stale VK
+                    # 修复 Win/Alt 在 UAC 切换/UIPI 边界后 sticky 导致快捷键失效
+                    _reconcile_modifier_state()
 
                     # 调试日志：记录按键事件（DEBUG级别）
                     if app_logger.is_debug_enabled() and vk_code in [
