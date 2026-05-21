@@ -5,27 +5,45 @@ import os
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog, QWidget
+
+
+def _assert_valid_parent(method_name: str, parent) -> None:
+    """Mimic PySide6's C++ parent-type contract.
+
+    PySide6 dialogs require a QWidget subclass (or None) as parent. Passing a bare
+    QObject (e.g. FluentSettingsWindow, which hosts a QML window) raises TypeError
+    at runtime — but monkeypatched dialogs in tests would silently accept it,
+    hiding the bug. This guard makes the contract explicit in tests.
+    """
+    assert parent is None or isinstance(parent, QWidget), (
+        f"{method_name} parent must be QWidget or None, got "
+        f"{type(parent).__name__} ({parent!r})"
+    )
 
 
 @pytest.fixture(autouse=True)
 def qmessagebox_guard(monkeypatch):
     """Prevent blocking dialogs and fail on unexpected warning/critical popups."""
 
-    def _information(*_args, **_kwargs):
+    def _information(*args, **_kwargs):
+        _assert_valid_parent("QMessageBox.information", args[0] if args else None)
         return QMessageBox.StandardButton.Ok
 
     def _warning(*args, **_kwargs):
+        _assert_valid_parent("QMessageBox.warning", args[0] if args else None)
         title = args[1] if len(args) > 1 else ""
         text = args[2] if len(args) > 2 else ""
         raise AssertionError(f"Unexpected QMessageBox.warning: {title} | {text}")
 
     def _critical(*args, **_kwargs):
+        _assert_valid_parent("QMessageBox.critical", args[0] if args else None)
         title = args[1] if len(args) > 1 else ""
         text = args[2] if len(args) > 2 else ""
         raise AssertionError(f"Unexpected QMessageBox.critical: {title} | {text}")
 
-    def _question(*_args, **_kwargs):
+    def _question(*args, **_kwargs):
+        _assert_valid_parent("QMessageBox.question", args[0] if args else None)
         # Default to "No" to avoid destructive actions in tests unless explicitly mocked.
         return QMessageBox.StandardButton.No
 
@@ -33,6 +51,39 @@ def qmessagebox_guard(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", _warning)
     monkeypatch.setattr(QMessageBox, "critical", _critical)
     monkeypatch.setattr(QMessageBox, "question", _question)
+
+
+@pytest.fixture(autouse=True)
+def qprogressdialog_guard(monkeypatch):
+    """Validate QProgressDialog construction signatures at test time.
+
+    PySide6 has two QProgressDialog overloads:
+      (labelText: str, cancelButtonText: str, minimum: int, maximum: int, /,
+          parent: QWidget|None = None, ...)
+      (parent: QWidget|None = None, flags: ...)
+    Disambiguate by inspecting args[0] type — matches PySide6's runtime dispatch.
+    Both `cancelButtonText` must be str (not None) on the first overload.
+    """
+    original_init = QProgressDialog.__init__
+
+    def _qpd_init(self, *args, **kwargs):
+        if args and isinstance(args[0], str):
+            # label-first overload
+            if len(args) >= 2:
+                assert isinstance(args[1], str), (
+                    f"QProgressDialog cancelButtonText must be str, got "
+                    f"{type(args[1]).__name__} ({args[1]!r})"
+                )
+            parent = args[4] if len(args) >= 5 else kwargs.get("parent")
+        elif args:
+            # parent-first overload
+            parent = args[0]
+        else:
+            parent = kwargs.get("parent")
+        _assert_valid_parent("QProgressDialog.__init__", parent)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(QProgressDialog, "__init__", _qpd_init)
 
 
 # ============= 配置隔离 Fixtures =============

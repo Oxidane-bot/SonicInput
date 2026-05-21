@@ -405,16 +405,18 @@ class MainWindow(QMainWindow):
                     "Model load requested via GUI", {"model": model_name}
                 )
 
-                parent_widget = (
-                    self._settings_window if hasattr(self, "_settings_window") else None
-                )
+                # FluentSettingsWindow is a QObject (QML host), not a QWidget, so it
+                # cannot be a dialog parent. Use None so dialogs are top-level on the
+                # active screen. cancelButtonText is "" because setCancelButton(None)
+                # below removes the button; PySide6 rejects None for that positional-only str.
+                parent_widget = None
 
                 progress = QProgressDialog(
                     QCoreApplication.translate(
                         "MainWindow",
                         "Loading model: {model}...\nThis may take a few seconds.",
                     ).format(model=model_name),
-                    None,
+                    "",
                     0,
                     0,
                     parent_widget,
@@ -473,7 +475,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             app_logger.log_error(e, "model_load_request_gui")
             QMessageBox.critical(
-                self._settings_window if hasattr(self, "_settings_window") else None,
+                None,
                 QCoreApplication.translate("MainWindow", "Error"),
                 QCoreApplication.translate(
                     "MainWindow", "Error processing model load request:\n{error}"
@@ -501,9 +503,7 @@ class MainWindow(QMainWindow):
 
                 if not speech_engine:
                     QMessageBox.warning(
-                        self._settings_window
-                        if hasattr(self, "_settings_window")
-                        else None,
+                        None,
                         QCoreApplication.translate("MainWindow", "Model Not Available"),
                         QCoreApplication.translate(
                             "MainWindow",
@@ -514,9 +514,7 @@ class MainWindow(QMainWindow):
 
                 if not getattr(speech_engine, "is_model_loaded", False):
                     QMessageBox.warning(
-                        self._settings_window
-                        if hasattr(self, "_settings_window")
-                        else None,
+                        None,
                         QCoreApplication.translate("MainWindow", "Model Not Loaded"),
                         QCoreApplication.translate(
                             "MainWindow",
@@ -525,9 +523,7 @@ class MainWindow(QMainWindow):
                     )
                     return
 
-                parent_widget = (
-                    self._settings_window if hasattr(self, "_settings_window") else None
-                )
+                parent_widget = None
 
                 progress = QProgressDialog(
                     QCoreApplication.translate("MainWindow", "Testing model..."),
@@ -632,7 +628,7 @@ class MainWindow(QMainWindow):
             error_details = f"{type(e).__name__}: {str(e)}"
             app_logger.log_error(e, "_on_model_test_requested")
             QMessageBox.critical(
-                self._settings_window if hasattr(self, "_settings_window") else None,
+                None,
                 QCoreApplication.translate("MainWindow", "Model Test Failed"),
                 QCoreApplication.translate(
                     "MainWindow",
