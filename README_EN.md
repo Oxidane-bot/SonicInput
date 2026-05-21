@@ -11,10 +11,12 @@
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
 
-## What's New (v0.7.8)
-- Completed the Fluent-only desktop UI migration and removed legacy QWidget settings, history, and overlay surfaces
-- Moved history batch reprocess confirmation, progress, and result reporting into Fluent/QML panels
-- Fixed long Chinese history rows so text elides within its own column instead of crowding status and action controls
+## What's New (v0.7.9)
+- Fixed crashes in the Fluent settings window model load/test/unload flows (`QMessageBox`/`QProgressDialog` parent-type errors)
+- Fixed sticky Win/Alt state after UAC/UIPI transitions that prevented hotkey matches
+- Fixed clipboard restore on worker threads producing COM refusals (`0x8001010D`) and heap corruption (`0xC0000374`) after transcription
+- Release the Fluent settings window's QML engine on process exit
+- Hardened UI tests: CI now runs `tests/ui/` (offscreen), and dialog parent types are validated against PySide6's real contract
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -25,7 +27,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.7.8-win64.exe` from [v0.7.8 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.8)
+1. Download `SonicInput-v0.7.9-win64.exe` from [v0.7.9 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.9)
 2. Run the exe; default hotkey is F12 (use Alt+H or customize if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

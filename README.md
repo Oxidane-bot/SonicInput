@@ -11,10 +11,12 @@
 - 双模式录制：Realtime 低延迟；Chunked 精度高（AI 后处理）
 - 云端/本地切换：Groq / OpenRouter / NVIDIA / OpenAI / 本地 sherpa-onnx
 
-## v0.7.8 更新
-- 完成全量 Fluent UI 收敛，移除旧 QWidget 设置窗、历史对话框和录音悬浮窗入口
-- 历史批量重处理确认、进度和结果改为 Fluent/QML 面板
-- 修正窄窗口下长中文历史行的正文、省略和右侧按钮避让
+## v0.7.9 更新
+- 修复 Fluent 设置窗口的模型加载/测试/卸载流程崩溃（`QMessageBox`/`QProgressDialog` 父级类型错误）
+- 修复 Win/Alt 等修饰键在 UAC/UIPI 切换后残留导致快捷键无法匹配
+- 修复转录完成后剪贴板恢复在 worker 线程触发 COM 拒绝（`0x8001010D`）和堆损坏（`0xC0000374`）的进程崩溃
+- 进程退出时主动释放 Fluent 设置窗口持有的 QML engine
+- 加固 UI 测试：CI 现在会跑 `tests/ui/`（offscreen），dialog 父级类型受 PySide6 真值校验
 
 ## 性能优化记录
 - 2026-03：分块停止路径、历史搜索/分页、批量重处理等性能整理见  
@@ -25,7 +27,7 @@
 - 内存 4GB+，磁盘 500MB
 
 ## 快速开始
-1. 下载 [v0.7.8 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.8) 中的 `SonicInput-v0.7.8-win64.exe`
+1. 下载 [v0.7.9 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.9) 中的 `SonicInput-v0.7.9-win64.exe`
 2. 双击运行，默认热键 F12（若冲突可改用 Alt+H 或自定义）
 3. 在设置中填写需要的云端 API Key（可选），或直接使用本地模型
 
