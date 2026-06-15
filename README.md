@@ -7,16 +7,20 @@
 
 ## 核心特性
 - 即开即用：剪贴板 / 文本 / GUI 多入口
-- 热键无管理员：Win32 RegisterHotKey（默认 F12，可自定义），冲突时会提示
+- 热键无管理员：Win32 RegisterHotKey（默认 Ctrl+Alt+Space，可自定义），冲突时会提示
 - 双模式录制：Realtime 低延迟；Chunked 精度高（AI 后处理）
 - 云端/本地切换：Groq / OpenRouter / NVIDIA / OpenAI / 本地 sherpa-onnx
+- 质量护栏：AI 清理输出会被本地 validator 审查，越界时自动回退原始转写
+- 本地学习：Review Agent 可在空闲时从历史记录发现术语候选和质量问题，用户接受后才进入本地词汇记忆
 
-## v0.7.9 更新
-- 修复 Fluent 设置窗口的模型加载/测试/卸载流程崩溃（`QMessageBox`/`QProgressDialog` 父级类型错误）
-- 修复 Win/Alt 等修饰键在 UAC/UIPI 切换后残留导致快捷键无法匹配
-- 修复转录完成后剪贴板恢复在 worker 线程触发 COM 拒绝（`0x8001010D`）和堆损坏（`0xC0000374`）的进程崩溃
-- 进程退出时主动释放 Fluent 设置窗口持有的 QML engine
-- 加固 UI 测试：CI 现在会跑 `tests/ui/`（offscreen），dialog 父级类型受 PySide6 真值校验
+## v0.8.0 更新
+- 新增 **AI 输出安全门禁**：拦截 markdown/标签泄漏、助手式回答、翻译越界、低信息扩写、长文本过度压缩、异常重复等结果；失败时回退到原始转写，避免坏输出直接输入到目标窗口。
+- 新增 **录音内 rolling context**：长语音在后续分块 AI 清理时会带上本次录音已出现的术语、路径和近期上下文，提高技术词、项目名和中英混合内容的一致性。
+- 新增 **Quality Review 页面**：设置窗口中可查看本地 Review Agent 发现的待审查建议，按边界越界、内容失真、诊断样本、词汇记忆和提示词问题分组处理。
+- 新增 **本地词汇记忆**：只有用户接受的术语候选才会进入本地记忆；支持导出、清空词汇记忆和清空学习数据。
+- 新增长录音云转写路径：云端长录音默认优先走文件转写路径（阈值 90 秒），并在历史记录中记录 `transcription_path`、决策原因和 fallback 类型，便于诊断。
+- 新增质量审计工具：`scripts/audit_transcript_quality.py`、`compare_quality_audits.py`、`evaluate_ai_prompt_profiles.py` 可在本地历史库上生成隐私安全的质量报告和 prompt profile 对比。
+- 默认热键从旧示例切换为 `Ctrl+Alt+Space`，降低与常见编辑快捷键冲突的概率。
 
 ## 性能优化记录
 - 2026-03：分块停止路径、历史搜索/分页、批量重处理等性能整理见  
@@ -27,11 +31,17 @@
 - 内存 4GB+，磁盘 500MB
 
 ## 快速开始
-1. 下载 [v0.7.9 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.7.9) 中的 `SonicInput-v0.7.9-win64.exe`
-2. 双击运行，默认热键 F12（若冲突可改用 Alt+H 或自定义）
+1. 下载 [v0.8.0 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.8.0) 中的 `SonicInput-v0.8.0-win64.exe`
+2. 双击运行，默认热键 Ctrl+Alt+Space（若冲突可在设置中自定义）
 3. 在设置中填写需要的云端 API Key（可选），或直接使用本地模型
 
 > 热键后端建议保持 `win32`（无需管理员，冲突率低）；需要按键抑制时再切换 `pynput`。
+
+## 质量审查与本地学习
+- AI 清理结果会先通过本地质量门禁；若疑似回答用户、翻译、输出 markdown、过度压缩或扩写噪声，系统会保留原始转写作为最终文本。
+- Quality Review 默认关闭空闲调度；可在设置页手动运行审查，检查最近历史中的质量建议。
+- Review Agent 不会自动改写历史记录；接受词汇候选只会加入本地词汇记忆，后续 AI 清理会把它作为保守参考。
+- 本地审计脚本默认不输出转写原文，只保存长度、状态、路径、异常标签等元数据，便于比较不同 prompt 或模型配置。
 
 ## 开发环境
 ```bash
@@ -63,6 +73,8 @@ uv sync --extra dev
 ## 路径
 - 配置：`%AppData%/SonicInput/config.json`
 - 日志：`%AppData%/SonicInput/logs/app.log`
+- 历史与 Review 数据：`%AppData%/SonicInput/history/history.db`
+- 本地质量审计输出：`quality_audit/`（默认 git 忽略）
 
 ## 许可
 MIT License，详见 [LICENSE](LICENSE)。

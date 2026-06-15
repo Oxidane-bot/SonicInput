@@ -28,7 +28,7 @@ def get_hotkeys_from_config(config_service) -> Tuple[List[str], str]:
 
     if hotkeys_config is None:
         # Very old format: single "hotkey" key
-        single_hotkey = config_service.get_setting("hotkey", "ctrl+shift+v")
+        single_hotkey = config_service.get_setting("hotkey", "ctrl+alt+space")
         return ([single_hotkey], "auto")
 
     if isinstance(hotkeys_config, list):
@@ -37,12 +37,12 @@ def get_hotkeys_from_config(config_service) -> Tuple[List[str], str]:
 
     if isinstance(hotkeys_config, dict):
         # New format: dict with "keys" and "backend"
-        keys = hotkeys_config.get("keys", ["ctrl+shift+v"])
+        keys = hotkeys_config.get("keys", ["ctrl+alt+space"])
         backend = hotkeys_config.get("backend", "auto")
         return (keys, backend)
 
     # Fallback
-    return (["ctrl+shift+v"], "auto")
+    return (["ctrl+alt+space"], "auto")
 
 
 def set_hotkeys_to_config(

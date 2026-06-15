@@ -33,7 +33,7 @@ uv run python build_nuitka.py
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小：~66MB（v0.7.9，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
+- 文件大小：~66MB+（v0.8.0，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
 
 ## 构建说明
 
@@ -186,7 +186,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.3.0-win64.exe
+SonicInput-v0.8.0-win64.exe
 ```
 
 ## 技术细节
@@ -238,8 +238,8 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ---
 
-**最后更新**：2026-05-22
-**适用版本**：v0.7.9+
+**最后更新**：2026-06-15
+**适用版本**：v0.8.0+
 
 
 ## Release Script

@@ -17,13 +17,16 @@ class _DummyConfig:
     def get_setting(self, key: str, default=None):
         return self._values.get(key, default)
 
+    def set(self, key: str, value) -> None:
+        self._values[key] = value
+
 
 class _RecordingEvents:
     def __init__(self) -> None:
         self.emitted: list[tuple[str, object]] = []
         self.once_callbacks: dict[str, object] = {}
 
-    def on(self, event_name: str, callback):
+    def on(self, event_name: str, callback, priority=None):
         return f"on:{event_name}"
 
     def once(self, event_name: str, callback):
@@ -185,3 +188,59 @@ def test_lazy_model_load_success_emits_loaded_events(monkeypatch) -> None:
     assert orchestrator._lazy_model_load_state == "loaded"
     assert (Events.MODEL_LOADING_COMPLETED, model_info) in events.emitted
     assert (Events.MODEL_LOADED, model_info) in events.emitted
+
+
+def test_lazy_load_unsubscribes_when_provider_switches_to_cloud(monkeypatch) -> None:
+    """provider 切到 cloud 后，RECORDING_STARTED 不能再触发本地模型加载（崩溃根因修复）。"""
+    monkeypatch.setattr(
+        "sonicinput.speech.sherpa_models.SherpaModelManager.is_model_cached",
+        lambda self, model_name: True,
+    )
+    events = _RecordingEvents()
+    speech_service = _AsyncSpeechService()
+    orchestrator = _build_orchestrator(events, speech_service)
+
+    orchestrator._init_model_loading()
+    assert Events.RECORDING_STARTED in events.once_callbacks
+
+    # 模拟 hot_reload 切到 cloud
+    orchestrator.config.set(ConfigKeys.TRANSCRIPTION_PROVIDER, "groq")
+    orchestrator._on_speech_service_reloaded({"new_provider": "GroqSpeechService"})
+
+    # 旧的 RECORDING_STARTED 订阅必须被清掉，且不应重新注册（因为是 cloud）
+    assert Events.RECORDING_STARTED not in events.once_callbacks
+    assert orchestrator._lazy_model_load_listener_id is None
+    assert speech_service.load_requests == []
+
+
+def test_lazy_load_resubscribes_when_provider_switches_back_to_local(monkeypatch) -> None:
+    """启动时是 cloud → 切回 local 时需要补注册 lazy load 订阅。"""
+    monkeypatch.setattr(
+        "sonicinput.speech.sherpa_models.SherpaModelManager.is_model_cached",
+        lambda self, model_name: True,
+    )
+    events = _RecordingEvents()
+    config = _DummyConfig()
+    config.set(ConfigKeys.TRANSCRIPTION_PROVIDER, "groq")
+    speech_service = _AsyncSpeechService()
+    orchestrator = ApplicationOrchestrator(
+        config_service=config,
+        event_service=events,
+        state_manager=_DummyState(),
+    )
+    orchestrator.set_services(
+        audio_service=None,
+        speech_service=speech_service,
+        input_service=None,
+        hotkey_service=None,
+    )
+
+    # 启动时 provider=cloud，没注册订阅
+    orchestrator._init_model_loading()
+    assert Events.RECORDING_STARTED not in events.once_callbacks
+
+    # 切回 local
+    config.set(ConfigKeys.TRANSCRIPTION_PROVIDER, "local")
+    orchestrator._on_speech_service_reloaded({"new_provider": "LocalSpeechService"})
+
+    assert Events.RECORDING_STARTED in events.once_callbacks

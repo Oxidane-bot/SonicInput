@@ -11,7 +11,7 @@ def get_default_config() -> Dict[str, Any]:
     """
     return {
         "hotkeys": {
-            "keys": ["ctrl+shift+v"],
+            "keys": ["ctrl+alt+space"],
             "backend": "auto",  # "auto", "win32", or "pynput"
         },
         "transcription": {
@@ -21,6 +21,10 @@ def get_default_config() -> Dict[str, Any]:
                 "language": "zh",  # 语言 (zh | en)
                 "auto_load": True,
                 "streaming_mode": "chunked",  # 流式模式 (chunked | realtime)
+            },
+            "long_recording": {
+                "prefer_file_for_cloud": True,
+                "file_threshold_seconds": 90.0,
             },
             "groq": {
                 "api_key": "",
@@ -105,6 +109,16 @@ def get_default_config() -> Dict[str, Any]:
         },
         "history": {
             "storage_path": "auto",
+        },
+        "review": {
+            # 默认关闭；后续 UI/实验确认稳定后再开放给用户启用。
+            "enabled": False,
+            "idle_seconds": 600,
+            "min_interval_seconds": 1800,
+            "max_records": 20,
+            "max_runs_per_session": 3,
+            "persist": True,
+            "use_lexicon_memory": True,
         },
         "logging": {
             "level": "WARNING",

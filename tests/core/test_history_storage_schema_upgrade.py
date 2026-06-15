@@ -2,6 +2,7 @@ import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from sonicinput.core.interfaces import HistoryRecord
 from sonicinput.core.services.storage.history_storage_service import (
@@ -86,6 +87,8 @@ def test_init_database_adds_diagnostic_columns_for_legacy_db() -> None:
         conn.close()
 
     assert "streaming_mode" in columns
+    assert "transcription_path" in columns
+    assert "transcription_decision_reason" in columns
     assert "transcription_duration" in columns
     assert "used_fallback" in columns
     assert "fallback_type" in columns
@@ -98,7 +101,7 @@ def test_init_database_adds_diagnostic_columns_for_legacy_db() -> None:
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT diagnostics_collected, fallback_type, fallback_reason "
+            "SELECT diagnostics_collected, transcription_path, transcription_decision_reason, fallback_type, fallback_reason "
             "FROM history_records WHERE id = 'legacy-1'"
         )
         row = cursor.fetchone()
@@ -107,8 +110,10 @@ def test_init_database_adds_diagnostic_columns_for_legacy_db() -> None:
 
     assert row is not None
     assert row[0] == 0
-    assert row[1] == "none"
+    assert row[1] == "standard"
     assert row[2] is None
+    assert row[3] == "none"
+    assert row[4] is None
 
     if db_path.exists():
         db_path.unlink()
@@ -132,6 +137,8 @@ def test_save_and_load_record_with_extended_diagnostics() -> None:
         transcription_provider="local",
         transcription_status="success",
         streaming_mode="chunked",
+        transcription_path="streaming_chunked",
+        transcription_decision_reason="streaming_stop_result",
         transcription_duration=0.25,
         used_fallback=True,
         fallback_type="local_sync",
@@ -150,10 +157,46 @@ def test_save_and_load_record_with_extended_diagnostics() -> None:
 
     loaded = service.get_record_by_id("rec-extended-1")
     assert loaded is not None
+    assert loaded.transcription_path == "streaming_chunked"
+    assert loaded.transcription_decision_reason == "streaming_stop_result"
     assert loaded.fallback_type == "local_sync"
     assert loaded.fallback_reason == "empty_chunked_result"
     assert loaded.diagnostics_collected is True
     assert loaded.reprocess_parent_id == "orig-1"
+
+    service._do_stop()
+    if db_path.exists():
+        db_path.unlink()
+
+
+def test_init_database_logs_current_schema_expectations() -> None:
+    temp_dir = Path(".tmp_pytest")
+    temp_dir.mkdir(exist_ok=True)
+    db_path = temp_dir / f"history_schema_expectations_{uuid.uuid4().hex}.db"
+
+    service = HistoryStorageService(_DummyConfigService())
+    service._db_path = db_path
+
+    with patch(
+        "sonicinput.core.services.storage.history_storage_service.app_logger.log_audio_event"
+    ) as mock_log_audio_event:
+        service._init_database()
+
+    expectation_calls = [
+        call
+        for call in mock_log_audio_event.call_args_list
+        if call.args and call.args[0] == "History schema expectations declared"
+    ]
+    assert len(expectation_calls) == 1
+
+    details = expectation_calls[0].args[1]
+    assert details["expects_transcription_path"] is True
+    assert details["expects_transcription_decision_reason"] is True
+    assert "transcription_path" in details["required_columns"]
+    assert "transcription_decision_reason" in details["required_columns"]
+    assert details["required_column_count"] >= 2
+    assert details["history_schema_expectation_version"] == 2
+    assert "transcription_decision_reason" in details["history_schema_signature"]
 
     service._do_stop()
     if db_path.exists():

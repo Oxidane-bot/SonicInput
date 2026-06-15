@@ -49,6 +49,8 @@ class HistoryRecord:
     transcription_provider: str
     transcription_status: str
     streaming_mode: str = "unknown"
+    transcription_path: str = "standard"
+    transcription_decision_reason: Optional[str] = None
     transcription_duration: float = 0.0
     used_fallback: bool = False
     fallback_type: str = "none"

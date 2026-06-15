@@ -29,8 +29,15 @@ ApplicationWindow {
         root.t("transcription", "Transcription"),
         root.t("ai_processing", "AI Processing"),
         root.t("audio_and_input", "Audio and Input"),
-        root.t("history", "History")
+        root.t("history", "History"),
+        root.t("quality_review", "Quality Review")
     ]
+
+    onSelectedSectionChanged: {
+        if (root.selectedSection === 6 && root.viewModel) {
+            root.viewModel.refreshReviewSuggestions()
+        }
+    }
 
     function t(token, fallback) {
         var language = root.viewModel ? root.viewModel.uiLanguage : "en-US"
@@ -1263,6 +1270,661 @@ ApplicationWindow {
                     }
                 }
             }
+
+            Flickable {
+                objectName: "qualityReviewPage"
+                contentWidth: width
+                contentHeight: qualityReviewColumn.implicitHeight
+                clip: true
+
+                Component.onCompleted: root.viewModel && root.viewModel.refreshReviewSuggestions()
+
+                ColumnLayout {
+                    id: qualityReviewColumn
+                    width: parent.width
+                    spacing: 14
+
+                    SettingsCard {
+                        title: root.t("quality_review", "Quality Review")
+
+                        Label {
+                            text: root.t("quality_review_help", "Idle review suggestions are advisory. Only accepted lexicon suggestions become local memory.")
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Switch {
+                            objectName: "reviewEnabledSwitch"
+                            text: root.t("enable_idle_review", "Enable idle quality review")
+                            checked: root.value("review.enabled", false)
+                            onToggled: root.setValue("review.enabled", checked)
+                        }
+
+                        Switch {
+                            objectName: "reviewUseLexiconMemorySwitch"
+                            text: root.t("use_lexicon_memory", "Use accepted lexicon memory")
+                            checked: root.value("review.use_lexicon_memory", true)
+                            onToggled: root.setValue("review.use_lexicon_memory", checked)
+                        }
+
+                        GridLayout {
+                            columns: 2
+                            rowSpacing: 12
+                            columnSpacing: 12
+                            Layout.fillWidth: true
+
+                            Label { text: root.t("review_idle_seconds", "Idle wait time") }
+                            SpinBox {
+                                objectName: "reviewIdleSecondsSpin"
+                                from: 60
+                                to: 3600
+                                stepSize: 60
+                                value: root.value("review.idle_seconds", 600)
+                                Layout.fillWidth: true
+                                onValueModified: root.numberValue(reviewIdleSecondsSpin, "review.idle_seconds")
+                            }
+
+                            Label { text: root.t("max_review_records", "Records per review") }
+                            SpinBox {
+                                objectName: "reviewMaxRecordsSpin"
+                                from: 1
+                                to: 100
+                                value: root.value("review.max_records", 20)
+                                Layout.fillWidth: true
+                                onValueModified: root.numberValue(reviewMaxRecordsSpin, "review.max_records")
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                objectName: "reviewSuggestionCountLabel"
+                                text: root.t("review_suggestions", "Review Suggestions") + ": " + (root.viewModel ? root.viewModel.reviewSuggestionCount : 0)
+                                Layout.fillWidth: true
+                            }
+                            Button {
+                                objectName: "reviewRefreshButton"
+                                text: root.t("refresh", "Refresh")
+                                onClicked: root.viewModel && root.viewModel.refreshReviewSuggestions()
+                            }
+                            Button {
+                                objectName: "runReviewNowButton"
+                                text: root.t("run_review_now", "Run Review Now")
+                                highlighted: true
+                                onClicked: root.viewModel && root.viewModel.runIdleReviewOnce()
+                            }
+                        }
+
+                        Label {
+                            objectName: "reviewRunMessageLabel"
+                            text: root.viewModel ? root.viewModel.reviewRunMessage : ""
+                            visible: text.length > 0
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Button {
+                                objectName: "exportReviewDebugReportButton"
+                                text: root.t("review_export_debug_report", "Export Debug Report")
+                                enabled: root.viewModel && root.viewModel.reviewSuggestionCount > 0
+                                onClicked: root.viewModel && root.viewModel.exportReviewDebugReport()
+                            }
+
+                            Label {
+                                objectName: "reviewDebugExportHelpLabel"
+                                text: root.t("review_debug_export_help", "Exports recurring prompt/validator issue cards for local debugging without changing the live prompt.")
+                                wrapMode: Text.WordWrap
+                                opacity: 0.72
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Label {
+                            objectName: "reviewDebugExportMessageLabel"
+                            text: root.viewModel ? root.viewModel.reviewDebugExportMessage : ""
+                            visible: text.length > 0
+                            wrapMode: Text.WordWrap
+                            opacity: 0.75
+                            Layout.fillWidth: true
+                        }
+
+                        Frame {
+                            objectName: "reviewJobsFrame"
+                            visible: root.viewModel && root.viewModel.reviewJobCount > 0
+                            Layout.fillWidth: true
+                            padding: 10
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 6
+
+                                Label {
+                                    text: root.t("review_jobs", "Recent Review Runs")
+                                    font.weight: Font.Medium
+                                    Layout.fillWidth: true
+                                }
+
+                                Repeater {
+                                    objectName: "reviewJobsRepeater"
+                                    model: root.viewModel ? root.viewModel.reviewJobs.slice(0, 3) : []
+
+                                    delegate: RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+
+                                        Label {
+                                            objectName: "reviewJobCreatedAtLabel"
+                                            text: modelData.createdAt
+                                            opacity: 0.75
+                                            elide: Text.ElideRight
+                                            Layout.preferredWidth: 170
+                                        }
+                                        Label {
+                                            objectName: "reviewJobSummaryLabel"
+                                            text: modelData.summaryText
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Label {
+                                            text: modelData.status
+                                            opacity: 0.75
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            objectName: "reviewEmptyState"
+                            visible: !root.viewModel || root.viewModel.reviewSuggestionCount === 0
+                            Layout.fillWidth: true
+
+                            Label {
+                                objectName: "reviewEmptyStateLabel"
+                                text: root.viewModel ? root.viewModel.reviewEmptyStateText : root.t("no_review_suggestions", "No pending review suggestions")
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                objectName: "reviewBackToOverviewButton"
+                                text: root.t("review_back_to_overview", "Back to Overview")
+                                visible: root.viewModel && root.viewModel.reviewCategoryFilterActive
+                                onClicked: root.viewModel && root.viewModel.setReviewCategoryFilter("all")
+                            }
+                        }
+
+                        Label {
+                            objectName: "reviewSuggestionOverflowLabel"
+                            text: root.viewModel ? root.viewModel.reviewSuggestionOverflowText : ""
+                            visible: text.length > 0
+                            wrapMode: Text.WordWrap
+                            opacity: 0.75
+                            Layout.fillWidth: true
+                        }
+
+                        Frame {
+                            objectName: "reviewCategorySummaryFrame"
+                            visible: root.viewModel && root.viewModel.reviewCategorySummaries.length > 0
+                            Layout.fillWidth: true
+                            padding: 10
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 6
+
+                                Label {
+                                    objectName: "reviewCategorySummaryTitle"
+                                    text: root.t("review_categories", "Review Categories")
+                                    font.weight: Font.Medium
+                                    Layout.fillWidth: true
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    Button {
+                                        objectName: "reviewCategoryAllButton"
+                                        text: root.t("review_filter_all_categories", "All Categories")
+                                        highlighted: root.viewModel && root.viewModel.reviewSelectedCategory === "all"
+                                        enabled: root.viewModel && root.viewModel.reviewSelectedCategory !== "all"
+                                        onClicked: root.viewModel && root.viewModel.setReviewCategoryFilter("all")
+                                    }
+
+                                    Label {
+                                        objectName: "reviewSelectedCategoryLabel"
+                                        text: root.viewModel ? root.viewModel.reviewSelectedCategoryLabel : ""
+                                        opacity: 0.72
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+
+                                Repeater {
+                                    objectName: "reviewCategorySummaryRepeater"
+                                    model: root.viewModel ? root.viewModel.reviewCategorySummaries : []
+
+                                    delegate: ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 8
+
+                                            Label {
+                                                objectName: "reviewCategorySummaryLabel"
+                                                text: modelData.categoryLabel
+                                                font.weight: Font.Medium
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Label {
+                                                objectName: "reviewCategorySummaryCount"
+                                                text: modelData.shownCount === modelData.totalCount
+                                                    ? String(modelData.totalCount)
+                                                    : String(modelData.shownCount) + "/" + String(modelData.totalCount)
+                                                opacity: 0.8
+                                            }
+
+                                            Rectangle {
+                                                objectName: "reviewCategorySummaryPriorityBadge"
+                                                radius: 10
+                                                color: modelData.priorityLevel === "high"
+                                                    ? "#FDE7E9"
+                                                    : modelData.priorityLevel === "medium"
+                                                        ? "#FFF4D6"
+                                                        : "#E8F4EA"
+                                                border.width: 1
+                                                border.color: modelData.priorityLevel === "high"
+                                                    ? "#D13438"
+                                                    : modelData.priorityLevel === "medium"
+                                                        ? "#B98900"
+                                                        : "#2E7D32"
+                                                Layout.preferredHeight: 24
+                                                Layout.preferredWidth: reviewCategorySummaryPriorityLabel.implicitWidth + 14
+
+                                                Label {
+                                                    id: reviewCategorySummaryPriorityLabel
+                                                    objectName: "reviewCategorySummaryPriorityLabel"
+                                                    anchors.centerIn: parent
+                                                    text: modelData.priorityLabel || ""
+                                                    font.pixelSize: 11
+                                                }
+                                            }
+
+                                            Button {
+                                                objectName: "reviewCategoryFilterButton"
+                                                text: modelData.isSelected
+                                                    ? root.t("review_filter_showing", "Showing")
+                                                    : root.t("review_filter_show_only", "Show Only")
+                                                highlighted: modelData.isSelected
+                                                enabled: !modelData.isSelected
+                                                onClicked: root.viewModel && root.viewModel.setReviewCategoryFilter(modelData.category)
+                                            }
+                                        }
+
+                                        Label {
+                                            objectName: "reviewCategorySummaryDescription"
+                                            text: modelData.categoryDescription || ""
+                                            visible: text.length > 0
+                                            wrapMode: Text.WordWrap
+                                            opacity: 0.72
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            id: reviewSuggestionList
+                            objectName: "reviewSuggestionList"
+                            visible: root.viewModel && root.viewModel.reviewSuggestionCount > 0
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Repeater {
+                                objectName: "reviewSuggestionGroupRepeater"
+                                model: root.viewModel ? root.viewModel.reviewSuggestionGroups : []
+
+                                delegate: Frame {
+                                    objectName: "reviewSuggestionGroupFrame"
+                                    Layout.fillWidth: true
+                                    padding: 10
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        spacing: 8
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 8
+
+                                            Label {
+                                                objectName: "reviewSuggestionGroupLabel"
+                                                text: modelData.categoryLabel
+                                                font.pixelSize: 14
+                                                font.weight: Font.DemiBold
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Label {
+                                                objectName: "reviewSuggestionGroupCount"
+                                                text: modelData.shownCount === modelData.totalCount
+                                                    ? String(modelData.totalCount)
+                                                    : String(modelData.shownCount) + "/" + String(modelData.totalCount)
+                                                opacity: 0.8
+                                            }
+
+                                            Rectangle {
+                                                objectName: "reviewSuggestionGroupPriorityBadge"
+                                                radius: 10
+                                                color: modelData.priorityLevel === "high"
+                                                    ? "#FDE7E9"
+                                                    : modelData.priorityLevel === "medium"
+                                                        ? "#FFF4D6"
+                                                        : "#E8F4EA"
+                                                border.width: 1
+                                                border.color: modelData.priorityLevel === "high"
+                                                    ? "#D13438"
+                                                    : modelData.priorityLevel === "medium"
+                                                        ? "#B98900"
+                                                        : "#2E7D32"
+                                                Layout.preferredHeight: 24
+                                                Layout.preferredWidth: reviewSuggestionGroupPriorityLabel.implicitWidth + 14
+
+                                                Label {
+                                                    id: reviewSuggestionGroupPriorityLabel
+                                                    objectName: "reviewSuggestionGroupPriorityLabel"
+                                                    anchors.centerIn: parent
+                                                    text: modelData.priorityLabel || ""
+                                                    font.pixelSize: 11
+                                                }
+                                            }
+
+                                            Label {
+                                                objectName: "reviewSuggestionGroupHiddenLabel"
+                                                text: modelData.hiddenCount > 0
+                                                    ? "+" + String(modelData.hiddenCount) + " " + root.t("review_hidden_suffix", "hidden")
+                                                    : ""
+                                                visible: text.length > 0
+                                                opacity: 0.7
+                                            }
+
+                                            Button {
+                                                objectName: "reviewSuggestionGroupToggleButton"
+                                                text: modelData.isExpanded
+                                                    ? root.t("review_group_collapse", "Collapse")
+                                                    : root.t("review_group_expand", "Expand")
+                                                onClicked: root.viewModel && root.viewModel.toggleReviewSuggestionGroup(modelData.category)
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            objectName: "reviewSuggestionGroupBody"
+                                            visible: !!modelData.isExpanded
+                                            Layout.fillWidth: true
+                                            spacing: 8
+
+                                            Label {
+                                                objectName: "reviewSuggestionGroupDescription"
+                                                text: modelData.categoryDescription || ""
+                                                visible: text.length > 0
+                                                wrapMode: Text.WordWrap
+                                                opacity: 0.72
+                                                Layout.fillWidth: true
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Repeater {
+                                                    objectName: "reviewSuggestionItemRepeater"
+                                                    model: modelData.items || []
+
+                                                    delegate: Frame {
+                                                        objectName: "reviewSuggestionCard"
+                                                        Layout.fillWidth: true
+                                                        padding: 10
+
+                                                        ColumnLayout {
+                                                            anchors.fill: parent
+                                                            spacing: 6
+
+                                                            RowLayout {
+                                                                Layout.fillWidth: true
+                                                                Label {
+                                                                    objectName: "reviewSuggestionTitleLabel"
+                                                                    text: modelData.title || modelData.type
+                                                                    font.weight: Font.Medium
+                                                                    elide: Text.ElideRight
+                                                                    Layout.fillWidth: true
+                                                                }
+                                                                Label {
+                                                                    objectName: "reviewSuggestionTypeLabel"
+                                                                    text: modelData.typeLabel || modelData.type
+                                                                    opacity: 0.8
+                                                                }
+                                                                Label {
+                                                                    objectName: "reviewSuggestionRiskLabel"
+                                                                    text: (modelData.riskLabel || modelData.riskLevel) + " · " + modelData.confidenceText
+                                                                    opacity: 0.75
+                                                                }
+                                                            }
+
+                                                            Label {
+                                                                objectName: "reviewSuggestionRiskDescriptionLabel"
+                                                                text: modelData.riskDescription || ""
+                                                                visible: text.length > 0
+                                                                wrapMode: Text.WordWrap
+                                                                opacity: 0.75
+                                                                Layout.fillWidth: true
+                                                            }
+
+                                                            Label {
+                                                                objectName: "reviewSuggestionDetailLabel"
+                                                                text: modelData.detail
+                                                                wrapMode: Text.WordWrap
+                                                                maximumLineCount: 3
+                                                                elide: Text.ElideRight
+                                                                Layout.fillWidth: true
+                                                            }
+
+                                                            Label {
+                                                                objectName: "reviewSuggestionEvidenceLabel"
+                                                                text: modelData.oldForm && modelData.newForm
+                                                                    ? modelData.oldForm + " → " + modelData.newForm
+                                                                    : modelData.evidenceText
+                                                                opacity: 0.8
+                                                                elide: Text.ElideRight
+                                                                Layout.fillWidth: true
+                                                            }
+
+                                                            Label {
+                                                                objectName: "reviewSuggestionSourceLabel"
+                                                                text: modelData.sourceRecordText
+                                                                    ? modelData.sourceRecordLabel + ": " + modelData.sourceRecordText
+                                                                    : ""
+                                                                visible: text.length > 0
+                                                                opacity: 0.65
+                                                                wrapMode: Text.WordWrap
+                                                                maximumLineCount: 2
+                                                                elide: Text.ElideRight
+                                                                Layout.fillWidth: true
+                                                            }
+
+                                                            Button {
+                                                                objectName: "reviewOpenSourceRecordButton"
+                                                                text: modelData.sourceRecordActionLabel || root.t("open_source_record", "Open Source Record")
+                                                                visible: !!modelData.canOpenSourceRecord
+                                                                onClicked: root.viewModel && root.viewModel.openReviewSourceRecord(modelData.id)
+                                                            }
+
+                                                            Label {
+                                                                objectName: "reviewSuggestionActionHintLabel"
+                                                                text: modelData.actionHint || ""
+                                                                visible: text.length > 0
+                                                                wrapMode: Text.WordWrap
+                                                                opacity: 0.75
+                                                                Layout.fillWidth: true
+                                                            }
+
+                                                            RowLayout {
+                                                                Layout.fillWidth: true
+                                                                Item { Layout.fillWidth: true }
+                                                                Button {
+                                                                    objectName: "reviewAcceptButton"
+                                                                    text: root.t("accept", "Accept")
+                                                                    onClicked: root.viewModel && root.viewModel.acceptReviewSuggestion(modelData.id)
+                                                                }
+                                                                Button {
+                                                                    objectName: "reviewRejectButton"
+                                                                    text: root.t("reject", "Reject")
+                                                                    onClicked: root.viewModel && root.viewModel.rejectReviewSuggestion(modelData.id)
+                                                                }
+                                                                Button {
+                                                                    objectName: "reviewIgnoreOnceButton"
+                                                                    text: root.t("ignore_once", "Ignore Once")
+                                                                    onClicked: root.viewModel && root.viewModel.archiveReviewSuggestion(modelData.id)
+                                                                }
+                                                                Button {
+                                                                    objectName: "reviewIgnoreButton"
+                                                                    text: root.t("always_ignore_similar", "Always Ignore Similar")
+                                                                    onClicked: root.viewModel && root.viewModel.ignoreReviewSuggestion(modelData.id)
+                                                                }
+                                                                Button {
+                                                                    objectName: "reviewReprocessButton"
+                                                                    text: root.t("reprocess_sample", "Reprocess Sample")
+                                                                    visible: !!modelData.canReprocessSample
+                                                                    onClicked: root.viewModel && root.viewModel.reprocessReviewSuggestion(modelData.id)
+                                                                }
+                                                                Button {
+                                                                    objectName: "reviewRevertToRawButton"
+                                                                    text: root.t("revert_to_raw", "Revert to Raw Transcript")
+                                                                    visible: !!modelData.canRevertToRaw
+                                                                    onClicked: root.viewModel && root.viewModel.revertReviewSuggestionToRaw(modelData.id)
+                                                                }
+                                                            }
+
+                                                            Label {
+                                                                objectName: "reviewIgnoreScopeHintLabel"
+                                                                text: root.viewModel ? root.viewModel.reviewIgnoreScopeHint : root.t("review_ignore_scope_hint", "Ignore Once dismisses only this card. Always Ignore Similar suppresses future similar suggestions.")
+                                                                wrapMode: Text.WordWrap
+                                                                opacity: 0.7
+                                                                Layout.fillWidth: true
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        title: root.t("lexicon_memory", "Lexicon Memory")
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                objectName: "lexiconEntryCountLabel"
+                                text: root.t("lexicon_memory", "Lexicon Memory") + ": " + (root.viewModel ? root.viewModel.lexiconEntryCount : 0)
+                                Layout.fillWidth: true
+                            }
+                            Button {
+                                objectName: "exportLexiconButton"
+                                text: root.t("export_lexicon", "Export Lexicon")
+                                enabled: root.viewModel && root.viewModel.lexiconEntryCount > 0
+                                onClicked: root.viewModel && root.viewModel.exportLexiconEntries()
+                            }
+                            Button {
+                                objectName: "clearLexiconButton"
+                                text: root.t("clear_lexicon", "Clear Lexicon")
+                                enabled: root.viewModel && root.viewModel.lexiconEntryCount > 0
+                                onClicked: root.viewModel && root.viewModel.clearLexiconEntries()
+                            }
+                            Button {
+                                objectName: "clearReviewLearningDataButton"
+                                text: root.t("clear_learning_data", "Clear Learned Review Data")
+                                enabled: root.viewModel && (root.viewModel.lexiconEntryCount > 0 || root.viewModel.reviewJobCount > 0)
+                                onClicked: root.viewModel && root.viewModel.clearReviewLearningData()
+                            }
+                        }
+
+                        Label {
+                            objectName: "lexiconExportMessageLabel"
+                            text: root.viewModel ? root.viewModel.lexiconExportMessage : ""
+                            visible: text.length > 0
+                            wrapMode: Text.WordWrap
+                            opacity: 0.75
+                            Layout.fillWidth: true
+                        }
+
+                        Label {
+                            objectName: "reviewLearningDataMessageLabel"
+                            text: root.viewModel ? root.viewModel.reviewLearningDataMessage : ""
+                            visible: text.length > 0
+                            wrapMode: Text.WordWrap
+                            opacity: 0.75
+                            Layout.fillWidth: true
+                        }
+
+                        Label {
+                            objectName: "lexiconEmptyState"
+                            text: root.t("no_lexicon_entries", "No local lexicon entries")
+                            visible: !root.viewModel || root.viewModel.lexiconEntryCount === 0
+                            Layout.fillWidth: true
+                        }
+
+                        ListView {
+                            id: lexiconEntryList
+                            objectName: "lexiconEntryList"
+                            model: root.viewModel ? root.viewModel.lexiconEntries : []
+                            visible: root.viewModel && root.viewModel.lexiconEntryCount > 0
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(240, Math.max(120, contentHeight + 8))
+                            clip: true
+                            spacing: 8
+
+                            delegate: Frame {
+                                width: lexiconEntryList.width
+                                padding: 10
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 8
+                                    Label {
+                                        objectName: "lexiconTermLabel"
+                                        text: modelData.term
+                                        font.weight: Font.Medium
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        text: modelData.oldForm ? modelData.oldForm : ""
+                                        opacity: 0.75
+                                        elide: Text.ElideRight
+                                        Layout.preferredWidth: 160
+                                    }
+                                    Label {
+                                        text: modelData.evidenceText + " · " + modelData.confidenceText
+                                        opacity: 0.75
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1339,6 +2001,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Label { text: root.t("time", "Time"); opacity: 0.65 }
                             Label { text: root.historyDetailValue("fullTime", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                            Label { text: root.t("record_id", "Record ID"); opacity: 0.65 }
+                            Label { objectName: "historyDetailRecordIdValue"; text: root.historyDetailValue("id", ""); elide: Text.ElideMiddle; Layout.fillWidth: true }
                             Label { text: root.t("duration", "Duration"); opacity: 0.65 }
                             Label { text: root.historyDetailValue("durationText", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                             Label { text: root.t("audio_file", "Audio File"); opacity: 0.65 }
@@ -1362,12 +2026,18 @@ ApplicationWindow {
                         Label { text: root.historyDetailValue("diagnosticsText", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                         Label { text: root.t("mode", "Mode"); opacity: 0.65 }
                         Label { text: root.historyDetailValue("streamingMode", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("transcription_path", "Transcription Path"); opacity: 0.65 }
+                        Label { objectName: "historyDetailTranscriptionPathValue"; text: root.historyDetailValue("transcriptionPath", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("decision_reason", "Decision Reason"); opacity: 0.65 }
+                        Label { objectName: "historyDetailDecisionReasonValue"; text: root.historyDetailValue("transcriptionDecisionReason", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                         Label { text: root.t("provider", "Provider"); opacity: 0.65 }
                         Label { text: root.historyDetailValue("transcriptionProvider", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                         Label { text: root.t("transcribe_time", "Transcribe Time"); opacity: 0.65 }
                         Label { text: root.historyDetailValue("transcribeTime", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                         Label { text: root.t("fallback", "Fallback"); opacity: 0.65 }
                         Label { text: root.historyDetailValue("fallbackUsed", ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: root.t("fallback_type", "Fallback Type"); opacity: 0.65 }
+                        Label { objectName: "historyDetailFallbackTypeValue"; text: root.historyDetailValue("fallbackType", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                         Label { text: root.t("fallback_reason", "Fallback Reason"); opacity: 0.65 }
                         Label { text: root.historyDetailValue("fallbackReason", ""); elide: Text.ElideRight; Layout.fillWidth: true }
                     }
@@ -1553,6 +2223,34 @@ ApplicationWindow {
             width: parent ? parent.width : 420
             wrapMode: Text.WordWrap
             text: root.viewModel ? root.viewModel.historyActionMessage : ""
+        }
+    }
+
+    property string applyErrorMessage: ""
+
+    Connections {
+        target: root.viewModel
+        ignoreUnknownSignals: true
+        function onApplyFailed(message) {
+            root.applyErrorMessage = message
+            applyErrorDialog.open()
+        }
+    }
+
+    Dialog {
+        id: applyErrorDialog
+        objectName: "applyErrorDialog"
+        modal: true
+        title: root.t("settings_apply_failed", "Could not save settings")
+        anchors.centerIn: parent
+        width: Math.min(root.width - 64, 520)
+        standardButtons: Dialog.Ok
+
+        contentItem: Label {
+            objectName: "applyErrorMessageLabel"
+            width: parent ? parent.width : 420
+            wrapMode: Text.WordWrap
+            text: root.applyErrorMessage
         }
     }
 }

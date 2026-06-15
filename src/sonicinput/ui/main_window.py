@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
 
     # 信号定义
     window_closing = Signal()
+    _REVIEW_AUTO_TIMER_INTERVAL_MS = 60_000
 
     def __init__(
         self,
@@ -174,6 +175,8 @@ class MainWindow(QMainWindow):
         # 如果服务已经注入，连接事件
         if self.ui_main_service:
             self._connect_service_events()
+        if self.ui_settings_service:
+            self._setup_review_auto_timer()
 
         app_logger.log_audio_event(
             "MainWindow initialized", {"services_injected": ui_main_service is not None}
@@ -280,6 +283,50 @@ class MainWindow(QMainWindow):
         self.ui_settings_service = ui_settings_service
         self.ui_model_service = ui_model_service
         self._connect_service_events()
+        self._setup_review_auto_timer()
+
+    def _setup_review_auto_timer(self) -> None:
+        """Start a conservative periodic review tick.
+
+        The timer itself is cheap and the settings service keeps review disabled
+        by default. When enabled, each tick still goes through ReviewSchedulerService
+        idle/busy/min-interval/session-budget gates.
+        """
+        if not self.ui_settings_service:
+            return
+        timer = getattr(self, "_review_auto_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(self._REVIEW_AUTO_TIMER_INTERVAL_MS)
+            timer.timeout.connect(self._on_review_auto_timer)
+            self._review_auto_timer = timer
+        if not timer.isActive():
+            timer.start()
+
+    def _on_review_auto_timer(self) -> None:
+        run_review = getattr(self.ui_settings_service, "run_idle_review_once", None)
+        if not callable(run_review):
+            return
+        try:
+            result = run_review()
+        except Exception as e:
+            app_logger.log_error(e, "review_auto_timer")
+            return
+
+        if isinstance(result, dict) and result.get("ran"):
+            app_logger.log_audio_event(
+                "Idle review completed from auto timer",
+                {
+                    "job_id": result.get("jobId", ""),
+                    "reviewed_record_count": result.get("reviewedRecordCount", 0),
+                    "suggestion_count": result.get("suggestionCount", 0),
+                },
+            )
+            settings = getattr(self, "_settings_window", None)
+            view_model = getattr(settings, "view_model", None)
+            refresh = getattr(view_model, "refreshReviewSuggestions", None)
+            if callable(refresh):
+                refresh()
 
     def _connect_service_events(self) -> None:
         """连接UI服务事件"""

@@ -142,6 +142,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
     # 2) 合并分块文本时做边界去重，减少重叠上下文带来的重复文本
     _CHUNK_CONTEXT_OVERLAP_SECONDS = 0.6
     _TEXT_OVERLAP_MAX_CHARS = 60
+    _TEXT_NORMALIZED_OVERLAP_MIN_CHARS = 8
     _CHUNK_RESULT_MIN_TIMEOUT_SECONDS = 30.0
     _CHUNK_WAIT_POLL_INTERVAL_SECONDS = 0.05
 
@@ -729,7 +730,18 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             if overlap > 0:
                 merged = merged + part[overlap:]
             else:
-                merged = self._smart_concat_text(merged, part)
+                normalized_skip = self._normalized_suffix_prefix_overlap_skip(
+                    merged,
+                    part,
+                    max_chars=self._TEXT_OVERLAP_MAX_CHARS,
+                    min_chars=self._TEXT_NORMALIZED_OVERLAP_MIN_CHARS,
+                )
+                if normalized_skip > 0:
+                    merged = self._smart_concat_text(
+                        merged, part[normalized_skip:].lstrip()
+                    )
+                else:
+                    merged = self._smart_concat_text(merged, part)
 
         return merged.strip()
 
@@ -748,6 +760,37 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             if left[-overlap:] == right[:overlap]:
                 return overlap
         return 0
+
+    @classmethod
+    def _normalized_suffix_prefix_overlap_skip(
+        cls,
+        left_text: str,
+        right_text: str,
+        *,
+        max_chars: int = 60,
+        min_chars: int = 8,
+    ) -> int:
+        """在忽略空白和标点后，计算 right 前缀可安全跳过的原始字符数。"""
+        left_normalized, _left_indices = cls._normalized_overlap_view(left_text)
+        right_normalized, right_indices = cls._normalized_overlap_view(right_text)
+        if not left_normalized or not right_normalized:
+            return 0
+
+        limit = min(len(left_normalized), len(right_normalized), max_chars)
+        for overlap in range(limit, min_chars - 1, -1):
+            if left_normalized[-overlap:] == right_normalized[:overlap]:
+                return right_indices[overlap - 1] + 1
+        return 0
+
+    @staticmethod
+    def _normalized_overlap_view(text: str) -> tuple[str, list[int]]:
+        normalized_chars: list[str] = []
+        raw_indices: list[int] = []
+        for index, char in enumerate(str(text or "")):
+            if char.isalnum():
+                normalized_chars.append(char.lower())
+                raw_indices.append(index)
+        return ("".join(normalized_chars), raw_indices)
 
     @staticmethod
     def _smart_concat_text(left_text: str, right_text: str) -> str:

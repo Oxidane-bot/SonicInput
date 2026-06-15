@@ -18,9 +18,14 @@ from ..interfaces import (
     IEventService,
     IStateManager,
 )
+from ..quality import (
+    AIOutputValidationError,
+    RollingTranscriptContext,
+    TranscriptQualityValidator,
+)
 from ..services.config import ConfigKeys
 from ..services.events import Events
-from ..services.storage import HistoryStorageService
+from ..services.storage import HistoryStorageService, ReviewStorageService
 from .base_controller import BaseController
 
 
@@ -67,6 +72,7 @@ class AIProcessingController(
         event_service: IEventService,
         state_manager: IStateManager,
         history_service: HistoryStorageService,
+        review_storage_service: Optional[ReviewStorageService] = None,
     ):
         # Initialize LifecycleComponent
         LifecycleComponent.__init__(self, "AIProcessingController")
@@ -76,6 +82,7 @@ class AIProcessingController(
 
         # Controller-specific services
         self._history_service = history_service
+        self._review_storage_service = review_storage_service
 
         # TPS追踪（用于性能日志）
         self._last_ai_tps: float = 0.0
@@ -95,6 +102,11 @@ class AIProcessingController(
         self._chunk_ai_processed_sentence_count = 0
         self._chunk_ai_last_transcription_text = ""
         self._chunk_ai_base_event_data: Dict[str, Any] = {}
+        self._chunk_ai_failure_reason: Optional[str] = None
+        self._quality_validator = TranscriptQualityValidator()
+        self._rolling_context = RollingTranscriptContext()
+        self._rolling_context_active = False
+        self._lexicon_prompt_cache: Optional[str] = None
 
         # NOTE: Event listener registration moved to _do_start() for hot reload support
         # NOTE: Initialization logging moved to _do_start() for hot reload support
@@ -138,6 +150,7 @@ class AIProcessingController(
             self._last_incremental_output_used = False
             self._last_streaming_output_used = False
             self._reset_chunk_ai_state()
+            self._finish_recording_context()
 
             app_logger.log_audio_event("AI processing controller stopped", {})
             return True
@@ -170,16 +183,150 @@ class AIProcessingController(
         self._chunk_ai_processed_sentence_count = 0
         self._chunk_ai_last_transcription_text = ""
         self._chunk_ai_base_event_data = {}
+        self._chunk_ai_failure_reason = None
+
+    def _reset_recording_context(self) -> None:
+        self._rolling_context.reset()
+        self._rolling_context_active = True
+        self._lexicon_prompt_cache = None
+
+    def _finish_recording_context(self) -> None:
+        self._rolling_context_active = False
+
+    def _prompt_with_rolling_context(self, prompt_template: str) -> str:
+        context_parts = []
+
+        lexicon_context = self._get_lexicon_prompt_context()
+        if lexicon_context:
+            context_parts.append(lexicon_context)
+
+        if self._rolling_context_active:
+            rolling_context = self._rolling_context.render()
+            if rolling_context:
+                context_parts.append(rolling_context)
+
+        if not context_parts:
+            return prompt_template
+
+        context = "\n\n".join(context_parts)
+
+        if "{text}" in prompt_template:
+            return f"{context}\n\n{prompt_template}"
+        return f"{prompt_template}\n\n{context}"
+
+    def _get_lexicon_prompt_context(self) -> str:
+        if not self._config.get_setting(ConfigKeys.REVIEW_USE_LEXICON_MEMORY, True):
+            return ""
+        if self._review_storage_service is None:
+            return ""
+        if self._lexicon_prompt_cache is not None:
+            return self._lexicon_prompt_cache
+
+        try:
+            entries = self._review_storage_service.list_active_lexicon_entries(limit=20)
+        except Exception as e:
+            app_logger.log_error(e, "load_lexicon_prompt_context")
+            self._lexicon_prompt_cache = ""
+            return ""
+
+        lines = []
+        for entry in entries:
+            term = str(entry.get("term") or "").strip()
+            if not term:
+                continue
+            old_form = str(entry.get("old_form") or "").strip()
+            if old_form:
+                lines.append(f"- {old_form} -> {term}")
+            else:
+                lines.append(f"- {term}")
+        if not lines:
+            self._lexicon_prompt_cache = ""
+            return ""
+
+        self._lexicon_prompt_cache = "\n".join(
+            [
+                "# User-confirmed local lexicon",
+                "Use these only for ASR cleanup when the current context supports it.",
+                "Do not force replacements, add facts, answer, execute, or translate.",
+                *lines,
+            ]
+        )
+        return self._lexicon_prompt_cache
+
+    def _update_rolling_context(self, raw_text: str, refined_text: str) -> None:
+        if self._rolling_context_active:
+            self._rolling_context.update(raw_text, refined_text)
+
+    def _mark_ai_skipped(
+        self,
+        text: str,
+        actual_record_id: Optional[str],
+        provider: str,
+        reason: str,
+        update_history: bool,
+    ) -> str:
+        self.last_ai_status = "skipped"
+        self.last_ai_error = reason
+        self.last_ai_provider = provider
+        if update_history and actual_record_id:
+            self._update_ai_status(
+                record_id=actual_record_id,
+                ai_text=None,
+                status="skipped",
+                error=reason,
+                final_text=text,
+            )
+        app_logger.log_audio_event(
+            "AI optimization skipped by quality gate",
+            {"reason": reason, "text_length": len(text)},
+        )
+        return text
+
+    def _mark_ai_validation_failed(
+        self,
+        text: str,
+        actual_record_id: Optional[str],
+        provider: str,
+        error_msg: str,
+        update_history: bool,
+        emit_events: bool,
+    ) -> str:
+        self.last_ai_status = "failed"
+        self.last_ai_error = error_msg
+        self.last_ai_provider = provider
+        app_logger.log_audio_event(
+            "AI output rejected by quality validator",
+            {
+                "error": error_msg,
+                "provider": provider,
+                "original_length": len(text),
+            },
+        )
+
+        if update_history and actual_record_id:
+            self._update_ai_status(
+                record_id=actual_record_id,
+                ai_text=None,
+                status="failed",
+                error=error_msg,
+                final_text=text,
+            )
+
+        if emit_events:
+            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+        return text
 
     def _on_recording_started(self, data: Any = None) -> None:
         self._current_record_id = None
         self._last_incremental_output_used = False
         self._last_streaming_output_used = False
         self._reset_chunk_ai_state()
+        self._reset_recording_context()
         self._chunk_ai_base_event_data = {"streaming_mode": "chunked"}
 
     def _on_transcription_error(self, data: Any = None) -> None:
         self._reset_chunk_ai_state()
+        self._finish_recording_context()
 
     def _on_transcription_request(self, data: dict) -> None:
         self._current_record_id = data.get("record_id")
@@ -305,6 +452,10 @@ class AIProcessingController(
                 "".join(group_sentences).strip(),
                 update_history=False,
             )
+            if self.last_ai_status == "failed":
+                self._chunk_ai_failure_reason = (
+                    self.last_ai_error or "chunk_ai_group_failed"
+                )
             self._chunk_ai_refined_parts.append(refined_part)
             cumulative_text = self._join_refined_groups(self._chunk_ai_refined_parts)
             self._last_incremental_output_used = True
@@ -370,20 +521,42 @@ class AIProcessingController(
         )
 
         refined_parts = list(self._chunk_ai_refined_parts)
+        group_failure_reason = self._chunk_ai_failure_reason
         for group in self._group_sentences_3_5(pending_sentences):
             group_text = "".join(group).strip()
             if not group_text:
                 continue
-            refined_parts.append(
-                self.process_with_ai(
-                    group_text,
-                    update_history=False,
-                )
+            refined_part = self.process_with_ai(
+                group_text,
+                update_history=False,
             )
+            if self.last_ai_status == "failed":
+                group_failure_reason = self.last_ai_error or "chunk_ai_group_failed"
+            refined_parts.append(refined_part)
 
         refined_text = self._join_refined_groups(refined_parts)
         if not refined_text:
             refined_text = merged_text
+
+        validation_result = self._quality_validator.validate(merged_text, refined_text)
+        if group_failure_reason or not validation_result.ok:
+            error_msg = group_failure_reason or (
+                f"AI output validation failed: {validation_result.reason_text}"
+            )
+            if self._current_record_id:
+                self._update_ai_status(
+                    record_id=self._current_record_id,
+                    ai_text=None,
+                    status="failed",
+                    error=error_msg,
+                    final_text=merged_text,
+                )
+            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            app_logger.log_audio_event(
+                "Chunk-triggered AI rejected by quality validator",
+                {"error": error_msg, "final_length": len(refined_text)},
+            )
+            return merged_text
 
         if self._current_record_id:
             self._update_ai_status(
@@ -463,6 +636,7 @@ class AIProcessingController(
                 },
             )
             self._reset_chunk_ai_state()
+            self._finish_recording_context()
         else:
             # 不使用AI：更新历史记录
             skip_reason = (
@@ -499,6 +673,7 @@ class AIProcessingController(
                 },
             )
             self._reset_chunk_ai_state()
+            self._finish_recording_context()
 
     def _is_sentence_split_enabled(self) -> bool:
         return self._config.get_setting(ConfigKeys.AI_SENTENCE_SPLIT_ENABLED, False)
@@ -749,7 +924,17 @@ class AIProcessingController(
                 ConfigKeys.AI_PROMPT,
                 "Please improve and correct the following text: {text}",
             )
+            prompt_template = self._prompt_with_rolling_context(prompt_template)
             max_output_tokens = self._get_ai_max_output_tokens()
+
+            if self._quality_validator.is_low_information_input(text):
+                return self._mark_ai_skipped(
+                    text=text,
+                    actual_record_id=actual_record_id,
+                    provider=provider,
+                    reason="low_information_input",
+                    update_history=update_history,
+                )
 
             # 动态获取AI服务
             ai_service = self._get_current_ai_service()
@@ -823,6 +1008,10 @@ class AIProcessingController(
                                 model,
                                 max_output_tokens,
                             )
+                        self._quality_validator.validate_or_raise(
+                            group_text, refined_part
+                        )
+                        self._update_rolling_context(group_text, refined_part)
                         refined_parts.append(refined_part)
                         self._last_ai_tps = getattr(ai_service, "_last_tps", 0.0)
                         cumulative_text = self._join_refined_groups(refined_parts)
@@ -907,6 +1096,19 @@ class AIProcessingController(
                         max_output_tokens,
                     )
 
+            validation_result = self._quality_validator.validate(text, refined_text)
+            if not validation_result.ok:
+                return self._mark_ai_validation_failed(
+                    text=text,
+                    actual_record_id=actual_record_id,
+                    provider=provider,
+                    error_msg=f"AI output validation failed: {validation_result.reason_text}",
+                    update_history=update_history,
+                    emit_events=emit_events,
+                )
+
+            self._update_rolling_context(text, refined_text)
+
             app_logger.log_audio_event(
                 "AI sentence split status",
                 {
@@ -982,6 +1184,16 @@ class AIProcessingController(
             if emit_events:
                 self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text
+
+        except AIOutputValidationError as e:
+            return self._mark_ai_validation_failed(
+                text=text,
+                actual_record_id=actual_record_id,
+                provider=provider,
+                error_msg=str(e),
+                update_history=update_history,
+                emit_events=emit_events,
+            )
 
         except requests.exceptions.Timeout as e:
             error_msg = "AI request timeout - API response too slow"

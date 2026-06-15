@@ -327,7 +327,7 @@ def create_container() -> "DIContainer":
     container.register_singleton(HotReloadManager, HotReloadManager)
 
     # 历史记录服务 - 单例
-    from .services.storage import HistoryStorageService
+    from .services.storage import HistoryStorageService, ReviewStorageService
 
     def create_history_service(container):
         config = container.resolve(IConfigService)
@@ -336,6 +336,32 @@ def create_container() -> "DIContainer":
 
     container.register_singleton(
         HistoryStorageService, factory=lambda: create_history_service(container)
+    )
+
+    def create_review_storage_service(container):
+        history = container.resolve(HistoryStorageService)
+        return ReviewStorageService(history.get_storage_path() / "history.db")
+
+    container.register_singleton(
+        ReviewStorageService,
+        factory=lambda: create_review_storage_service(container),
+    )
+
+    from .services.review_scheduler_service import ReviewSchedulerService
+
+    def create_review_scheduler_service(container):
+        config = container.resolve(IConfigService)
+        history = container.resolve(HistoryStorageService)
+        review_storage = container.resolve(ReviewStorageService)
+        return ReviewSchedulerService(
+            load_recent_records=lambda limit: history.search_records(limit=limit),
+            review_storage=review_storage,
+            config=ReviewSchedulerService.config_from_service(config),
+        )
+
+    container.register_singleton(
+        ReviewSchedulerService,
+        factory=lambda: create_review_scheduler_service(container),
     )
 
     # 音频服务 - 瞬态
@@ -582,6 +608,7 @@ def create_container() -> "DIContainer":
         config = container.resolve(IConfigService)
         events = container.resolve(IEventService)
         history = container.resolve(HistoryStorageService)
+        review_storage = container.resolve(ReviewStorageService)
         localization_service = container.resolve(UILocalizationService)
         launch_at_login_service = container.resolve(LaunchAtLoginService)
 
@@ -613,6 +640,7 @@ def create_container() -> "DIContainer":
             ai_processing_controller=ai_processing_controller,
             localization_service=localization_service,
             launch_at_login_service=launch_at_login_service,
+            review_storage_service=review_storage,
             container=container,  # Pass container for dynamic service resolution after hot reload
         )
 

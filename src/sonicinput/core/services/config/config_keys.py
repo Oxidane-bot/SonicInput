@@ -35,6 +35,16 @@ class ConfigKeys:
     TRANSCRIPTION_LOCAL_STREAMING_MODE = "transcription.local.streaming_mode"
     """流式转录模式 (str): "chunked" | "realtime" """
 
+    TRANSCRIPTION_LONG_RECORDING_FILE_THRESHOLD_SECONDS = (
+        "transcription.long_recording.file_threshold_seconds"
+    )
+    """长录音切换到文件转录路径的阈值秒数 (float)。"""
+
+    TRANSCRIPTION_LONG_RECORDING_PREFER_FILE_FOR_CLOUD = (
+        "transcription.long_recording.prefer_file_for_cloud"
+    )
+    """长录音时云提供商优先走文件转录路径 (bool)。"""
+
     # Groq
     TRANSCRIPTION_GROQ_API_KEY = "transcription.groq.api_key"
     """Groq API密钥 (str)"""
@@ -240,6 +250,28 @@ class ConfigKeys:
     HISTORY_STORAGE_PATH = "history.storage_path"
     """历史记录存储路径 (str): "auto"表示自动选择"""
 
+    # ==================== Review (质量审查配置) ====================
+    REVIEW_ENABLED = "review.enabled"
+    """启用空闲质量审查调度 (bool)，默认关闭"""
+
+    REVIEW_IDLE_SECONDS = "review.idle_seconds"
+    """空闲多久后允许运行 review (float): 秒"""
+
+    REVIEW_MIN_INTERVAL_SECONDS = "review.min_interval_seconds"
+    """两次 review 之间的最小间隔 (float): 秒"""
+
+    REVIEW_MAX_RECORDS = "review.max_records"
+    """每次最多审查的历史记录数 (int)"""
+
+    REVIEW_MAX_RUNS_PER_SESSION = "review.max_runs_per_session"
+    """每个 App session 最多运行 review 的次数 (int)"""
+
+    REVIEW_PERSIST = "review.persist"
+    """是否把 review suggestions 持久化到本地 DB (bool)"""
+
+    REVIEW_USE_LEXICON_MEMORY = "review.use_lexicon_memory"
+    """是否在 AI 清理时使用用户已接受的本地词汇记忆 (bool)"""
+
     # ==================== Logging (日志配置) ====================
     LOGGING_LEVEL = "logging.level"
     """日志级别 (str): "DEBUG" | "INFO" | "WARNING" | "ERROR" """
@@ -440,4 +472,14 @@ class ConfigKeyGroups:
         ConfigKeys.INPUT_PREFERRED_METHOD,
         ConfigKeys.INPUT_FALLBACK_ENABLED,
         ConfigKeys.INPUT_AUTO_DETECT_TERMINAL,
+    ]
+
+    REVIEW = [
+        ConfigKeys.REVIEW_ENABLED,
+        ConfigKeys.REVIEW_IDLE_SECONDS,
+        ConfigKeys.REVIEW_MIN_INTERVAL_SECONDS,
+        ConfigKeys.REVIEW_MAX_RECORDS,
+        ConfigKeys.REVIEW_MAX_RUNS_PER_SESSION,
+        ConfigKeys.REVIEW_PERSIST,
+        ConfigKeys.REVIEW_USE_LEXICON_MEMORY,
     ]

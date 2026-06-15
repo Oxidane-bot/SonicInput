@@ -27,6 +27,28 @@ class HistoryStorageService(LifecycleComponent):
 
     _FTS_TABLE_NAME = "history_records_fts"
     _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _HISTORY_SCHEMA_EXPECTATION_VERSION = 2
+
+    @classmethod
+    def _history_record_required_columns(cls) -> dict[str, str]:
+        """Return the backward-compatible diagnostic columns required by the app."""
+        return {
+            "streaming_mode": "TEXT NOT NULL DEFAULT 'unknown'",
+            "transcription_path": "TEXT NOT NULL DEFAULT 'standard'",
+            "transcription_decision_reason": "TEXT",
+            "transcription_duration": "REAL NOT NULL DEFAULT 0",
+            "used_fallback": "INTEGER NOT NULL DEFAULT 0",
+            "fallback_type": "TEXT NOT NULL DEFAULT 'none'",
+            "fallback_reason": "TEXT",
+            # 旧库升级时默认标记为未采集，避免与真实采集值混淆
+            "diagnostics_collected": "INTEGER NOT NULL DEFAULT 0",
+            "reprocess_parent_id": "TEXT",
+        }
+
+    @classmethod
+    def history_schema_signature(cls) -> str:
+        """Return a stable signature for the current expected history schema."""
+        return "|".join(sorted(cls._history_record_required_columns().keys()))
 
     def __init__(
         self,
@@ -158,6 +180,23 @@ class HistoryStorageService(LifecycleComponent):
         # 使用临时连接进行初始化，不保存到线程本地存储
         conn = sqlite3.connect(str(self._db_path))
         cursor = conn.cursor()
+        required_columns = self._history_record_required_columns()
+
+        app_logger.log_audio_event(
+            "History schema expectations declared",
+            {
+                "required_columns": sorted(required_columns.keys()),
+                "required_column_count": len(required_columns),
+                "history_schema_expectation_version": (
+                    self._HISTORY_SCHEMA_EXPECTATION_VERSION
+                ),
+                "history_schema_signature": self.history_schema_signature(),
+                "expects_transcription_path": "transcription_path" in required_columns,
+                "expects_transcription_decision_reason": (
+                    "transcription_decision_reason" in required_columns
+                ),
+            },
+        )
 
         # 创建历史记录表
         cursor.execute("""
@@ -170,6 +209,8 @@ class HistoryStorageService(LifecycleComponent):
                 transcription_provider TEXT NOT NULL,
                 transcription_status TEXT NOT NULL,
                 streaming_mode TEXT NOT NULL DEFAULT 'unknown',
+                transcription_path TEXT NOT NULL DEFAULT 'standard',
+                transcription_decision_reason TEXT,
                 transcription_duration REAL NOT NULL DEFAULT 0,
                 used_fallback INTEGER NOT NULL DEFAULT 0,
                 fallback_type TEXT NOT NULL DEFAULT 'none',
@@ -219,16 +260,7 @@ class HistoryStorageService(LifecycleComponent):
         cursor.execute("PRAGMA table_info(history_records)")
         existing_columns = {row[1] for row in cursor.fetchall()}
 
-        required_columns = {
-            "streaming_mode": "TEXT NOT NULL DEFAULT 'unknown'",
-            "transcription_duration": "REAL NOT NULL DEFAULT 0",
-            "used_fallback": "INTEGER NOT NULL DEFAULT 0",
-            "fallback_type": "TEXT NOT NULL DEFAULT 'none'",
-            "fallback_reason": "TEXT",
-            # 旧库升级时默认标记为未采集，避免与真实采集值混淆
-            "diagnostics_collected": "INTEGER NOT NULL DEFAULT 0",
-            "reprocess_parent_id": "TEXT",
-        }
+        required_columns = self._history_record_required_columns()
 
         for column_name, column_ddl in required_columns.items():
             if column_name not in existing_columns:
@@ -498,12 +530,12 @@ class HistoryStorageService(LifecycleComponent):
                     INSERT INTO history_records (
                         id, timestamp, audio_file_path, duration,
                         transcription_text, transcription_provider, transcription_status,
-                        streaming_mode, transcription_duration, used_fallback,
+                        streaming_mode, transcription_path, transcription_decision_reason, transcription_duration, used_fallback,
                         fallback_type, fallback_reason, diagnostics_collected, reprocess_parent_id,
                         transcription_error,
                         ai_optimized_text, ai_provider, ai_status, ai_error,
                         final_text
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         record.id,
@@ -514,6 +546,8 @@ class HistoryStorageService(LifecycleComponent):
                         record.transcription_provider,
                         record.transcription_status,
                         record.streaming_mode,
+                        record.transcription_path,
+                        record.transcription_decision_reason,
                         record.transcription_duration,
                         int(record.used_fallback),
                         record.fallback_type,
@@ -564,6 +598,8 @@ class HistoryStorageService(LifecycleComponent):
                         transcription_provider = ?,
                         transcription_status = ?,
                         streaming_mode = ?,
+                        transcription_path = ?,
+                        transcription_decision_reason = ?,
                         transcription_duration = ?,
                         used_fallback = ?,
                         fallback_type = ?,
@@ -583,6 +619,8 @@ class HistoryStorageService(LifecycleComponent):
                         record.transcription_provider,
                         record.transcription_status,
                         record.streaming_mode,
+                        record.transcription_path,
+                        record.transcription_decision_reason,
                         record.transcription_duration,
                         int(record.used_fallback),
                         record.fallback_type,
@@ -643,12 +681,12 @@ class HistoryStorageService(LifecycleComponent):
                         INSERT INTO history_records (
                             id, timestamp, audio_file_path, duration,
                             transcription_text, transcription_provider,
-                            transcription_status, streaming_mode, transcription_duration,
+                            transcription_status, streaming_mode, transcription_path, transcription_decision_reason, transcription_duration,
                             used_fallback, fallback_type, fallback_reason,
                             diagnostics_collected, reprocess_parent_id, transcription_error,
                             ai_optimized_text, ai_provider, ai_status, ai_error,
                             final_text
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         (
                             record.id,
@@ -659,6 +697,8 @@ class HistoryStorageService(LifecycleComponent):
                             record.transcription_provider,
                             record.transcription_status,
                             record.streaming_mode,
+                            record.transcription_path,
+                            record.transcription_decision_reason,
                             record.transcription_duration,
                             int(record.used_fallback),
                             record.fallback_type,
@@ -1321,6 +1361,16 @@ class HistoryStorageService(LifecycleComponent):
         streaming_mode = (
             row["streaming_mode"] if "streaming_mode" in row_keys else "unknown"
         )
+        transcription_path = (
+            row["transcription_path"]
+            if "transcription_path" in row_keys
+            else "standard"
+        )
+        transcription_decision_reason = (
+            row["transcription_decision_reason"]
+            if "transcription_decision_reason" in row_keys
+            else None
+        )
         transcription_duration = (
             float(row["transcription_duration"])
             if "transcription_duration" in row_keys
@@ -1355,6 +1405,8 @@ class HistoryStorageService(LifecycleComponent):
             transcription_provider=row["transcription_provider"],
             transcription_status=row["transcription_status"],
             streaming_mode=streaming_mode,
+            transcription_path=transcription_path,
+            transcription_decision_reason=transcription_decision_reason,
             transcription_duration=transcription_duration,
             used_fallback=used_fallback,
             fallback_type=fallback_type,

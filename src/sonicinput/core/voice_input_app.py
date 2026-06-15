@@ -27,9 +27,14 @@ from .interfaces import (
     IStateManager,
 )
 from .services.application_orchestrator import ApplicationOrchestrator
+from .services.config import ConfigKeys
 from .services.events import Events
 from .services.hot_reload_manager import HotReloadManager
-from .services.storage.history_storage_service import HistoryStorageService
+from .services.review_scheduler_service import (
+    ReviewSchedulerRunResult,
+    ReviewSchedulerService,
+)
+from .services.storage import HistoryStorageService, ReviewStorageService
 from .services.ui_event_bridge import UIEventBridge
 
 
@@ -67,6 +72,8 @@ class VoiceInputApp:
         self._input_service: Optional[IInputService] = None
         self._hotkey_service: Optional[IHotkeyService] = None
         self._history_service: Optional[HistoryStorageService] = None
+        self._review_storage_service: Optional[ReviewStorageService] = None
+        self._review_scheduler: Optional[ReviewSchedulerService] = None
 
         # 控制器（延迟初始化）
         self._recording_controller: Optional[RecordingController] = None
@@ -107,6 +114,11 @@ class VoiceInputApp:
             self._speech_service = self.container.get(ISpeechService)
             self._input_service = self.container.get(IInputService)
             self._history_service = self.container.get(HistoryStorageService)
+            if self.container.is_registered(ReviewStorageService):
+                self._review_storage_service = self.container.get(ReviewStorageService)
+            if self.container.is_registered(ReviewSchedulerService):
+                self._review_scheduler = self.container.get(ReviewSchedulerService)
+                self._review_scheduler.bind_events(self.events)
 
             # 初始化快捷键服务（从 DI 容器获取，确保被注册到 config_reload_registry）
             # HotkeyService 在创建时已经注册了所有热键
@@ -197,6 +209,7 @@ class VoiceInputApp:
             event_service=self.events,
             state_manager=self.state,
             history_service=self._history_service,
+            review_storage_service=self._review_storage_service,
         )
 
         # 输入控制器
@@ -332,6 +345,18 @@ class VoiceInputApp:
         if self._recording_controller:
             self._recording_controller.toggle_recording()
 
+    def run_idle_review_once(self) -> ReviewSchedulerRunResult:
+        """Run one local review pass if enabled and idle.
+
+        This method is safe for a future UI/app timer to call. Review is disabled
+        by default and never mutates transcript history.
+        """
+        if not self._review_scheduler:
+            return ReviewSchedulerRunResult(False, "review_scheduler_unavailable")
+        if not self.config.get_setting(ConfigKeys.REVIEW_ENABLED, False):
+            return ReviewSchedulerRunResult(False, "review_disabled")
+        return self._review_scheduler.run_once_if_idle()
+
     def set_recording_overlay(self, recording_overlay) -> None:
         """设置录音悬浮窗 (向后兼容方法)
 
@@ -441,6 +466,9 @@ class VoiceInputApp:
 
             # 移除UI事件桥接
             self.ui_bridge.remove_overlay_events()
+
+            if self._review_scheduler:
+                self._review_scheduler.unbind_events(self.events)
 
             # 停止历史记录服务（关闭线程本地数据库连接）
             if self._history_service and hasattr(self._history_service, "stop"):

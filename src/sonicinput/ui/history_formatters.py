@@ -34,6 +34,17 @@ def format_fallback_for_table(record: Any) -> str:
     )
 
 
+def format_transcription_path_for_display(record: Any) -> str:
+    transcription_path = str(
+        getattr(record, "transcription_path", "standard") or "standard"
+    )
+    if not diagnostics_collected(record):
+        return QCoreApplication.translate(
+            "HistoryTab", "Legacy default ({path})"
+        ).format(path=transcription_path)
+    return transcription_path
+
+
 def build_diagnostic_tooltip(record: Any) -> str:
     diagnostics_label = (
         QCoreApplication.translate("HistoryTab", "Captured")
@@ -55,6 +66,7 @@ def build_diagnostic_tooltip(record: Any) -> str:
         f"Provider: {provider}\n"
         f"Diagnostics: {diagnostics_label}\n"
         f"Mode: {format_mode_for_table(record)}\n"
+        f"Path: {format_transcription_path_for_display(record)}\n"
         f"Transcribe: {format_transcribe_for_table(record)}\n"
         f"Fallback: {format_fallback_for_table(record)}\n"
         f"Fallback Reason: {fallback_reason}"

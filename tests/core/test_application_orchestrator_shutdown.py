@@ -10,7 +10,7 @@ class _DummyConfig:
 
 
 class _DummyEvents:
-    def on(self, event_name: str, callback):
+    def on(self, event_name: str, callback, priority=None):
         return None
 
     def emit(self, event_name: str, data=None):

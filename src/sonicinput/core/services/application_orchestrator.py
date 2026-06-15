@@ -72,6 +72,7 @@ class ApplicationOrchestrator:
         self._startup_complete = False
         self._initialization_error: Optional[Exception] = None
         self._lazy_model_load_state = "idle"
+        self._lazy_model_load_listener_id: Optional[str] = None
 
         # 回调管理
         self._startup_callbacks: Dict[str, List[Callable]] = {}
@@ -88,6 +89,16 @@ class ApplicationOrchestrator:
 
         # 注册 config_changed_detailed 事件监听，实现统一的热重载
         self.events.on(Events.CONFIG_CHANGED_DETAILED, self._on_config_changed)
+
+        # provider 切换后需要重建 lazy load 订阅（旧的 once 订阅可能错配到新 provider）
+        # LOW 优先级：等 voice_input_app 先更新 self._speech_service 再执行
+        from .dynamic_event_system import EventPriority
+
+        self.events.on(
+            Events.SPEECH_SERVICE_RELOADED,
+            self._on_speech_service_reloaded,
+            priority=EventPriority.LOW,
+        )
 
         app_logger.log_audio_event("ApplicationOrchestrator initialized", {})
 
@@ -183,6 +194,9 @@ class ApplicationOrchestrator:
             # 卸载模型
             if self._speech_service:
                 self._speech_service.unload_model()
+
+            # 清理 lazy load 订阅
+            self._unregister_lazy_model_load()
 
             # 清理音频服务 (修复PyAudio资源泄漏)
             if self._audio_service and hasattr(self._audio_service, "cleanup"):
@@ -344,9 +358,22 @@ class ApplicationOrchestrator:
         """注册懒加载回调：首次 RECORDING_STARTED 时触发模型加载"""
         if self._lazy_model_load_state != "idle":
             return
+        if self._lazy_model_load_listener_id is not None:
+            return
 
         def on_first_recording(_data: Any = None) -> None:
+            self._lazy_model_load_listener_id = None
             if self._lazy_model_load_state != "idle":
+                return
+            # provider 在订阅之后被切换到 cloud 的兜底检查
+            current_provider = self.config.get_setting(
+                ConfigKeys.TRANSCRIPTION_PROVIDER, "local"
+            )
+            if current_provider != "local":
+                app_logger.log_audio_event(
+                    "Lazy load: skipped because provider switched to cloud",
+                    {"current_provider": current_provider},
+                )
                 return
             # 保险检查：模型可能已在其他地方加载
             if self._is_speech_model_loaded():
@@ -369,7 +396,24 @@ class ApplicationOrchestrator:
             except Exception as e:
                 self._handle_lazy_model_load_failure(model_name, str(e))
 
-        self.events.once(Events.RECORDING_STARTED, on_first_recording)
+        self._lazy_model_load_listener_id = self.events.once(
+            Events.RECORDING_STARTED, on_first_recording
+        )
+
+    def _unregister_lazy_model_load(self) -> None:
+        """取消 lazy load 订阅（provider 切换/关闭时调用）"""
+        if self._lazy_model_load_listener_id is None:
+            return
+        try:
+            self.events.off(Events.RECORDING_STARTED, self._lazy_model_load_listener_id)
+        except Exception as e:
+            app_logger.log_error(e, "unregister_lazy_model_load")
+        finally:
+            self._lazy_model_load_listener_id = None
+
+    def _on_speech_service_reloaded(self, _data: Any = None) -> None:
+        """provider 切换后：丢弃旧 lazy load 订阅，按新 provider 重新决定是否注册"""
+        self._reconcile_lazy_model_load()
 
     def _is_speech_model_loaded(self) -> bool:
         return bool(
@@ -525,11 +569,30 @@ class ApplicationOrchestrator:
                 {"changed_keys": changed_keys},
             )
 
+            # provider 切换时清理可能错配的 lazy load 订阅（防御性兜底）
+            # 主路径是 SPEECH_SERVICE_RELOADED 事件，但 UI 走 save_config() 路径
+            # 时该事件不会发出，这里需要兜底处理。
+            provider_changed = (
+                ConfigKeys.TRANSCRIPTION_PROVIDER in changed_keys
+                or "transcription.provider" in changed_keys
+            )
+            if provider_changed:
+                self._reconcile_lazy_model_load()
+
             # 调用公共接口进行热重载
             self.notify_config_changed(changed_keys, new_config)
 
         except Exception as e:
             app_logger.log_error(e, "ApplicationOrchestrator._on_config_changed")
+
+    def _reconcile_lazy_model_load(self) -> None:
+        """根据当前 provider 重新对齐 lazy load 订阅状态"""
+        self._unregister_lazy_model_load()
+        self._lazy_model_load_state = "idle"
+        try:
+            self._init_model_loading()
+        except Exception as e:
+            app_logger.log_error(e, "reconcile_lazy_model_load")
 
     def notify_config_changed(
         self, changed_keys: List[str], new_config: Dict[str, Any]

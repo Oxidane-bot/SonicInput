@@ -159,6 +159,18 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
             ConfigurationError: 配置项无效或类型不匹配时
             RuntimeError: 热重载失败时（例如录音进行中）
         """
+        # 切换 transcription provider 前必须有可用的 API key
+        # （UI 走 set_setting + save_config 路径时不会进 _reload_speech_service，
+        # 必须在入口拦截）
+        if key in (
+            ConfigKeys.TRANSCRIPTION_PROVIDER,
+            "transcription.provider",
+        ):
+            self._guard_against_provider_change_while_recording()
+            is_valid, error_msg = self._validate_transcription_provider(value)
+            if not is_valid:
+                raise ConfigurationError(error_msg)
+
         old_value = self.get_setting(key)
 
         # 更新配置
@@ -209,6 +221,20 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
         """
         if not changes:
             return
+
+        # 切换 transcription provider 前必须有可用的 API key（batch 入口拦截）
+        # 注意：用户可能同一批次中同时改 provider 和 api_key，要看到合并后的值
+        provider_key = ConfigKeys.TRANSCRIPTION_PROVIDER
+        if provider_key in changes or "transcription.provider" in changes:
+            self._guard_against_provider_change_while_recording()
+            new_provider = changes.get(provider_key) or changes.get(
+                "transcription.provider"
+            )
+            is_valid, error_msg = self._validate_transcription_provider(
+                new_provider, pending_changes=changes
+            )
+            if not is_valid:
+                raise ConfigurationError(error_msg)
 
         # 1. 批量更新所有配置项
         for key, value in changes.items():
@@ -659,11 +685,33 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
             app_logger.log_error(e, "validate_hotkey")
             return False, f"Failed to validate hotkey: {str(e)}"
 
-    def _validate_transcription_provider(self, provider: str) -> tuple[bool, str]:
+    def _guard_against_provider_change_while_recording(self) -> None:
+        """录音进行中禁止切换 provider（决策：禁止而非自动停止录音）。
+
+        如果 DI 容器未注入（早期初始化阶段），跳过检查。
+        """
+        if not self._container:
+            return
+        try:
+            from ...interfaces import IStateManager
+
+            state_manager = self._container.resolve(IStateManager)
+        except Exception:
+            return
+        if state_manager.is_recording():
+            raise ConfigurationError(
+                "Cannot change transcription provider while recording. "
+                "Please stop recording first."
+            )
+
+    def _validate_transcription_provider(
+        self, provider: str, pending_changes: Optional[Dict[str, Any]] = None
+    ) -> tuple[bool, str]:
         """验证转录提供商配置
 
         Args:
             provider: 提供商名称（local/groq/siliconflow/qwen）
+            pending_changes: 同批次待写入的配置（用于校验时合并未持久化的 api_key）
 
         Returns:
             (is_valid, error_message)
@@ -683,9 +731,14 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
                     f"Invalid transcription provider '{provider}'. Valid providers: {', '.join(valid_providers)}",
                 )
 
+            def _get_with_pending(key: str, default: str = "") -> str:
+                if pending_changes is not None and key in pending_changes:
+                    return pending_changes[key] or default
+                return self.get_setting(key, default)
+
             # 对于云服务提供商，检查 API 密钥是否已配置
             if provider == "groq":
-                api_key = self.get_setting("transcription.groq.api_key", "")
+                api_key = _get_with_pending("transcription.groq.api_key", "")
                 if not api_key or not api_key.strip():
                     return (
                         False,
@@ -693,7 +746,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
                     )
 
             elif provider == "siliconflow":
-                api_key = self.get_setting("transcription.siliconflow.api_key", "")
+                api_key = _get_with_pending("transcription.siliconflow.api_key", "")
                 if not api_key or not api_key.strip():
                     return (
                         False,
@@ -701,7 +754,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
                     )
 
             elif provider == "qwen":
-                api_key = self.get_setting("transcription.qwen.api_key", "")
+                api_key = _get_with_pending("transcription.qwen.api_key", "")
                 if not api_key or not api_key.strip():
                     return (
                         False,
@@ -742,6 +795,12 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
                     "Cannot change transcription provider while recording. "
                     "Please stop recording first."
                 )
+
+            # 1.5 切到 cloud provider 时验证 API key 已配置
+            if changed_key == ConfigKeys.TRANSCRIPTION_PROVIDER:
+                is_valid, error_msg = self._validate_transcription_provider(new_value)
+                if not is_valid:
+                    raise ConfigurationError(error_msg)
 
             # 2. 获取旧服务实例
             from ...interfaces import ISpeechService
@@ -787,6 +846,9 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
 
         except RuntimeError:
             # 重新抛出录音状态错误（用户需要看到）
+            raise
+        except ConfigurationError:
+            # 重新抛出 provider key 缺失等配置错误，UI 层会显示给用户
             raise
         except Exception as e:
             app_logger.log_error(e, "speech_service_reload")

@@ -73,6 +73,9 @@ check_*.py
 # Icon generation script (local only)
 scripts/generate_icons.py
 
+# Local agent/runtime state
+.omx/
+
 # Claude MCP local settings
 .claude/settings.local.json
 
@@ -81,8 +84,10 @@ CLAUDE.md
 .claude/
 
 # Empty/temporary directories
+tmp_pytest*/
 test_analysis/
 temp_export/
+quality_audit/
 
 # Release notes (only used for GitHub releases)
 .release-notes-*.md

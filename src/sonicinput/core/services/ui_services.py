@@ -5,6 +5,8 @@
 """
 
 import copy
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -16,7 +18,7 @@ from ..interfaces import (
     IStateManager,
 )
 from .config import ConfigKeys
-from ..services.storage.history_storage_service import HistoryStorageService
+from ..services.storage import HistoryStorageService, ReviewStorageService
 
 if TYPE_CHECKING:
     from .launch_at_login_service import LaunchAtLoginService
@@ -131,6 +133,7 @@ class UISettingsService:
         ai_processing_controller=None,
         localization_service=None,
         launch_at_login_service: "LaunchAtLoginService | None" = None,
+        review_storage_service: ReviewStorageService | None = None,
         container=None,
     ):
         """初始化UI设置服务
@@ -142,6 +145,7 @@ class UISettingsService:
             transcription_service: 转录服务(可选,用于retry processing)
             ai_processing_controller: AI处理控制器(可选,用于retry processing)
             launch_at_login_service: 开机自启系统集成服务（可选）
+            review_storage_service: Review suggestions/lexicon 存储服务（可选）
             container: DI容器(可选,用于热重载后获取最新服务)
         """
         self.config_service = config_service
@@ -151,6 +155,7 @@ class UISettingsService:
         self._ai_processing_controller = ai_processing_controller
         self.localization_service = localization_service
         self._launch_at_login_service = launch_at_login_service
+        self._review_storage_service = review_storage_service
         self._container = container
         app_logger.log_audio_event("UISettingsService initialized", {})
 
@@ -228,6 +233,234 @@ class UISettingsService:
     def get_history_service(self) -> HistoryStorageService:
         """获取历史记录存储服务"""
         return self.history_service
+
+    def get_review_storage_service(self):
+        """获取 Review suggestions/lexicon 存储服务。"""
+        if self._review_storage_service is not None:
+            return self._review_storage_service
+
+        if self._container is None:
+            return None
+
+        try:
+            service = self._container.resolve(ReviewStorageService)
+            if service:
+                self._review_storage_service = service
+            return service
+        except Exception:
+            return None
+
+    def list_review_suggestions(self, limit: int = 100) -> list[dict[str, Any]]:
+        """列出待审查 suggestions，供 Review UI 展示。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return []
+        return service.list_pending_suggestions(limit=limit)
+
+    def list_review_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """列出最近的 review jobs，供 Review UI 展示运行状态。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return []
+        list_jobs = getattr(service, "list_review_jobs", None)
+        if not callable(list_jobs):
+            return []
+        return list_jobs(limit=limit)
+
+    def decide_review_suggestion(
+        self,
+        suggestion_id: str,
+        decision: str,
+        note: str | None = None,
+    ) -> bool:
+        """接受/拒绝/忽略/归档一条 review suggestion。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return False
+        service.record_decision(suggestion_id, decision, note=note)
+        return True
+
+    def list_lexicon_entries(self, limit: int = 200) -> list[dict[str, Any]]:
+        """列出 active 本地词汇记忆。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return []
+        return service.list_active_lexicon_entries(limit=limit)
+
+    def clear_lexicon_entries(self) -> bool:
+        """清空/归档 active 本地词汇记忆。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return False
+        service.clear_lexicon_entries()
+        return True
+
+    def clear_review_learning_data(self) -> bool:
+        """清空本地 review 学习数据。
+
+        这会重置：
+        - 已接受的 lexicon memory
+        - 用于 suppress 相似建议的 review decisions / processed statuses
+        但不会删除 review jobs 审计记录。
+        """
+        service = self.get_review_storage_service()
+        if service is None:
+            return False
+        clear_learning_data = getattr(service, "clear_learning_data", None)
+        if not callable(clear_learning_data):
+            return False
+        clear_learning_data()
+        return True
+
+    def export_lexicon_entries(self, file_path: str | None = None) -> dict[str, Any]:
+        """导出 active 本地词汇记忆为 JSON 文件。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return {
+                "success": False,
+                "path": "",
+                "count": 0,
+                "reason": "review_storage_unavailable",
+            }
+
+        entries = service.list_active_lexicon_entries(limit=10000)
+        if file_path:
+            target_path = Path(file_path).expanduser()
+        else:
+            target_path = (
+                Path.home()
+                / "Documents"
+                / "SonicInput"
+                / "exports"
+                / f"lexicon_memory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "exported_at": datetime.now().isoformat(timespec="seconds"),
+            "count": len(entries),
+            "entries": entries,
+        }
+        target_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return {
+            "success": True,
+            "path": str(target_path),
+            "count": len(entries),
+        }
+
+    def export_review_debug_report(
+        self,
+        file_path: str | None = None,
+    ) -> dict[str, Any]:
+        """导出 prompt/validator 失败模式建议，供本地调试使用。"""
+        service = self.get_review_storage_service()
+        if service is None:
+            return {
+                "success": False,
+                "path": "",
+                "count": 0,
+                "reason": "review_storage_unavailable",
+            }
+
+        try:
+            suggestions = service.list_pending_suggestions(limit=1000)
+            recent_jobs = service.list_review_jobs(limit=50)
+        except Exception as exc:
+            return {
+                "success": False,
+                "path": "",
+                "count": 0,
+                "reason": str(exc),
+            }
+
+        debug_suggestions = [
+            item
+            for item in suggestions
+            if str(item.get("suggestion_type", "") or "") == "prompt_failure_pattern"
+        ]
+        if file_path:
+            target_path = Path(file_path).expanduser()
+        else:
+            target_path = (
+                Path.home()
+                / "Documents"
+                / "SonicInput"
+                / "exports"
+                / f"review_debug_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "exported_at": datetime.now().isoformat(timespec="seconds"),
+            "count": len(debug_suggestions),
+            "suggestions": debug_suggestions,
+            "recent_jobs": recent_jobs,
+        }
+        target_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return {
+            "success": True,
+            "path": str(target_path),
+            "count": len(debug_suggestions),
+        }
+
+    def run_idle_review_once(self) -> dict[str, Any]:
+        """手动触发一次保守的 idle review。
+
+        该方法供 UI 的 "Run Review Now" 调用。它仍然复用
+        ReviewSchedulerService 的 idle/busy/min-interval/session-budget 门禁，
+        不绕过产品安全边界。
+        """
+        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
+            return {
+                "ran": False,
+                "reason": "review_disabled",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+
+        if self._container is None:
+            return {
+                "ran": False,
+                "reason": "review_scheduler_unavailable",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+
+        try:
+            from .review_scheduler_service import ReviewSchedulerService
+
+            scheduler = self._container.resolve(ReviewSchedulerService)
+            result = scheduler.run_once_if_idle()
+        except Exception as exc:
+            app_logger.log_audio_event(
+                "UI idle review run failed",
+                {"error": str(exc)},
+            )
+            return {
+                "ran": False,
+                "reason": "review_run_failed",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+
+        return {
+            "ran": bool(getattr(result, "ran", False)),
+            "reason": str(getattr(result, "reason", "")),
+            "jobId": str(getattr(result, "job_id", "") or ""),
+            "reviewedRecordCount": int(
+                getattr(result, "reviewed_record_count", 0) or 0
+            ),
+            "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
+        }
 
     def get_transcription_service(self):
         """获取转录服务

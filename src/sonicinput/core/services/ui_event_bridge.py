@@ -92,6 +92,47 @@ class UIEventBridge:
         # 执行自定义处理器
         self._execute_custom_handler(Events.RECORDING_STOPPED, data)
 
+    def handle_model_loading_started(self, data: Any = None) -> None:
+        """模型加载开始时切到 'loading model' 状态。
+
+        覆盖场景：lazy load 在首次按热键时触发，用户已经在说话，
+        但模型还没准备好（特别是首次启动需要下载几百 MB 模型）。
+        显示"Loading model..."避免用户以为软件没反应。
+        """
+        if not self._overlay:
+            return
+        # 仅当 overlay 显示在 recording 状态时才覆盖（避免抢走 idle/processing 状态）
+        view_model = getattr(self._overlay, "view_model", None)
+        current_state = getattr(view_model, "_state", None) if view_model else None
+        if current_state in ("recording", "idle", None):
+            if hasattr(self._overlay, "show_model_loading"):
+                self._overlay.show_model_loading()
+
+    def handle_model_loading_completed(self, data: Any = None) -> None:
+        """模型加载完成 → 如果还在录音，恢复 recording 状态"""
+        if not self._overlay:
+            return
+        view_model = getattr(self._overlay, "view_model", None)
+        current_state = getattr(view_model, "_state", None) if view_model else None
+        if current_state == "model_loading":
+            # 检查是否还在录音
+            still_recording = False
+            try:
+                from ..interfaces.state import RecordingState
+
+                state_manager = getattr(self._overlay, "_state_manager", None)
+                if state_manager is not None:
+                    still_recording = state_manager.get_recording_state() in (
+                        RecordingState.STARTING,
+                        RecordingState.RECORDING,
+                    )
+            except Exception:
+                pass
+            if still_recording:
+                self._overlay.show_recording()
+            else:
+                self._overlay.hide_recording()
+
     def handle_ai_processing_started(self, data: Any = None) -> None:
         """处理AI处理开始事件"""
         if self._overlay:
@@ -187,6 +228,14 @@ class UIEventBridge:
 
         # Realtime 转录更新事件
         self.events.on(Events.REALTIME_TEXT_UPDATED, self.handle_realtime_text_update)
+
+        # 模型加载事件（首次按热键触发 lazy load 时给用户反馈）
+        self.events.on(Events.MODEL_LOADING_STARTED, self.handle_model_loading_started)
+        self.events.on(
+            Events.MODEL_LOADING_COMPLETED, self.handle_model_loading_completed
+        )
+        # 加载失败走通用 error 路径
+        self.events.on(Events.MODEL_LOADING_FAILED, self.handle_error)
 
         # 错误事件
         self.events.on(Events.TRANSCRIPTION_ERROR, self.handle_error)

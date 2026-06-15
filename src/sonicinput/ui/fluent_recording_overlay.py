@@ -18,6 +18,7 @@ class FluentRecordingOverlay(QWidget):
     show_completed_requested = Signal(int)
     show_warning_requested = Signal(int)
     show_error_requested = Signal(int)
+    show_model_loading_requested = Signal()
     set_status_requested = Signal(str)
     update_audio_level_requested = Signal(float)
     hide_recording_delayed_requested = Signal(int)
@@ -54,6 +55,7 @@ class FluentRecordingOverlay(QWidget):
         self.set_status_requested.connect(self._set_status_text_impl)
         self.update_audio_level_requested.connect(self._update_audio_level_impl)
         self.hide_recording_delayed_requested.connect(self._hide_recording_delayed_impl)
+        self.show_model_loading_requested.connect(self._show_model_loading_impl)
 
     def set_config_service(self, config_service) -> None:
         self.config_service = config_service
@@ -185,6 +187,14 @@ class FluentRecordingOverlay(QWidget):
         self.view_model.showError()
         self._present_overlay()
         QTimer.singleShot(delay_ms, self.hide_recording)
+
+    def show_model_loading(self) -> None:
+        self.show_model_loading_requested.emit()
+
+    def _show_model_loading_impl(self) -> None:
+        self._timer.stop()
+        self.view_model.showModelLoading()
+        self._present_overlay()
 
     def set_status_text(self, text: str) -> None:
         self.set_status_requested.emit(text)

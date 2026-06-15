@@ -85,6 +85,7 @@ def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat(
 ):
     service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
     service._TEXT_OVERLAP_MAX_CHARS = 60
+    service._TEXT_NORMALIZED_OVERLAP_MIN_CHARS = 8
 
     merged_overlap = service._merge_chunk_texts_with_boundary_dedup(
         ["abc123", "123xyz"]
@@ -93,6 +94,27 @@ def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat(
 
     merged_plain = service._merge_chunk_texts_with_boundary_dedup(["hello", "world"])
     assert merged_plain == "hello world"
+
+    merged_normalized = service._merge_chunk_texts_with_boundary_dedup(
+        [
+            "reference 的这些东西",
+            "reference的这些东西 你就不需要提取出来",
+        ]
+    )
+    assert merged_normalized == "reference 的这些东西 你就不需要提取出来"
+
+
+def test_normalized_suffix_prefix_overlap_skip_ignores_spacing_and_punctuation() -> None:
+    service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
+
+    skip = service._normalized_suffix_prefix_overlap_skip(
+        "review agent 的边界",
+        "review agent的边界，然后再跑回归",
+        max_chars=60,
+        min_chars=8,
+    )
+
+    assert skip == len("review agent的边界")
 
 
 def test_wait_for_chunk_results_uses_shared_timeout_budget() -> None:

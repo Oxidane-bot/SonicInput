@@ -20,6 +20,7 @@ from ..interfaces import (
     ITranscriptionController,
 )
 from ..interfaces.state import AppState
+from ..quality.transcript_quality_validator import TranscriptQualityValidator
 from ..services.config import ConfigKeys
 from ..services.events import Events
 from ..services.storage import HistoryStorageService
@@ -37,6 +38,71 @@ class TranscriptionController(
     - 管理流式转录
     - 通过 EventBus 发送转录事件
     """
+
+    _LOW_QUALITY_CHUNKED_FALLBACK_MIN_DURATION_SECONDS = 8.0
+
+    def _to_bool_config(self, value: object, *, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _long_recording_path_decision_context(
+        self,
+        streaming_mode: str,
+    ) -> dict[str, object]:
+        provider = str(
+            self._config.get_setting(ConfigKeys.TRANSCRIPTION_PROVIDER, "local") or ""
+        ).strip()
+        prefer_file = self._config.get_setting(
+            ConfigKeys.TRANSCRIPTION_LONG_RECORDING_PREFER_FILE_FOR_CLOUD,
+            True,
+        )
+        prefer_enabled = self._to_bool_config(prefer_file, default=True)
+        threshold = self._config.get_setting(
+            ConfigKeys.TRANSCRIPTION_LONG_RECORDING_FILE_THRESHOLD_SECONDS,
+            90.0,
+        )
+        try:
+            threshold_value = float(threshold)
+        except (TypeError, ValueError):
+            threshold_value = 90.0
+
+        return {
+            "record_id": self._current_record_id,
+            "streaming_mode": streaming_mode,
+            "provider": provider,
+            "audio_duration": self._audio_duration,
+            "audio_file_path_present": bool(self._current_audio_file_path),
+            "prefer_file_for_long_cloud_recording": prefer_enabled,
+            "long_recording_file_threshold_seconds": threshold_value,
+            "audio_service_present": self._audio_service is not None,
+        }
+
+    def _log_transcription_path_decision(
+        self,
+        *,
+        event: str,
+        streaming_mode: str,
+        selected_path: str,
+        fallback_used: bool,
+        fallback_type: str,
+        fallback_reason: Optional[str],
+        extra: Optional[dict[str, object]] = None,
+    ) -> None:
+        details = self._long_recording_path_decision_context(streaming_mode)
+        details.update(
+            {
+                "selected_path": selected_path,
+                "fallback_used": fallback_used,
+                "fallback_type": fallback_type,
+                "fallback_reason": fallback_reason,
+            }
+        )
+        if extra:
+            details.update(extra)
+        app_logger.log_audio_event(event, details)
 
     def __init__(
         self,
@@ -160,6 +226,8 @@ class TranscriptionController(
     def process_streaming_transcription(self) -> None:
         """处理流式转录（使用新的TranscriptionService API）"""
         streaming_mode = "unknown"
+        transcription_path = "standard"
+        transcription_decision_reason = None
         fallback_used = False
         fallback_type = "none"
         fallback_reason = None
@@ -181,7 +249,38 @@ class TranscriptionController(
             streaming_mode = self._streaming_manager.get_current_mode()
 
             # 根据流式模式决定转录路径（统一处理本地和云提供商）
-            if streaming_mode in ["chunked", "realtime"]:
+            if self._should_prefer_file_transcription_for_long_cloud_recording(
+                streaming_mode
+            ):
+                self._log_transcription_path_decision(
+                    event="Transcription path decision",
+                    streaming_mode=streaming_mode,
+                    selected_path="cloud_file_long_recording",
+                    fallback_used=False,
+                    fallback_type="none",
+                    fallback_reason=None,
+                    extra={"decision_reason": "long_cloud_recording_prefer_file"},
+                )
+                app_logger.log_audio_event(
+                    "Long cloud recording prefers file transcription path",
+                    {
+                        "streaming_mode": streaming_mode,
+                        "audio_duration": self._audio_duration,
+                    },
+                )
+                self._cleanup_streaming_session_without_transcription()
+                text = self._transcribe_from_file_for_cloud()
+                transcription_path = "cloud_file_long_recording"
+                transcription_decision_reason = "long_cloud_recording_prefer_file"
+                stats = {
+                    "mode": streaming_mode,
+                    "path": "cloud_file_long_recording",
+                }
+                if text is None:
+                    text = ""
+                elif not isinstance(text, str):
+                    text = str(text)
+            elif streaming_mode in ["chunked", "realtime"]:
                 # 流式转录路径（本地和云提供商都支持）
                 app_logger.log_audio_event(
                     "Stopping streaming transcription",
@@ -198,6 +297,21 @@ class TranscriptionController(
                     text = ""
                 elif not isinstance(text, str):
                     text = str(text)
+                transcription_path = (
+                    "streaming_realtime"
+                    if streaming_mode == "realtime"
+                    else "streaming_chunked"
+                )
+                transcription_decision_reason = "streaming_stop_result"
+                self._log_transcription_path_decision(
+                    event="Transcription path decision",
+                    streaming_mode=streaming_mode,
+                    selected_path=transcription_path,
+                    fallback_used=False,
+                    fallback_type="none",
+                    fallback_reason=None,
+                    extra={"decision_reason": "streaming_stop_result"},
+                )
 
                 app_logger.log_audio_event(
                     "Streaming transcription stopped",
@@ -210,6 +324,17 @@ class TranscriptionController(
                     {"streaming_mode": streaming_mode},
                 )
                 text = self._transcribe_from_file_for_cloud()
+                transcription_path = "cloud_file"
+                transcription_decision_reason = "streaming_disabled_file_transcription"
+                self._log_transcription_path_decision(
+                    event="Transcription path decision",
+                    streaming_mode=streaming_mode,
+                    selected_path="cloud_file",
+                    fallback_used=False,
+                    fallback_type="none",
+                    fallback_reason=None,
+                    extra={"decision_reason": "streaming_disabled_file_transcription"},
+                )
                 stats = {}
                 if text is None:
                     text = ""
@@ -225,18 +350,94 @@ class TranscriptionController(
                         {"streaming_mode": streaming_mode, "fallback": "local_sync"},
                     )
                     text = self._sync_transcribe_last_audio()
+                    transcription_path = "local_sync_fallback"
+                    transcription_decision_reason = "empty_chunked_result"
                     fallback_used = True
                     fallback_type = "local_sync"
                     fallback_reason = "empty_chunked_result"
+                    self._log_transcription_path_decision(
+                        event="Transcription fallback engaged",
+                        streaming_mode=streaming_mode,
+                        selected_path=transcription_path,
+                        fallback_used=True,
+                        fallback_type=fallback_type,
+                        fallback_reason=fallback_reason,
+                        extra={"decision_reason": "empty_chunked_result"},
+                    )
                 else:
                     app_logger.log_audio_event(
                         "No text from chunked streaming, falling back to file transcription",
                         {"streaming_mode": streaming_mode, "fallback": "cloud_file"},
                     )
                     text = self._transcribe_from_file_for_cloud()
+                    transcription_path = "cloud_file_fallback"
+                    transcription_decision_reason = "empty_chunked_result"
                     fallback_used = True
                     fallback_type = "cloud_file"
                     fallback_reason = "empty_chunked_result"
+                    self._log_transcription_path_decision(
+                        event="Transcription fallback engaged",
+                        streaming_mode=streaming_mode,
+                        selected_path=transcription_path,
+                        fallback_used=True,
+                        fallback_type=fallback_type,
+                        fallback_reason=fallback_reason,
+                        extra={"decision_reason": "empty_chunked_result"},
+                    )
+            elif self._should_fallback_for_low_quality_chunked_result(
+                text=text,
+                streaming_mode=streaming_mode,
+            ):
+                if self._audio_service:
+                    app_logger.log_audio_event(
+                        "Low-quality text from chunked streaming, falling back to sync transcription",
+                        {
+                            "streaming_mode": streaming_mode,
+                            "fallback": "local_sync",
+                            "audio_duration": self._audio_duration,
+                            "text_preview": text[:50],
+                        },
+                    )
+                    text = self._sync_transcribe_last_audio()
+                    transcription_path = "local_sync_fallback"
+                    transcription_decision_reason = "low_quality_chunked_result"
+                    fallback_used = True
+                    fallback_type = "local_sync"
+                    fallback_reason = "low_quality_chunked_result"
+                    self._log_transcription_path_decision(
+                        event="Transcription fallback engaged",
+                        streaming_mode=streaming_mode,
+                        selected_path=transcription_path,
+                        fallback_used=True,
+                        fallback_type=fallback_type,
+                        fallback_reason=fallback_reason,
+                        extra={"decision_reason": "low_quality_chunked_result"},
+                    )
+                else:
+                    app_logger.log_audio_event(
+                        "Low-quality text from chunked streaming, falling back to file transcription",
+                        {
+                            "streaming_mode": streaming_mode,
+                            "fallback": "cloud_file",
+                            "audio_duration": self._audio_duration,
+                            "text_preview": text[:50],
+                        },
+                    )
+                    text = self._transcribe_from_file_for_cloud()
+                    transcription_path = "cloud_file_fallback"
+                    transcription_decision_reason = "low_quality_chunked_result"
+                    fallback_used = True
+                    fallback_type = "cloud_file"
+                    fallback_reason = "low_quality_chunked_result"
+                    self._log_transcription_path_decision(
+                        event="Transcription fallback engaged",
+                        streaming_mode=streaming_mode,
+                        selected_path=transcription_path,
+                        fallback_used=True,
+                        fallback_type=fallback_type,
+                        fallback_reason=fallback_reason,
+                        extra={"decision_reason": "low_quality_chunked_result"},
+                    )
 
             transcribe_duration = time.time() - transcribe_start
 
@@ -257,6 +458,8 @@ class TranscriptionController(
                     status="success",
                     error=None,
                     streaming_mode=streaming_mode,
+                    transcription_path=transcription_path,
+                    transcription_decision_reason=transcription_decision_reason,
                     transcription_duration=transcribe_duration,
                     used_fallback=fallback_used,
                     fallback_type=fallback_type,
@@ -296,6 +499,8 @@ class TranscriptionController(
                     status="failed",
                     error=str(e),
                     streaming_mode=streaming_mode,
+                    transcription_path=transcription_path,
+                    transcription_decision_reason=transcription_decision_reason,
                     transcription_duration=transcribe_duration,
                     used_fallback=fallback_used,
                     fallback_type=fallback_type,
@@ -404,6 +609,8 @@ class TranscriptionController(
         status: str,
         error: Optional[str],
         streaming_mode: str = "unknown",
+        transcription_path: str = "standard",
+        transcription_decision_reason: Optional[str] = None,
         transcription_duration: float = 0.0,
         used_fallback: bool = False,
         fallback_type: str = "none",
@@ -433,6 +640,8 @@ class TranscriptionController(
                 transcription_provider=provider,
                 transcription_status=status,
                 streaming_mode=streaming_mode,
+                transcription_path=transcription_path,
+                transcription_decision_reason=transcription_decision_reason,
                 transcription_duration=transcription_duration,
                 used_fallback=used_fallback,
                 fallback_type=fallback_type,
@@ -457,6 +666,8 @@ class TranscriptionController(
                         "status": status,
                         "text_length": len(text),
                         "streaming_mode": streaming_mode,
+                        "transcription_path": transcription_path,
+                        "transcription_decision_reason": transcription_decision_reason,
                         "transcription_duration": transcription_duration,
                         "used_fallback": used_fallback,
                         "fallback_type": fallback_type,
@@ -471,6 +682,61 @@ class TranscriptionController(
 
         except Exception as e:
             app_logger.log_error(e, "_save_transcription_record")
+
+    def _should_fallback_for_low_quality_chunked_result(
+        self,
+        *,
+        text: str,
+        streaming_mode: str,
+    ) -> bool:
+        if streaming_mode != "chunked":
+            return False
+        if (
+            self._audio_duration
+            < self._LOW_QUALITY_CHUNKED_FALLBACK_MIN_DURATION_SECONDS
+        ):
+            return False
+        normalized_text = str(text or "").strip()
+        if not normalized_text:
+            return False
+        return TranscriptQualityValidator.is_low_information_input(normalized_text)
+
+    def _should_prefer_file_transcription_for_long_cloud_recording(
+        self,
+        streaming_mode: str,
+    ) -> bool:
+        if streaming_mode != "chunked":
+            return False
+        provider = str(
+            self._config.get_setting(ConfigKeys.TRANSCRIPTION_PROVIDER, "local") or ""
+        ).strip()
+        if provider == "local":
+            return False
+
+        prefer_file = self._config.get_setting(
+            ConfigKeys.TRANSCRIPTION_LONG_RECORDING_PREFER_FILE_FOR_CLOUD,
+            True,
+        )
+        prefer_enabled = self._to_bool_config(prefer_file, default=True)
+        if not prefer_enabled:
+            return False
+
+        threshold = self._config.get_setting(
+            ConfigKeys.TRANSCRIPTION_LONG_RECORDING_FILE_THRESHOLD_SECONDS,
+            90.0,
+        )
+        try:
+            threshold_value = float(threshold)
+        except (TypeError, ValueError):
+            threshold_value = 90.0
+        if self._audio_duration < max(1.0, threshold_value):
+            return False
+        return bool(self._current_audio_file_path)
+
+    def _cleanup_streaming_session_without_transcription(self) -> None:
+        coordinator = getattr(self._speech_service, "streaming_coordinator", None)
+        if coordinator is not None and hasattr(coordinator, "stop_streaming"):
+            coordinator.stop_streaming()
 
     def _do_start(self) -> bool:
         """Start lifecycle method - Initialize transcription resources

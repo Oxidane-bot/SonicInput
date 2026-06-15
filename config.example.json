@@ -1,7 +1,7 @@
 {
   "hotkeys": {
     "keys": [
-      "ctrl+shift+v"
+      "ctrl+alt+space"
     ],
     "backend": "auto"
   },
@@ -34,6 +34,10 @@
       "timeout": 30,
       "max_retries": 3,
       "enable_itn": true
+    },
+    "long_recording": {
+      "prefer_file_for_cloud": true,
+      "file_threshold_seconds": 90.0
     }
   },
   "ai": {
@@ -68,7 +72,8 @@
     }
   },
   "_notes": {
-    "openai_compatible": "For remote OpenAI-compatible services such as Cerebras, prefer a model returned by GET /models for the current API key instead of relying only on documentation overview pages."
+    "openai_compatible": "For remote OpenAI-compatible services such as Cerebras, prefer a model returned by GET /models for the current API key instead of relying only on documentation overview pages.",
+    "quality_review": "Quality Review runs locally on history metadata/suggestions. Idle auto-review is disabled by default; accepted lexicon candidates are stored locally."
   },
   "audio": {
     "sample_rate": 16000,
@@ -110,16 +115,16 @@
   "history": {
     "storage_path": "auto"
   },
-    "logging": {
-        "level": "WARNING",
-        "console_output": true,
-        "max_log_size_mb": 10,
-        "max_backup_files": 2,
-        "keep_logs_days": 7,
-        "enabled_categories": [
-            "audio",
-            "api",
-            "ui",
+  "logging": {
+    "level": "WARNING",
+    "console_output": true,
+    "max_log_size_mb": 10,
+    "max_backup_files": 2,
+    "keep_logs_days": 7,
+    "enabled_categories": [
+      "audio",
+      "api",
+      "ui",
       "model",
       "hotkey",
       "gpu",
@@ -139,5 +144,14 @@
       "cache_audio": false,
       "parallel_processing": false
     }
+  },
+  "review": {
+    "enabled": false,
+    "idle_seconds": 600,
+    "min_interval_seconds": 1800,
+    "max_records": 20,
+    "max_runs_per_session": 3,
+    "persist": true,
+    "use_lexicon_memory": true
   }
 }

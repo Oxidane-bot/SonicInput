@@ -3,8 +3,10 @@
 import pytest
 import os
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
+from uuid import uuid4
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog, QWidget
 
 
@@ -90,7 +92,7 @@ def qprogressdialog_guard(monkeypatch):
 
 
 @pytest.fixture
-def isolated_config(tmp_path):
+def isolated_config(monkeypatch):
     """创建隔离的临时配置文件
 
     这个fixture确保测试永远不会修改真实的用户配置文件。
@@ -98,7 +100,13 @@ def isolated_config(tmp_path):
 
     配置会从真实用户配置复制API keys和model IDs,避免测试时弹出错误窗口。
     """
-    config_file = tmp_path / "test_config.json"
+    temp_root = Path.cwd() / "tmp_pytest_ui"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    config_dir = temp_root / f"config_{uuid4().hex}"
+    config_dir.mkdir(parents=True, exist_ok=False)
+    monkeypatch.setenv("TMP", str(config_dir))
+    monkeypatch.setenv("TEMP", str(config_dir))
+    config_file = config_dir / "test_config.json"
 
     # 尝试读取真实用户配置以获取API keys
     real_config_path = Path(os.getenv("APPDATA", ".")) / "SonicInput" / "config.json"
@@ -169,7 +177,9 @@ def isolated_config(tmp_path):
     # 写入配置文件
     config_file.write_text(json.dumps(default_config, indent=2, ensure_ascii=False))
 
-    return config_file
+    yield config_file
+
+    shutil.rmtree(config_dir, ignore_errors=True)
 
 
 @pytest.fixture
