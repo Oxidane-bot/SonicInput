@@ -39,7 +39,9 @@ class _Events:
 
     def off(self, event_name, listener_id):
         self.listeners[event_name] = [
-            item for item in self.listeners.get(event_name, []) if item[0] != listener_id
+            item
+            for item in self.listeners.get(event_name, [])
+            if item[0] != listener_id
         ]
 
     def emit(self, event_name, data=None):
@@ -69,6 +71,44 @@ def test_review_scheduler_waits_until_idle():
     assert scheduler.can_run().can_run is True
 
 
+def test_review_scheduler_run_now_ignores_idle_gate_but_keeps_busy_protection():
+    clock = _Clock(1000)
+    records = [{"id": "r1", "transcription_text": "hello"}]
+    storage = _storage()
+    scheduler = ReviewSchedulerService(
+        load_recent_records=lambda limit: records[:limit],
+        review_storage=storage,
+        config=ReviewSchedulerConfig(idle_seconds=300, max_runs_per_session=1),
+        clock=clock,
+    )
+
+    assert scheduler.run_once_if_idle().reason == "not_idle_long_enough"
+
+    result = scheduler.run_once_now()
+
+    assert result.ran is True
+    assert result.reason == "completed"
+    assert result.suggestion_count >= 0
+    assert storage.list_review_jobs()[0]["id"] == result.job_id
+    assert scheduler.run_once_now().ran is True
+
+    scheduler.set_recording(True)
+    assert scheduler.run_once_now().reason == "recording_active"
+
+
+def test_review_scheduler_run_now_does_not_consume_session_budget():
+    clock = _Clock(1000)
+    scheduler = ReviewSchedulerService(
+        load_recent_records=lambda limit: [],
+        review_storage=_storage(),
+        config=ReviewSchedulerConfig(idle_seconds=300, max_runs_per_session=1),
+        clock=clock,
+    )
+
+    assert scheduler.run_once_now().ran is True
+    assert scheduler.run_once_now().ran is True
+
+
 def test_review_scheduler_blocks_while_recording():
     clock = _Clock(1000)
     scheduler = ReviewSchedulerService(
@@ -81,6 +121,7 @@ def test_review_scheduler_blocks_while_recording():
     scheduler.set_recording(True)
 
     assert scheduler.can_run().reason == "recording_active"
+    assert scheduler.can_run_now().reason == "recording_active"
 
 
 def test_review_scheduler_runs_and_persists_suggestions():
@@ -112,7 +153,10 @@ def test_review_scheduler_runs_and_persists_suggestions():
 
     assert result.ran is True
     assert result.suggestion_count == 1
-    assert storage.list_pending_suggestions()[0]["suggestion_type"] == "assistant_response_leak_alert"
+    assert (
+        storage.list_pending_suggestions()[0]["suggestion_type"]
+        == "assistant_response_leak_alert"
+    )
     assert scheduler.run_once_if_idle().reason == "min_interval_not_reached"
 
 

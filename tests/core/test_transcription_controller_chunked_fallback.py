@@ -105,13 +105,11 @@ def test_long_chunked_cloud_recording_prefers_file_transcription_path():
     speech_service.streaming_coordinator = Mock()
 
     config_service = Mock()
-    config_service.get_setting.side_effect = (
-        lambda key, default=None: {
-            "transcription.provider": "groq",
-            "transcription.long_recording.prefer_file_for_cloud": True,
-            "transcription.long_recording.file_threshold_seconds": 90.0,
-        }.get(key, default)
-    )
+    config_service.get_setting.side_effect = lambda key, default=None: {
+        "transcription.provider": "groq",
+        "transcription.long_recording.prefer_file_for_cloud": True,
+        "transcription.long_recording.file_threshold_seconds": 90.0,
+    }.get(key, default)
     event_service = Mock()
     state_manager = Mock()
     history_service = Mock()

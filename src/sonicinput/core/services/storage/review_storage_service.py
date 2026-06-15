@@ -13,7 +13,7 @@ from ...quality import ReviewSuggestion
 
 
 class ReviewStorageService:
-    """Persist Review Agent jobs, suggestions, and decisions.
+    """Persist local review jobs, suggestions, and decisions.
 
     The service is intentionally small and can share the existing history DB.
     It does not alter history records.

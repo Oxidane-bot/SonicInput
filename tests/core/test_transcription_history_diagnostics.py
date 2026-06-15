@@ -131,13 +131,11 @@ def test_long_cloud_recording_primary_file_path_does_not_mark_fallback() -> None
     speech_service.streaming_coordinator = Mock()
 
     config_service = Mock()
-    config_service.get_setting.side_effect = (
-        lambda key, default=None: {
-            "transcription.provider": "groq",
-            "transcription.long_recording.prefer_file_for_cloud": True,
-            "transcription.long_recording.file_threshold_seconds": 90.0,
-        }.get(key, default)
-    )
+    config_service.get_setting.side_effect = lambda key, default=None: {
+        "transcription.provider": "groq",
+        "transcription.long_recording.prefer_file_for_cloud": True,
+        "transcription.long_recording.file_threshold_seconds": 90.0,
+    }.get(key, default)
     event_service = Mock()
     state_manager = Mock()
     history_service = Mock()
@@ -167,8 +165,7 @@ def test_long_cloud_recording_primary_file_path_does_not_mark_fallback() -> None
     assert saved_record.streaming_mode == "chunked"
     assert saved_record.transcription_path == "cloud_file_long_recording"
     assert (
-        saved_record.transcription_decision_reason
-        == "long_cloud_recording_prefer_file"
+        saved_record.transcription_decision_reason == "long_cloud_recording_prefer_file"
     )
     assert saved_record.used_fallback is False
     assert saved_record.fallback_type == "none"
@@ -192,13 +189,11 @@ def test_transcription_path_decision_log_includes_long_recording_context(
     speech_service.streaming_coordinator = Mock()
 
     config_service = Mock()
-    config_service.get_setting.side_effect = (
-        lambda key, default=None: {
-            "transcription.provider": "groq",
-            "transcription.long_recording.prefer_file_for_cloud": True,
-            "transcription.long_recording.file_threshold_seconds": 90.0,
-        }.get(key, default)
-    )
+    config_service.get_setting.side_effect = lambda key, default=None: {
+        "transcription.provider": "groq",
+        "transcription.long_recording.prefer_file_for_cloud": True,
+        "transcription.long_recording.file_threshold_seconds": 90.0,
+    }.get(key, default)
     event_service = Mock()
     state_manager = Mock()
     history_service = Mock()

@@ -91,9 +91,7 @@ def test_ui_settings_service_exposes_review_suggestion_actions():
 
     review_storage.list_pending_suggestions.assert_called_once_with(limit=5)
     review_storage.list_review_jobs.assert_called_once_with(limit=2)
-    review_storage.record_decision.assert_called_once_with(
-        "s1", "accepted", note="ok"
-    )
+    review_storage.record_decision.assert_called_once_with("s1", "accepted", note="ok")
     review_storage.list_active_lexicon_entries.assert_called_once_with(limit=5)
     review_storage.clear_lexicon_entries.assert_called_once_with()
     review_storage.clear_learning_data.assert_called_once_with()
@@ -115,7 +113,7 @@ def test_ui_settings_service_review_methods_are_safe_without_storage():
     assert service.export_review_debug_report()["success"] is False
 
 
-def test_ui_settings_service_can_run_idle_review_once_from_container():
+def test_ui_settings_service_can_run_review_now_from_container():
     from sonicinput.core.services.review_scheduler_service import (
         ReviewSchedulerRunResult,
         ReviewSchedulerService,
@@ -124,7 +122,7 @@ def test_ui_settings_service_can_run_idle_review_once_from_container():
     config = Mock()
     config.get_setting.return_value = True
     scheduler = Mock()
-    scheduler.run_once_if_idle.return_value = ReviewSchedulerRunResult(
+    scheduler.run_once_now.return_value = ReviewSchedulerRunResult(
         True,
         "completed",
         job_id="job-1",
@@ -145,14 +143,14 @@ def test_ui_settings_service_can_run_idle_review_once_from_container():
         container=Container(),
     )
 
-    assert service.run_idle_review_once() == {
+    assert service.run_review_now() == {
         "ran": True,
         "reason": "completed",
         "jobId": "job-1",
         "reviewedRecordCount": 12,
         "suggestionCount": 2,
     }
-    scheduler.run_once_if_idle.assert_called_once_with()
+    scheduler.run_once_now.assert_called_once_with()
 
 
 def test_ui_settings_service_idle_review_respects_disabled_config():
@@ -170,6 +168,40 @@ def test_ui_settings_service_idle_review_respects_disabled_config():
 
     assert result["ran"] is False
     assert result["reason"] == "review_disabled"
+
+
+def test_ui_settings_service_auto_idle_review_uses_idle_gate():
+    from sonicinput.core.services.review_scheduler_service import (
+        ReviewSchedulerRunResult,
+        ReviewSchedulerService,
+    )
+
+    config = Mock()
+    config.get_setting.return_value = True
+    scheduler = Mock()
+    scheduler.run_once_if_idle.return_value = ReviewSchedulerRunResult(
+        False,
+        "not_idle_long_enough",
+    )
+
+    class Container:
+        def resolve(self, interface):
+            if interface is ReviewSchedulerService:
+                return scheduler
+            raise RuntimeError(f"unsupported interface: {interface}")
+
+    service = UISettingsService(
+        config_service=config,
+        event_service=Mock(),
+        history_service=Mock(),
+        container=Container(),
+    )
+
+    result = service.run_idle_review_once()
+
+    assert result["ran"] is False
+    assert result["reason"] == "not_idle_long_enough"
+    scheduler.run_once_if_idle.assert_called_once_with()
 
 
 def test_ui_model_service_updates_runtime_speech_service():

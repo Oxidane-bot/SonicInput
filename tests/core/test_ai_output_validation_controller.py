@@ -205,7 +205,9 @@ def test_ai_controller_can_disable_user_confirmed_lexicon(monkeypatch):
         event_service=events,
         state_manager=_State(),
         history_service=history,
-        review_storage_service=_ReviewStorage([{"old_form": "拍套曲", "term": "PyTorch"}]),
+        review_storage_service=_ReviewStorage(
+            [{"old_form": "拍套曲", "term": "PyTorch"}]
+        ),
     )
     monkeypatch.setattr(controller, "_get_current_ai_service", lambda: ai_service)
 

@@ -110,9 +110,7 @@ def test_history_review_agent_flags_abnormal_repetition_separately():
         ]
     )
 
-    assert any(
-        s.suggestion_type == "abnormal_repetition_alert" for s in suggestions
-    )
+    assert any(s.suggestion_type == "abnormal_repetition_alert" for s in suggestions)
     assert not any(s.suggestion_type == "bad_ai_output_alert" for s in suggestions)
 
 
@@ -179,9 +177,7 @@ def test_history_review_agent_promotes_collapsed_fragment_above_generic_over_com
         ("collapsed_to_fragment", "over_compressed_long_input"),
     )
 
-    assert any(
-        s.suggestion_type == "collapsed_to_fragment_alert" for s in suggestions
-    )
+    assert any(s.suggestion_type == "collapsed_to_fragment_alert" for s in suggestions)
     assert not any(
         s.suggestion_type == "over_compressed_long_input_alert" for s in suggestions
     )
@@ -363,7 +359,9 @@ def test_history_review_agent_requires_more_evidence_for_short_uppercase_abbrevi
         ]
     )
 
-    lexicon_terms = {s.new_form for s in suggestions if s.suggestion_type == "lexicon_candidate"}
+    lexicon_terms = {
+        s.new_form for s in suggestions if s.suggestion_type == "lexicon_candidate"
+    }
 
     assert "API" not in lexicon_terms
     assert "OCR" in lexicon_terms
@@ -590,7 +588,9 @@ def test_history_review_agent_skips_lexicon_candidates_from_invalid_ai_output():
         ]
     )
 
-    lexicon_terms = {s.new_form for s in suggestions if s.suggestion_type == "lexicon_candidate"}
+    lexicon_terms = {
+        s.new_form for s in suggestions if s.suggestion_type == "lexicon_candidate"
+    }
 
     assert "Markdown" not in lexicon_terms
     assert any(s.suggestion_type == "format_pollution_alert" for s in suggestions)

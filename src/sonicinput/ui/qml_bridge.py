@@ -39,7 +39,7 @@ class FluentSettingsViewModel(QObject):
         "AI Processing",
         "Audio and Input",
         "History",
-        "Quality Review",
+        "Local Quality Review",
     )
 
     _MODIFIER_ALIASES = {
@@ -95,7 +95,7 @@ class FluentSettingsViewModel(QObject):
         "enable_ai_streaming_output": "启用 AI 流式输出",
         "enable_ai_optimization": "启用 AI 文本优化",
         "enable_fallback": "启用备用输入方法",
-        "enable_idle_review": "启用空闲质量审查",
+        "enable_idle_review": "启用自动质量审查",
         "enable_itn": "启用逆文本归一化",
         "enable_sentence_split": "启用句子切分",
         "fallback": "备用输入",
@@ -153,8 +153,8 @@ class FluentSettingsViewModel(QObject):
         "preferred_method": "首选方法",
         "preset_position": "预设位置",
         "provider": "提供商",
-        "quality_review": "质量审查",
-        "quality_review_help": "空闲 Review Agent 会给出建议；只有你接受的词汇才会进入本地记忆。",
+        "quality_review": "本地质量审查",
+        "quality_review_help": "这是本地规则扫描，不调用云端模型；只有你接受的词汇才会进入本地记忆。",
         "provider_credentials": "提供商凭据",
         "recording_overlay": "录音悬浮窗",
         "recording_details": "录音详情",
@@ -165,7 +165,8 @@ class FluentSettingsViewModel(QObject):
         "remove_shortcut": "移除快捷键",
         "reject": "拒绝",
         "reprocess_sample": "重新处理样本",
-        "review_run_completed": "审查完成：{records} 条记录，{suggestions} 条建议",
+        "review_run_completed": "本地规则审查完成：{records} 条记录，{suggestions} 条建议",
+        "review_run_completed_empty": "本地规则审查完成：检查了 {records} 条记录，未发现待处理建议",
         "review_run_skipped": "审查未运行：{reason}",
         "review_categories": "审查类别",
         "review_filter_all_categories": "全部类别",
@@ -178,7 +179,7 @@ class FluentSettingsViewModel(QObject):
         "review_suggestion_overflow": "当前显示 {shown}/{total} 条待审查建议；系统优先展示高风险问题，其余术语候选已暂时折叠。",
         "review_suggestion_overflow_category": "当前在“{category}”中显示 {shown}/{total} 条待审查建议。",
         "review_suggestions": "审查建议",
-        "review_idle_seconds": "空闲等待时间",
+        "review_idle_seconds": "自动审查空闲等待时间",
         "review_action_abnormal_repetition_alert": "建议检查 AI 是否卡在循环重复；这类输出通常应回退或重新处理。",
         "review_action_assistant_response_leak_alert": "建议确认 AI 是否变成了助手回复、拒绝语或占位提示；语音清理不应向用户说话。",
         "review_action_bad_ai_output_alert": "建议检查这条记录；若 AI 输出越界，应保留原始转写或重新处理。",
@@ -237,7 +238,7 @@ class FluentSettingsViewModel(QObject):
         "local_example": "本地示例",
         "local_examples": "本地示例",
         "local_examples_more": "（另 {count} 条）",
-        "run_review_now": "立即审查",
+        "run_review_now": "立即运行本地审查",
         "source_records": "来源记录",
         "reprocess_of": "重处理来源",
         "revert": "还原",
@@ -1078,17 +1079,45 @@ class FluentSettingsViewModel(QObject):
 
     def _format_review_run_message(self, result: dict[str, Any]) -> str:
         if result.get("ran"):
+            records = int(result.get("reviewedRecordCount", 0) or 0)
+            suggestions = int(result.get("suggestionCount", 0) or 0)
+            if suggestions <= 0:
+                return self.translate(
+                    "review_run_completed_empty",
+                    "Local rule review completed: checked {records} records, no suggestions",
+                ).format(records=records)
             return self.translate(
                 "review_run_completed",
-                "Review completed: {records} records, {suggestions} suggestions",
+                "Local rule review completed: {records} records, {suggestions} suggestions",
             ).format(
-                records=int(result.get("reviewedRecordCount", 0) or 0),
-                suggestions=int(result.get("suggestionCount", 0) or 0),
+                records=records,
+                suggestions=suggestions,
             )
         return self.translate(
             "review_run_skipped",
             "Review did not run: {reason}",
-        ).format(reason=str(result.get("reason", "unknown") or "unknown"))
+        ).format(reason=self._review_run_reason_text(result))
+
+    def _review_run_reason_text(self, result: dict[str, Any]) -> str:
+        reason = str(result.get("reason", "unknown") or "unknown")
+        return {
+            "review_disabled": self.translate("review_disabled", "Review is disabled"),
+            "review_scheduler_unavailable": self.translate(
+                "review_scheduler_unavailable", "Review scheduler unavailable"
+            ),
+            "review_run_failed": self.translate(
+                "review_run_failed", "Review failed to run"
+            ),
+            "not_idle_long_enough": self.translate(
+                "not_idle_long_enough", "Not idle long enough"
+            ),
+            "min_interval_not_reached": self.translate(
+                "min_interval_not_reached", "Minimum interval not reached"
+            ),
+            "session_budget_exhausted": self.translate(
+                "session_budget_exhausted", "Session review budget exhausted"
+            ),
+        }.get(reason, reason)
 
     def _set_history_stats(
         self, total_count: int, total_duration: float, success_count: int
@@ -1547,8 +1576,46 @@ class FluentSettingsViewModel(QObject):
         return True
 
     @Slot(result="QVariant")
+    def runReviewNow(self) -> dict[str, Any]:
+        run_review = getattr(self._settings_service, "run_review_now", None)
+        if not callable(run_review):
+            run_review = getattr(self._settings_service, "run_idle_review_once", None)
+        if not callable(run_review):
+            result = {
+                "ran": False,
+                "reason": "review_scheduler_unavailable",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+        else:
+            try:
+                raw_result = run_review()
+            except Exception:
+                raw_result = {
+                    "ran": False,
+                    "reason": "review_run_failed",
+                    "jobId": "",
+                    "reviewedRecordCount": 0,
+                    "suggestionCount": 0,
+                }
+            result = dict(raw_result) if isinstance(raw_result, dict) else {}
+            result.setdefault("ran", False)
+            result.setdefault("reason", "review_run_failed")
+            result.setdefault("jobId", "")
+            result.setdefault("reviewedRecordCount", 0)
+            result.setdefault("suggestionCount", 0)
+
+        self._review_last_run_result = result
+        self._review_run_message = self._format_review_run_message(result)
+        self.refreshReviewSuggestions()
+        return result
+
+    @Slot(result="QVariant")
     def runIdleReviewOnce(self) -> dict[str, Any]:
         run_review = getattr(self._settings_service, "run_idle_review_once", None)
+        if not callable(run_review):
+            run_review = getattr(self._settings_service, "run_review_now", None)
         if not callable(run_review):
             result = {
                 "ran": False,

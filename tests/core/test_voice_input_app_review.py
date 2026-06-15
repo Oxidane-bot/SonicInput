@@ -15,10 +15,15 @@ class _Config:
 
 class _Scheduler:
     def __init__(self):
-        self.calls = 0
+        self.idle_calls = 0
+        self.manual_calls = 0
 
     def run_once_if_idle(self):
-        self.calls += 1
+        self.idle_calls += 1
+        return ReviewSchedulerRunResult(True, "completed", suggestion_count=0)
+
+    def run_once_now(self):
+        self.manual_calls += 1
         return ReviewSchedulerRunResult(True, "completed", suggestion_count=0)
 
 
@@ -36,7 +41,8 @@ def test_voice_input_app_idle_review_is_disabled_by_default_gate():
 
     assert result.ran is False
     assert result.reason == "review_disabled"
-    assert app._review_scheduler.calls == 0
+    assert app._review_scheduler.idle_calls == 0
+    assert app._review_scheduler.manual_calls == 0
 
 
 def test_voice_input_app_idle_review_delegates_when_enabled():
@@ -46,4 +52,5 @@ def test_voice_input_app_idle_review_delegates_when_enabled():
 
     assert result.ran is True
     assert result.reason == "completed"
-    assert app._review_scheduler.calls == 1
+    assert app._review_scheduler.idle_calls == 0
+    assert app._review_scheduler.manual_calls == 1

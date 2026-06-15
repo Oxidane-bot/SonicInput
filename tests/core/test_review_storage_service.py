@@ -557,7 +557,9 @@ def test_ui_settings_service_can_export_review_debug_report_to_json():
         old_form="拍套曲",
         new_form="PyTorch",
     )
-    service.save_review_run([prompt_issue, unrelated], record_limit=20, reviewed_count=4)
+    service.save_review_run(
+        [prompt_issue, unrelated], record_limit=20, reviewed_count=4
+    )
 
     ui_service = UISettingsService(
         config_service=Mock(),

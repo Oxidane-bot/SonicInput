@@ -104,7 +104,9 @@ def test_merge_chunk_texts_with_boundary_dedup_handles_overlap_and_plain_concat(
     assert merged_normalized == "reference 的这些东西 你就不需要提取出来"
 
 
-def test_normalized_suffix_prefix_overlap_skip_ignores_spacing_and_punctuation() -> None:
+def test_normalized_suffix_prefix_overlap_skip_ignores_spacing_and_punctuation() -> (
+    None
+):
     service = RefactoredTranscriptionService.__new__(RefactoredTranscriptionService)
 
     skip = service._normalized_suffix_prefix_overlap_skip(

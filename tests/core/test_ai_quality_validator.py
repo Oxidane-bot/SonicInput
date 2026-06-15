@@ -37,7 +37,9 @@ def test_transcript_quality_validator_rejects_parenthesized_meta_placeholder():
 def test_transcript_quality_validator_rejects_english_refusal_response():
     validator = TranscriptQualityValidator()
 
-    result = validator.validate("给点思路但是不要给答案", "I’m sorry, but I can’t help with that.")
+    result = validator.validate(
+        "给点思路但是不要给答案", "I’m sorry, but I can’t help with that."
+    )
 
     assert not result.ok
     assert "assistant_response_tone" in result.reasons

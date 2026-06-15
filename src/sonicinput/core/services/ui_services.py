@@ -409,13 +409,60 @@ class UISettingsService:
             "count": len(debug_suggestions),
         }
 
-    def run_idle_review_once(self) -> dict[str, Any]:
-        """手动触发一次保守的 idle review。
+    def run_review_now(self) -> dict[str, Any]:
+        """手动触发一次本地 review。
 
-        该方法供 UI 的 "Run Review Now" 调用。它仍然复用
-        ReviewSchedulerService 的 idle/busy/min-interval/session-budget 门禁，
-        不绕过产品安全边界。
+        该方法供 UI 的 "Run Review Now" 调用。它会绕过 idle/min-interval 门禁，
+        但仍保留录音、转写、AI 处理中止和 session budget 保护。
         """
+        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
+            return {
+                "ran": False,
+                "reason": "review_disabled",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+
+        if self._container is None:
+            return {
+                "ran": False,
+                "reason": "review_scheduler_unavailable",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+
+        try:
+            from .review_scheduler_service import ReviewSchedulerService
+
+            scheduler = self._container.resolve(ReviewSchedulerService)
+            result = scheduler.run_once_now()
+        except Exception as exc:
+            app_logger.log_audio_event(
+                "UI manual review run failed",
+                {"error": str(exc)},
+            )
+            return {
+                "ran": False,
+                "reason": "review_run_failed",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+            }
+
+        return {
+            "ran": bool(getattr(result, "ran", False)),
+            "reason": str(getattr(result, "reason", "")),
+            "jobId": str(getattr(result, "job_id", "") or ""),
+            "reviewedRecordCount": int(
+                getattr(result, "reviewed_record_count", 0) or 0
+            ),
+            "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
+        }
+
+    def run_idle_review_once(self) -> dict[str, Any]:
+        """自动触发一次保守的 idle review。"""
         if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return {
                 "ran": False,

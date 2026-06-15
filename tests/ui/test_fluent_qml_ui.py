@@ -73,14 +73,16 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
 
         view_model = FluentSettingsViewModel(settings_service)
 
         assert view_model.sectionCount == 7
         assert view_model.sectionLabel(0) == "Application"
         assert view_model.sectionLabel(3) == "AI Processing"
-        assert view_model.sectionLabel(6) == "Quality Review"
+        assert view_model.sectionLabel(6) == "Local Quality Review"
 
     def test_review_bridge_exposes_suggestions_and_decisions(
         self,
@@ -88,7 +90,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -138,6 +142,15 @@ class TestFluentSettingsViewModel:
         settings_service.decide_review_suggestion = Mock(return_value=True)
         settings_service.clear_lexicon_entries = Mock(return_value=True)
         settings_service.clear_review_learning_data = Mock(return_value=True)
+        settings_service.run_review_now = Mock(
+            return_value={
+                "ran": True,
+                "reason": "completed",
+                "jobId": "job-1",
+                "reviewedRecordCount": 8,
+                "suggestionCount": 1,
+            }
+        )
         settings_service.run_idle_review_once = Mock(
             return_value={
                 "ran": True,
@@ -158,7 +171,9 @@ class TestFluentSettingsViewModel:
         assert view_model.reviewSuggestions[0]["category"] == "lexicon_learning"
         assert view_model.reviewSuggestions[0]["categoryLabel"] == "Lexicon Learning"
         assert view_model.reviewSuggestions[0]["categoryPriorityLevel"] == "low"
-        assert view_model.reviewSuggestions[0]["categoryPriorityLabel"] == "Review Later"
+        assert (
+            view_model.reviewSuggestions[0]["categoryPriorityLabel"] == "Review Later"
+        )
         assert view_model.reviewCategorySummaries[0]["category"] == "lexicon_learning"
         assert view_model.reviewCategorySummaries[0]["totalCount"] == 1
         assert view_model.reviewCategorySummaries[0]["priorityLevel"] == "low"
@@ -187,8 +202,7 @@ class TestFluentSettingsViewModel:
             == "Open Source Record"
         )
         assert (
-            "suppresses future similar suggestions"
-            in view_model.reviewIgnoreScopeHint
+            "suppresses future similar suggestions" in view_model.reviewIgnoreScopeHint
         )
         assert view_model.reviewSelectedCategory == "all"
         assert view_model.reviewSelectedCategoryLabel == "All Categories"
@@ -200,16 +214,17 @@ class TestFluentSettingsViewModel:
         assert view_model.reviewJobs[0]["summaryText"] == "8 records, 1 suggestions"
 
         assert view_model.acceptReviewSuggestion("s-1") is True
-        settings_service.decide_review_suggestion.assert_called_with(
-            "s-1", "accepted"
-        )
+        settings_service.decide_review_suggestion.assert_called_with("s-1", "accepted")
 
         assert view_model.clearLexiconEntries() is True
         settings_service.clear_lexicon_entries.assert_called_once()
 
         assert view_model.clearReviewLearningData() is True
         settings_service.clear_review_learning_data.assert_called_once()
-        assert view_model.reviewLearningDataMessage == "Local learning data has been cleared."
+        assert (
+            view_model.reviewLearningDataMessage
+            == "Local learning data has been cleared."
+        )
 
         settings_service.export_lexicon_entries = Mock(
             return_value={
@@ -237,21 +252,21 @@ class TestFluentSettingsViewModel:
             "Exported 1 prompt/validator debug suggestions to quality_audit/review_debug.json"
         )
 
-        assert view_model.runIdleReviewOnce()["ran"] is True
+        assert view_model.runReviewNow()["ran"] is True
         assert view_model.reviewRunMessage == (
-            "Review completed: 8 records, 1 suggestions"
+            "Local rule review completed: 8 records, 1 suggestions"
         )
-        settings_service.run_idle_review_once.assert_called_once()
+        settings_service.run_review_now.assert_called_once()
         assert view_model.archiveReviewSuggestion("s-1") is True
-        settings_service.decide_review_suggestion.assert_called_with(
-            "s-1", "archived"
-        )
+        settings_service.decide_review_suggestion.assert_called_with("s-1", "archived")
 
     def test_review_bridge_falls_back_to_source_record_ids_without_local_examples(self):
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -283,7 +298,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -330,7 +347,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -372,7 +391,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -407,8 +428,12 @@ class TestFluentSettingsViewModel:
         view_model.refreshReviewSuggestions()
 
         assert view_model.reviewSuggestions[0]["sourceRecordLabel"] == "Local Examples"
-        assert "alpha example final" in view_model.reviewSuggestions[0]["sourceRecordText"]
-        assert "beta example final" in view_model.reviewSuggestions[0]["sourceRecordText"]
+        assert (
+            "alpha example final" in view_model.reviewSuggestions[0]["sourceRecordText"]
+        )
+        assert (
+            "beta example final" in view_model.reviewSuggestions[0]["sourceRecordText"]
+        )
         assert "(+1 more)" in view_model.reviewSuggestions[0]["sourceRecordText"]
         assert view_model.reviewSuggestions[0]["canOpenSourceRecord"] is True
         assert (
@@ -420,7 +445,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -455,7 +482,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -491,7 +520,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -544,7 +575,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         suggestions = []
         for index in range(10):
             suggestions.append(
@@ -580,7 +613,9 @@ class TestFluentSettingsViewModel:
         settings_service.list_review_jobs = Mock(return_value=[])
         history_service = Mock()
         history_service.get_record_by_id = Mock(
-            side_effect=lambda record_id: _make_history_record(record_id, f"raw {record_id}")
+            side_effect=lambda record_id: _make_history_record(
+                record_id, f"raw {record_id}"
+            )
         )
         settings_service.get_history_service = Mock(return_value=history_service)
 
@@ -600,7 +635,9 @@ class TestFluentSettingsViewModel:
             item["type"] == "lexicon_candidate"
             for item in view_model.reviewSuggestions[10:]
         )
-        summaries = {item["category"]: item for item in view_model.reviewCategorySummaries}
+        summaries = {
+            item["category"]: item for item in view_model.reviewCategorySummaries
+        }
         assert summaries["boundary_violation"]["totalCount"] == 10
         assert summaries["boundary_violation"]["shownCount"] == 10
         assert summaries["boundary_violation"]["priorityLevel"] == "high"
@@ -635,7 +672,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         suggestions = []
         for index in range(10):
             suggestions.append(
@@ -682,7 +721,9 @@ class TestFluentSettingsViewModel:
             item["category"] == "lexicon_learning"
             for item in view_model.reviewSuggestions
         )
-        summaries = {item["category"]: item for item in view_model.reviewCategorySummaries}
+        summaries = {
+            item["category"]: item for item in view_model.reviewCategorySummaries
+        }
         groups = {item["category"]: item for item in view_model.reviewSuggestionGroups}
         assert summaries["boundary_violation"]["shownCount"] == 0
         assert summaries["lexicon_learning"]["shownCount"] == 20
@@ -722,7 +763,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         suggestions = [
             {
                 "suggestion_id": "alert-1",
@@ -767,7 +810,10 @@ class TestFluentSettingsViewModel:
         groups = {item["category"]: item for item in view_model.reviewSuggestionGroups}
         assert groups["boundary_violation"]["isExpanded"] is False
 
-        assert view_model.setReviewSuggestionGroupExpanded("lexicon_learning", True) is True
+        assert (
+            view_model.setReviewSuggestionGroupExpanded("lexicon_learning", True)
+            is True
+        )
         groups = {item["category"]: item for item in view_model.reviewSuggestionGroups}
         assert groups["lexicon_learning"]["isExpanded"] is True
 
@@ -781,7 +827,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -817,7 +865,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(return_value=[])
         settings_service.list_lexicon_entries = Mock(return_value=[])
         settings_service.list_review_jobs = Mock(return_value=[])
@@ -842,7 +892,9 @@ class TestFluentSettingsViewModel:
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
         settings_service = Mock()
-        settings_service.get_setting = Mock(side_effect=lambda _key, default=None: default)
+        settings_service.get_setting = Mock(
+            side_effect=lambda _key, default=None: default
+        )
         settings_service.list_review_suggestions = Mock(
             return_value=[
                 {
@@ -976,7 +1028,9 @@ class TestFluentSettingsViewModel:
         assert view_model.historyDetailVisible is True
         assert view_model.selectedHistoryDetail["id"] == "h-1"
         assert view_model.selectedHistoryDetail["primaryText"] == "detail final"
-        assert view_model.selectedHistoryDetail["transcriptionPath"] == "streaming_chunked"
+        assert (
+            view_model.selectedHistoryDetail["transcriptionPath"] == "streaming_chunked"
+        )
         assert (
             view_model.selectedHistoryDetail["transcriptionDecisionReason"]
             == "streaming_stop_result"
@@ -1353,11 +1407,11 @@ class TestFluentSettingsParity:
         ]:
             assert f'objectName: "{object_name}"' in qml_source
 
-        assert 'root.t("quality_review", "Quality Review")' in qml_source
+        assert 'root.t("quality_review", "Local Quality Review")' in qml_source
         assert 'root.setValue("review.enabled", checked)' in qml_source
         assert 'root.setValue("review.use_lexicon_memory", checked)' in qml_source
         assert "refreshReviewSuggestions()" in qml_source
-        assert "runIdleReviewOnce()" in qml_source
+        assert "runReviewNow()" in qml_source
         assert "exportReviewDebugReport()" in qml_source
         assert 'setReviewCategoryFilter("all")' in qml_source
         assert "setReviewCategoryFilter(modelData.category)" in qml_source
@@ -1375,7 +1429,9 @@ class TestFluentSettingsParity:
         assert "archiveReviewSuggestion(modelData.id)" in qml_source
         assert 'root.t("export_lexicon", "Export Lexicon")' in qml_source
         assert "exportLexiconEntries()" in qml_source
-        assert 'root.t("review_export_debug_report", "Export Debug Report")' in qml_source
+        assert (
+            'root.t("review_export_debug_report", "Export Debug Report")' in qml_source
+        )
         assert 'root.t("reprocess_sample", "Reprocess Sample")' in qml_source
         assert "reprocessReviewSuggestion(modelData.id)" in qml_source
         assert 'root.t("revert_to_raw", "Revert to Raw Transcript")' in qml_source

@@ -1,4 +1,4 @@
-"""Local review agent for recent transcript history."""
+"""Local rule reviewer for recent transcript history."""
 
 from __future__ import annotations
 
@@ -31,10 +31,10 @@ class ReviewSuggestion:
 
 
 class HistoryReviewAgent:
-    """Generate local review suggestions from recent history records.
+    """Generate local rule-based review suggestions from recent history records.
 
-    This agent does not mutate history and does not write lexicon memory. It only
-    creates pending suggestions that a future UI can show for accept/reject.
+    This reviewer does not mutate history and does not write lexicon memory. It
+    only creates pending suggestions that a future UI can show for accept/reject.
     """
 
     _TERM_RE = re.compile(

@@ -346,16 +346,16 @@ class VoiceInputApp:
             self._recording_controller.toggle_recording()
 
     def run_idle_review_once(self) -> ReviewSchedulerRunResult:
-        """Run one local review pass if enabled and idle.
+        """Run one local review pass if enabled.
 
-        This method is safe for a future UI/app timer to call. Review is disabled
-        by default and never mutates transcript history.
+        This method is safe for the manual UI action. It bypasses the idle gate
+        but still respects busy-state and session-budget protections.
         """
         if not self._review_scheduler:
             return ReviewSchedulerRunResult(False, "review_scheduler_unavailable")
         if not self.config.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return ReviewSchedulerRunResult(False, "review_disabled")
-        return self._review_scheduler.run_once_if_idle()
+        return self._review_scheduler.run_once_now()
 
     def set_recording_overlay(self, recording_overlay) -> None:
         """设置录音悬浮窗 (向后兼容方法)

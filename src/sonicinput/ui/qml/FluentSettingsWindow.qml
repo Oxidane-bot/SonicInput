@@ -30,7 +30,7 @@ ApplicationWindow {
         root.t("ai_processing", "AI Processing"),
         root.t("audio_and_input", "Audio and Input"),
         root.t("history", "History"),
-        root.t("quality_review", "Quality Review")
+        root.t("quality_review", "Local Quality Review")
     ]
 
     onSelectedSectionChanged: {
@@ -1285,10 +1285,10 @@ ApplicationWindow {
                     spacing: 14
 
                     SettingsCard {
-                        title: root.t("quality_review", "Quality Review")
+                        title: root.t("quality_review", "Local Quality Review")
 
                         Label {
-                            text: root.t("quality_review_help", "Idle review suggestions are advisory. Only accepted lexicon suggestions become local memory.")
+                                text: root.t("quality_review_help", "This is a local rule scan. It does not call a cloud model; only accepted lexicon suggestions become local memory.")
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -1351,7 +1351,7 @@ ApplicationWindow {
                                 objectName: "runReviewNowButton"
                                 text: root.t("run_review_now", "Run Review Now")
                                 highlighted: true
-                                onClicked: root.viewModel && root.viewModel.runIdleReviewOnce()
+                                onClicked: root.viewModel && root.viewModel.runReviewNow()
                             }
                         }
 

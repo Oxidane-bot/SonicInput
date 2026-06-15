@@ -37,7 +37,7 @@ class ReviewSchedulerRunResult:
 
 
 class ReviewSchedulerService:
-    """Run Review Agent only when the app is idle and within budget.
+    """Run the local rule reviewer only when the app is idle and within budget.
 
     This service deliberately has no background thread. The app can call
     ``run_once_if_idle`` from an existing timer after updating busy/activity
@@ -180,6 +180,9 @@ class ReviewSchedulerService:
             return ReviewSchedulerDecision(False, "network_unavailable")
         if now - self._last_activity_at < self._config.idle_seconds:
             return ReviewSchedulerDecision(False, "not_idle_long_enough")
+        return self._can_run_after_idle_checks(now)
+
+    def _can_run_after_idle_checks(self, now: float) -> ReviewSchedulerDecision:
         if (
             self._last_run_at is not None
             and now - self._last_run_at < self._config.min_interval_seconds
@@ -188,6 +191,45 @@ class ReviewSchedulerService:
         if self._runs_this_session >= self._config.max_runs_per_session:
             return ReviewSchedulerDecision(False, "session_budget_exhausted")
         return ReviewSchedulerDecision(True, "idle")
+
+    def can_run_now(
+        self,
+        *,
+        quota_available: bool = True,
+        network_available: bool = True,
+    ) -> ReviewSchedulerDecision:
+        if self._recording:
+            return ReviewSchedulerDecision(False, "recording_active")
+        if self._transcribing:
+            return ReviewSchedulerDecision(False, "transcription_active")
+        if self._ai_processing:
+            return ReviewSchedulerDecision(False, "ai_processing_active")
+        if self._ui_busy:
+            return ReviewSchedulerDecision(False, "ui_busy")
+        if not quota_available:
+            return ReviewSchedulerDecision(False, "quota_unavailable")
+        if not network_available:
+            return ReviewSchedulerDecision(False, "network_unavailable")
+        return ReviewSchedulerDecision(True, "manual")
+
+    def _run_review_pass(self, *, count_run: bool) -> ReviewSchedulerRunResult:
+        records = list(self._load_recent_records(self._config.max_records))
+        suggestions = self._review_agent.analyze_records(records)
+        job_id = self._review_storage.save_review_run(
+            suggestions,
+            record_limit=self._config.max_records,
+            reviewed_count=len(records),
+        )
+        self._last_run_at = self._clock()
+        if count_run:
+            self._runs_this_session += 1
+        return ReviewSchedulerRunResult(
+            True,
+            "completed",
+            job_id=job_id,
+            reviewed_record_count=len(records),
+            suggestion_count=len(suggestions),
+        )
 
     def run_once_if_idle(
         self,
@@ -201,20 +243,18 @@ class ReviewSchedulerService:
         )
         if not decision.can_run:
             return ReviewSchedulerRunResult(False, decision.reason)
+        return self._run_review_pass(count_run=True)
 
-        records = list(self._load_recent_records(self._config.max_records))
-        suggestions = self._review_agent.analyze_records(records)
-        job_id = self._review_storage.save_review_run(
-            suggestions,
-            record_limit=self._config.max_records,
-            reviewed_count=len(records),
+    def run_once_now(
+        self,
+        *,
+        quota_available: bool = True,
+        network_available: bool = True,
+    ) -> ReviewSchedulerRunResult:
+        decision = self.can_run_now(
+            quota_available=quota_available,
+            network_available=network_available,
         )
-        self._last_run_at = self._clock()
-        self._runs_this_session += 1
-        return ReviewSchedulerRunResult(
-            True,
-            "completed",
-            job_id=job_id,
-            reviewed_record_count=len(records),
-            suggestion_count=len(suggestions),
-        )
+        if not decision.can_run:
+            return ReviewSchedulerRunResult(False, decision.reason)
+        return self._run_review_pass(count_run=False)

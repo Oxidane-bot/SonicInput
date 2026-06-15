@@ -213,7 +213,9 @@ def test_lazy_load_unsubscribes_when_provider_switches_to_cloud(monkeypatch) -> 
     assert speech_service.load_requests == []
 
 
-def test_lazy_load_resubscribes_when_provider_switches_back_to_local(monkeypatch) -> None:
+def test_lazy_load_resubscribes_when_provider_switches_back_to_local(
+    monkeypatch,
+) -> None:
     """启动时是 cloud → 切回 local 时需要补注册 lazy load 订阅。"""
     monkeypatch.setattr(
         "sonicinput.speech.sherpa_models.SherpaModelManager.is_model_cached",

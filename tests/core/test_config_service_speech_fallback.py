@@ -102,6 +102,4 @@ def test_set_setting_rejects_provider_change_while_recording(tmp_path: Path) -> 
     service._writer.set_setting(ConfigKeys.TRANSCRIPTION_GROQ_API_KEY, "gsk_test")
 
     with pytest.raises(ConfigurationError, match="while recording"):
-        service.set_setting(
-            ConfigKeys.TRANSCRIPTION_PROVIDER, "groq", immediate=True
-        )
+        service.set_setting(ConfigKeys.TRANSCRIPTION_PROVIDER, "groq", immediate=True)
