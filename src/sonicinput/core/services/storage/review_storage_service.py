@@ -33,6 +33,11 @@ class ReviewStorageService:
         *,
         record_limit: int,
         reviewed_count: int,
+        review_source: str = "local",
+        provider: str | None = None,
+        model_id: str | None = None,
+        prompt_version: str | None = None,
+        fallback_reason: str | None = None,
     ) -> str:
         job_id = f"review_job_{uuid.uuid4().hex[:16]}"
         created_at = datetime.now().isoformat(timespec="seconds")
@@ -47,9 +52,10 @@ class ReviewStorageService:
                 """
                 INSERT INTO review_jobs (
                     id, created_at, status, record_limit,
-                    reviewed_count, suggestion_count
+                    reviewed_count, suggestion_count, review_source,
+                    provider, model_id, prompt_version, fallback_reason
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -58,6 +64,11 @@ class ReviewStorageService:
                     record_limit,
                     reviewed_count,
                     0,
+                    review_source,
+                    provider,
+                    model_id,
+                    prompt_version,
+                    fallback_reason,
                 ),
             )
             for suggestion in suggestions:
@@ -272,10 +283,23 @@ class ReviewStorageService:
                 status TEXT NOT NULL,
                 record_limit INTEGER NOT NULL,
                 reviewed_count INTEGER NOT NULL,
-                suggestion_count INTEGER NOT NULL
+                suggestion_count INTEGER NOT NULL DEFAULT 0,
+                review_source TEXT NOT NULL DEFAULT 'local',
+                provider TEXT,
+                model_id TEXT,
+                prompt_version TEXT,
+                fallback_reason TEXT
             )
             """
         )
+        cls = ReviewStorageService
+        cls._ensure_column(
+            conn, "review_jobs", "review_source", "TEXT NOT NULL DEFAULT 'local'"
+        )
+        cls._ensure_column(conn, "review_jobs", "provider", "TEXT")
+        cls._ensure_column(conn, "review_jobs", "model_id", "TEXT")
+        cls._ensure_column(conn, "review_jobs", "prompt_version", "TEXT")
+        cls._ensure_column(conn, "review_jobs", "fallback_reason", "TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS review_suggestions (
@@ -338,6 +362,22 @@ class ReviewStorageService:
             ON local_lexicon_entries(status, updated_at DESC)
             """
         )
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        existing_columns = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in existing_columns:
+            conn.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            )
 
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:

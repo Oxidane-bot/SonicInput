@@ -1,4 +1,4 @@
-"""Local rule reviewer for recent transcript history."""
+"""Local fallback reviewer for recent transcript history."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class ReviewSuggestion:
 
 
 class HistoryReviewAgent:
-    """Generate local rule-based review suggestions from recent history records.
+    """Generate local fallback review suggestions from recent history records.
 
     This reviewer does not mutate history and does not write lexicon memory. It
     only creates pending suggestions that a future UI can show for accept/reject.

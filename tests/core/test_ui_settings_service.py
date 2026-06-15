@@ -118,22 +118,29 @@ def test_ui_settings_service_can_run_review_now_from_container():
         ReviewSchedulerRunResult,
         ReviewSchedulerService,
     )
+    from sonicinput.core.quality import LLMReviewService
 
     config = Mock()
     config.get_setting.return_value = True
     scheduler = Mock()
+    review_service = Mock(name="review_service")
     scheduler.run_once_now.return_value = ReviewSchedulerRunResult(
         True,
         "completed",
         job_id="job-1",
         reviewed_record_count=12,
         suggestion_count=2,
+        review_source="llm",
+        provider="openrouter",
+        model_id="demo-model",
     )
 
     class Container:
         def resolve(self, interface):
             if interface is ReviewSchedulerService:
                 return scheduler
+            if interface is LLMReviewService:
+                return review_service
             raise RuntimeError(f"unsupported interface: {interface}")
 
     service = UISettingsService(
@@ -149,8 +156,9 @@ def test_ui_settings_service_can_run_review_now_from_container():
         "jobId": "job-1",
         "reviewedRecordCount": 12,
         "suggestionCount": 2,
+        "reviewSource": "llm",
     }
-    scheduler.run_once_now.assert_called_once_with()
+    scheduler.run_once_now.assert_called_once_with(review_service=review_service)
 
 
 def test_ui_settings_service_idle_review_respects_disabled_config():
@@ -168,6 +176,7 @@ def test_ui_settings_service_idle_review_respects_disabled_config():
 
     assert result["ran"] is False
     assert result["reason"] == "review_disabled"
+    assert result["reviewSource"] == "disabled"
 
 
 def test_ui_settings_service_auto_idle_review_uses_idle_gate():
@@ -175,10 +184,12 @@ def test_ui_settings_service_auto_idle_review_uses_idle_gate():
         ReviewSchedulerRunResult,
         ReviewSchedulerService,
     )
+    from sonicinput.core.quality import LLMReviewService
 
     config = Mock()
     config.get_setting.return_value = True
     scheduler = Mock()
+    review_service = Mock(name="review_service")
     scheduler.run_once_if_idle.return_value = ReviewSchedulerRunResult(
         False,
         "not_idle_long_enough",
@@ -188,6 +199,8 @@ def test_ui_settings_service_auto_idle_review_uses_idle_gate():
         def resolve(self, interface):
             if interface is ReviewSchedulerService:
                 return scheduler
+            if interface is LLMReviewService:
+                return review_service
             raise RuntimeError(f"unsupported interface: {interface}")
 
     service = UISettingsService(
@@ -201,7 +214,8 @@ def test_ui_settings_service_auto_idle_review_uses_idle_gate():
 
     assert result["ran"] is False
     assert result["reason"] == "not_idle_long_enough"
-    scheduler.run_once_if_idle.assert_called_once_with()
+    assert result["reviewSource"] == "local"
+    scheduler.run_once_if_idle.assert_called_once_with(review_service=review_service)
 
 
 def test_ui_model_service_updates_runtime_speech_service():

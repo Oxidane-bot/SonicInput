@@ -18,11 +18,11 @@ class _Scheduler:
         self.idle_calls = 0
         self.manual_calls = 0
 
-    def run_once_if_idle(self):
+    def run_once_if_idle(self, review_service=None):
         self.idle_calls += 1
         return ReviewSchedulerRunResult(True, "completed", suggestion_count=0)
 
-    def run_once_now(self):
+    def run_once_now(self, review_service=None):
         self.manual_calls += 1
         return ReviewSchedulerRunResult(True, "completed", suggestion_count=0)
 

@@ -347,6 +347,7 @@ def create_container() -> "DIContainer":
         factory=lambda: create_review_storage_service(container),
     )
 
+    from .quality import LLMReviewService
     from .services.review_scheduler_service import ReviewSchedulerService
 
     def create_review_scheduler_service(container):
@@ -362,6 +363,15 @@ def create_container() -> "DIContainer":
     container.register_singleton(
         ReviewSchedulerService,
         factory=lambda: create_review_scheduler_service(container),
+    )
+
+    def create_llm_review_service(container):
+        config = container.resolve(IConfigService)
+        return LLMReviewService(config_service=config)
+
+    container.register_transient(
+        LLMReviewService,
+        factory=lambda: create_llm_review_service(container),
     )
 
     # 音频服务 - 瞬态

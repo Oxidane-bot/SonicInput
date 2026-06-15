@@ -355,7 +355,15 @@ class VoiceInputApp:
             return ReviewSchedulerRunResult(False, "review_scheduler_unavailable")
         if not self.config.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return ReviewSchedulerRunResult(False, "review_disabled")
-        return self._review_scheduler.run_once_now()
+        review_service = None
+        if getattr(self, "_container", None) is not None:
+            try:
+                from .quality import LLMReviewService
+
+                review_service = self._container.resolve(LLMReviewService)
+            except Exception:
+                review_service = None
+        return self._review_scheduler.run_once_now(review_service=review_service)
 
     def set_recording_overlay(self, recording_overlay) -> None:
         """设置录音悬浮窗 (向后兼容方法)

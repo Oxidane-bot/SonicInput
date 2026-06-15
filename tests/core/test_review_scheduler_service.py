@@ -5,6 +5,7 @@ from sonicinput.core.services.review_scheduler_service import (
     ReviewSchedulerConfig,
     ReviewSchedulerService,
 )
+from sonicinput.core.quality import ReviewSuggestion
 from sonicinput.core.services.events import Events
 from sonicinput.core.services.storage import ReviewStorageService
 
@@ -53,6 +54,25 @@ def _storage() -> ReviewStorageService:
     path = Path("quality_audit") / f"test_review_scheduler_{uuid4().hex}.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     return ReviewStorageService(path)
+
+
+class _ReviewServiceStub:
+    def __init__(self, suggestions, source="llm", fallback_reason=None):
+        self._suggestions = suggestions
+        self._source = source
+        self._fallback_reason = fallback_reason
+
+    def review_records(self, records):
+        from sonicinput.core.quality import ReviewRunOutcome
+
+        return ReviewRunOutcome(
+            review_source=self._source,
+            suggestions=tuple(self._suggestions),
+            provider="openrouter",
+            model_id="demo-model",
+            prompt_version="v1",
+            fallback_reason=self._fallback_reason,
+        )
 
 
 def test_review_scheduler_waits_until_idle():
@@ -158,6 +178,37 @@ def test_review_scheduler_runs_and_persists_suggestions():
         == "assistant_response_leak_alert"
     )
     assert scheduler.run_once_if_idle().reason == "min_interval_not_reached"
+
+
+def test_review_scheduler_uses_llm_review_service_when_provided():
+    clock = _Clock(1000)
+    storage = _storage()
+    suggestion = ReviewSuggestion(
+        suggestion_id="review_llm_1",
+        suggestion_type="bad_ai_output_alert",
+        confidence=0.91,
+        risk_level="high",
+        source_record_ids=("r1",),
+        title="AI 输出可能越界",
+        detail="llm hit",
+        evidence_count=1,
+    )
+    scheduler = ReviewSchedulerService(
+        load_recent_records=lambda limit: [{"id": "r1"}],
+        review_storage=storage,
+        config=ReviewSchedulerConfig(idle_seconds=0, max_runs_per_session=1),
+        clock=clock,
+    )
+
+    result = scheduler.run_once_now(review_service=_ReviewServiceStub([suggestion]))
+
+    assert result.review_source == "llm"
+    assert result.provider == "openrouter"
+    assert result.model_id == "demo-model"
+    jobs = storage.list_review_jobs()
+    assert jobs[0]["review_source"] == "llm"
+    assert jobs[0]["provider"] == "openrouter"
+    assert jobs[0]["model_id"] == "demo-model"
 
 
 def test_review_scheduler_respects_session_budget_after_interval():

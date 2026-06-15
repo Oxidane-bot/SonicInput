@@ -39,7 +39,7 @@ class FluentSettingsViewModel(QObject):
         "AI Processing",
         "Audio and Input",
         "History",
-        "Local Quality Review",
+        "Model Review",
     )
 
     _MODIFIER_ALIASES = {
@@ -153,8 +153,8 @@ class FluentSettingsViewModel(QObject):
         "preferred_method": "首选方法",
         "preset_position": "预设位置",
         "provider": "提供商",
-        "quality_review": "本地质量审查",
-        "quality_review_help": "这是本地规则扫描，不调用云端模型；只有你接受的词汇才会进入本地记忆。",
+        "quality_review": "模型审查",
+        "quality_review_help": "优先调用你配置的 AI 提供商生成审查建议；如果模型不可用，会退回本地安全校验。",
         "provider_credentials": "提供商凭据",
         "recording_overlay": "录音悬浮窗",
         "recording_details": "录音详情",
@@ -165,8 +165,8 @@ class FluentSettingsViewModel(QObject):
         "remove_shortcut": "移除快捷键",
         "reject": "拒绝",
         "reprocess_sample": "重新处理样本",
-        "review_run_completed": "本地规则审查完成：{records} 条记录，{suggestions} 条建议",
-        "review_run_completed_empty": "本地规则审查完成：检查了 {records} 条记录，未发现待处理建议",
+        "review_run_completed": "模型审查完成：{records} 条记录，{suggestions} 条建议",
+        "review_run_completed_empty": "模型审查完成：检查了 {records} 条记录，未发现待处理建议",
         "review_run_skipped": "审查未运行：{reason}",
         "review_categories": "审查类别",
         "review_filter_all_categories": "全部类别",
@@ -191,12 +191,12 @@ class FluentSettingsViewModel(QObject):
         "review_action_low_information_expansion_alert": "建议检查是否为短噪声或填充词被扩写；不会自动回写历史。",
         "review_action_over_compressed_long_input_alert": "建议检查长文本是否被总结或删减；不会自动回写历史。",
         "review_action_over_expanded_short_input_alert": "建议检查短输入是否被扩写成解释或回答；语音清理通常应保持保守。",
-        "review_action_prompt_failure_pattern": "这是本地 prompt/validator 调试线索；接受或导出都不会自动修改线上提示词。",
+        "review_action_prompt_failure_pattern": "这是本地 fallback 调试线索；接受或导出都不会自动修改线上提示词。",
         "review_action_translation_command_leak_alert": "建议确认 AI 是否执行了翻译命令；语音清理不应替用户翻译。",
         "review_action_unexpected_language_shift_alert": "建议确认 AI 是否意外切换了语言；语音清理通常应保留原始语言。",
         "review_action_format_pollution_alert": "建议确认最终输入是否混入 markdown、标签或列表格式。",
-        "review_debug_export_help": "可将这类 prompt/validator 失败模式导出为本地调试报告，不会自动改动提示词。",
-        "review_debug_export_success": "已导出 {count} 条 prompt/validator 调试建议到 {path}",
+        "review_debug_export_help": "可将本地 fallback 发现的失败模式导出为调试报告，不会自动改动提示词。",
+        "review_debug_export_success": "已导出 {count} 条本地 fallback 调试建议到 {path}",
         "review_debug_export_failed": "调试报告导出失败：{reason}",
         "review_export_debug_report": "导出调试报告",
         "review_jobs": "最近审查运行",
@@ -210,7 +210,7 @@ class FluentSettingsViewModel(QObject):
         "review_category_lexicon_learning": "词汇记忆",
         "review_category_lexicon_learning_desc": "用于积累可确认的本地术语记忆，只有接受后才会生效。",
         "review_category_prompt_quality": "提示词问题",
-        "review_category_prompt_quality_desc": "汇总近期反复出现的 prompt/validator 失败模式，主要用于本地调试报告，不会自动改动线上提示词。",
+        "review_category_prompt_quality_desc": "汇总近期反复出现的 fallback 失败模式，主要用于本地调试报告，不会自动改动线上提示词。",
         "review_priority_high": "优先处理",
         "review_priority_medium": "值得检查",
         "review_priority_low": "可稍后处理",
@@ -238,7 +238,7 @@ class FluentSettingsViewModel(QObject):
         "local_example": "本地示例",
         "local_examples": "本地示例",
         "local_examples_more": "（另 {count} 条）",
-        "run_review_now": "立即运行本地审查",
+        "run_review_now": "立即运行模型审查",
         "source_records": "来源记录",
         "reprocess_of": "重处理来源",
         "revert": "还原",
@@ -774,7 +774,7 @@ class FluentSettingsViewModel(QObject):
             "low_information_expansion_alert": "Check whether short noise or filler was expanded; history is not rewritten automatically.",
             "over_compressed_long_input_alert": "Check whether a long dictation was summarized or had important clauses removed.",
             "over_expanded_short_input_alert": "Check whether a short input was expanded into an explanation, answer, or much longer rewrite.",
-            "prompt_failure_pattern": "This is a local prompt/validator debugging clue. Accepting or exporting it does not change the live prompt automatically.",
+            "prompt_failure_pattern": "This is a local fallback debugging clue. Accepting or exporting it does not change the live prompt automatically.",
             "translation_command_leak_alert": "Check whether AI executed a dictated translation command instead of preserving the transcript.",
             "unexpected_language_shift_alert": "Check whether AI unexpectedly switched the transcript into a different language.",
         }
@@ -798,6 +798,10 @@ class FluentSettingsViewModel(QObject):
     def _format_review_job(self, item: dict[str, Any]) -> dict[str, Any]:
         reviewed_count = int(item.get("reviewed_count", 0) or 0)
         suggestion_count = int(item.get("suggestion_count", 0) or 0)
+        review_source = str(item.get("review_source", "") or "local")
+        provider = str(item.get("provider", "") or "")
+        model_id = str(item.get("model_id", "") or "")
+        fallback_reason = str(item.get("fallback_reason", "") or "")
         return {
             "id": str(item.get("id", "") or ""),
             "createdAt": str(item.get("created_at", "") or ""),
@@ -805,6 +809,10 @@ class FluentSettingsViewModel(QObject):
             "recordLimit": int(item.get("record_limit", 0) or 0),
             "reviewedRecordCount": reviewed_count,
             "suggestionCount": suggestion_count,
+            "reviewSource": review_source,
+            "provider": provider,
+            "modelId": model_id,
+            "fallbackReason": fallback_reason,
             "summaryText": self.translate(
                 "review_job_summary",
                 "{records} records, {suggestions} suggestions",
@@ -1081,18 +1089,28 @@ class FluentSettingsViewModel(QObject):
         if result.get("ran"):
             records = int(result.get("reviewedRecordCount", 0) or 0)
             suggestions = int(result.get("suggestionCount", 0) or 0)
+            review_source = str(result.get("reviewSource", "") or "local")
+            if review_source == "fallback":
+                prefix = self.translate(
+                    "review_run_completed_fallback",
+                    "Fallback safety validation completed",
+                )
+            else:
+                prefix = self.translate(
+                    "review_run_completed",
+                    "Model review completed: {records} records, {suggestions} suggestions",
+                )
             if suggestions <= 0:
+                if review_source == "fallback":
+                    return self.translate(
+                        "review_run_completed_fallback_empty",
+                        "Fallback safety validation completed: checked {records} records, no suggestions",
+                    ).format(records=records)
                 return self.translate(
                     "review_run_completed_empty",
-                    "Local rule review completed: checked {records} records, no suggestions",
+                    "Model review completed: checked {records} records, no suggestions",
                 ).format(records=records)
-            return self.translate(
-                "review_run_completed",
-                "Local rule review completed: {records} records, {suggestions} suggestions",
-            ).format(
-                records=records,
-                suggestions=suggestions,
-            )
+            return prefix.format(records=records, suggestions=suggestions)
         return self.translate(
             "review_run_skipped",
             "Review did not run: {reason}",
@@ -1919,7 +1937,7 @@ class FluentSettingsViewModel(QObject):
             target = self._review_debug_last_export_path or "local file"
             self._review_debug_export_message = self.translate(
                 "review_debug_export_success",
-                "Exported {count} prompt/validator debug suggestions to {path}",
+                "Exported {count} fallback debug suggestions to {path}",
             ).format(count=count, path=target)
         else:
             reason = str(result.get("reason", "export_failed") or "export_failed")

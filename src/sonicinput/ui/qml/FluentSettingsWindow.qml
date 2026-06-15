@@ -30,7 +30,7 @@ ApplicationWindow {
         root.t("ai_processing", "AI Processing"),
         root.t("audio_and_input", "Audio and Input"),
         root.t("history", "History"),
-        root.t("quality_review", "Local Quality Review")
+        root.t("quality_review", "Model Review")
     ]
 
     onSelectedSectionChanged: {
@@ -1285,10 +1285,10 @@ ApplicationWindow {
                     spacing: 14
 
                     SettingsCard {
-                        title: root.t("quality_review", "Local Quality Review")
+                        title: root.t("quality_review", "Model Review")
 
                         Label {
-                                text: root.t("quality_review_help", "This is a local rule scan. It does not call a cloud model; only accepted lexicon suggestions become local memory.")
+                            text: root.t("quality_review_help", "This uses your configured AI provider first and falls back to local safety validation if the model is unavailable.")
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -1376,7 +1376,7 @@ ApplicationWindow {
 
                             Label {
                                 objectName: "reviewDebugExportHelpLabel"
-                                text: root.t("review_debug_export_help", "Exports recurring prompt/validator issue cards for local debugging without changing the live prompt.")
+                                text: root.t("review_debug_export_help", "Exports fallback-detected issue cards for local debugging without changing the live prompt.")
                                 wrapMode: Text.WordWrap
                                 opacity: 0.72
                                 Layout.fillWidth: true

@@ -82,7 +82,7 @@ class TestFluentSettingsViewModel:
         assert view_model.sectionCount == 7
         assert view_model.sectionLabel(0) == "Application"
         assert view_model.sectionLabel(3) == "AI Processing"
-        assert view_model.sectionLabel(6) == "Local Quality Review"
+        assert view_model.sectionLabel(6) == "Model Review"
 
     def test_review_bridge_exposes_suggestions_and_decisions(
         self,
@@ -149,6 +149,7 @@ class TestFluentSettingsViewModel:
                 "jobId": "job-1",
                 "reviewedRecordCount": 8,
                 "suggestionCount": 1,
+                "reviewSource": "llm",
             }
         )
         settings_service.run_idle_review_once = Mock(
@@ -158,6 +159,7 @@ class TestFluentSettingsViewModel:
                 "jobId": "job-1",
                 "reviewedRecordCount": 8,
                 "suggestionCount": 1,
+                "reviewSource": "llm",
             }
         )
 
@@ -249,12 +251,12 @@ class TestFluentSettingsViewModel:
         debug_export_result = view_model.exportReviewDebugReport()
         assert debug_export_result["success"] is True
         assert view_model.reviewDebugExportMessage == (
-            "Exported 1 prompt/validator debug suggestions to quality_audit/review_debug.json"
+            "Exported 1 fallback debug suggestions to quality_audit/review_debug.json"
         )
 
         assert view_model.runReviewNow()["ran"] is True
         assert view_model.reviewRunMessage == (
-            "Local rule review completed: 8 records, 1 suggestions"
+            "Model review completed: 8 records, 1 suggestions"
         )
         settings_service.run_review_now.assert_called_once()
         assert view_model.archiveReviewSuggestion("s-1") is True
@@ -1407,7 +1409,7 @@ class TestFluentSettingsParity:
         ]:
             assert f'objectName: "{object_name}"' in qml_source
 
-        assert 'root.t("quality_review", "Local Quality Review")' in qml_source
+        assert 'root.t("quality_review", "Model Review")' in qml_source
         assert 'root.setValue("review.enabled", checked)' in qml_source
         assert 'root.setValue("review.use_lexicon_memory", checked)' in qml_source
         assert "refreshReviewSuggestions()" in qml_source

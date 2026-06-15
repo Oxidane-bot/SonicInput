@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..quality import HistoryReviewAgent
+from ..quality import HistoryReviewAgent, LLMReviewService, ReviewRunOutcome
 from .config import ConfigKeys
 from .events import Events
 from .storage import ReviewStorageService
@@ -34,10 +34,15 @@ class ReviewSchedulerRunResult:
     job_id: str | None = None
     reviewed_record_count: int = 0
     suggestion_count: int = 0
+    review_source: str = "local"
+    provider: str | None = None
+    model_id: str | None = None
+    prompt_version: str | None = None
+    fallback_reason: str | None = None
 
 
 class ReviewSchedulerService:
-    """Run the local rule reviewer only when the app is idle and within budget.
+    """Run review only when the app is idle and within budget.
 
     This service deliberately has no background thread. The app can call
     ``run_once_if_idle`` from an existing timer after updating busy/activity
@@ -212,13 +217,29 @@ class ReviewSchedulerService:
             return ReviewSchedulerDecision(False, "network_unavailable")
         return ReviewSchedulerDecision(True, "manual")
 
-    def _run_review_pass(self, *, count_run: bool) -> ReviewSchedulerRunResult:
+    def _run_review_pass(
+        self,
+        *,
+        count_run: bool,
+        review_service: LLMReviewService | None = None,
+    ) -> ReviewSchedulerRunResult:
         records = list(self._load_recent_records(self._config.max_records))
-        suggestions = self._review_agent.analyze_records(records)
+        if review_service is None:
+            outcome = ReviewRunOutcome(
+                review_source="local",
+                suggestions=tuple(self._review_agent.analyze_records(records)),
+            )
+        else:
+            outcome = review_service.review_records(records)
         job_id = self._review_storage.save_review_run(
-            suggestions,
+            outcome.suggestions,
             record_limit=self._config.max_records,
             reviewed_count=len(records),
+            review_source=outcome.review_source,
+            provider=outcome.provider,
+            model_id=outcome.model_id,
+            prompt_version=outcome.prompt_version,
+            fallback_reason=outcome.fallback_reason,
         )
         self._last_run_at = self._clock()
         if count_run:
@@ -228,7 +249,12 @@ class ReviewSchedulerService:
             "completed",
             job_id=job_id,
             reviewed_record_count=len(records),
-            suggestion_count=len(suggestions),
+            suggestion_count=len(outcome.suggestions),
+            review_source=outcome.review_source,
+            provider=outcome.provider,
+            model_id=outcome.model_id,
+            prompt_version=outcome.prompt_version,
+            fallback_reason=outcome.fallback_reason,
         )
 
     def run_once_if_idle(
@@ -236,6 +262,7 @@ class ReviewSchedulerService:
         *,
         quota_available: bool = True,
         network_available: bool = True,
+        review_service: LLMReviewService | None = None,
     ) -> ReviewSchedulerRunResult:
         decision = self.can_run(
             quota_available=quota_available,
@@ -243,13 +270,14 @@ class ReviewSchedulerService:
         )
         if not decision.can_run:
             return ReviewSchedulerRunResult(False, decision.reason)
-        return self._run_review_pass(count_run=True)
+        return self._run_review_pass(count_run=True, review_service=review_service)
 
     def run_once_now(
         self,
         *,
         quota_available: bool = True,
         network_available: bool = True,
+        review_service: LLMReviewService | None = None,
     ) -> ReviewSchedulerRunResult:
         decision = self.can_run_now(
             quota_available=quota_available,
@@ -257,4 +285,4 @@ class ReviewSchedulerService:
         )
         if not decision.can_run:
             return ReviewSchedulerRunResult(False, decision.reason)
-        return self._run_review_pass(count_run=False)
+        return self._run_review_pass(count_run=False, review_service=review_service)

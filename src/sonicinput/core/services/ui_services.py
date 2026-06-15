@@ -355,7 +355,7 @@ class UISettingsService:
         self,
         file_path: str | None = None,
     ) -> dict[str, Any]:
-        """导出 prompt/validator 失败模式建议，供本地调试使用。"""
+        """导出 fallback 失败模式建议，供本地调试使用。"""
         service = self.get_review_storage_service()
         if service is None:
             return {
@@ -412,8 +412,8 @@ class UISettingsService:
     def run_review_now(self) -> dict[str, Any]:
         """手动触发一次本地 review。
 
-        该方法供 UI 的 "Run Review Now" 调用。它会绕过 idle/min-interval 门禁，
-        但仍保留录音、转写、AI 处理中止和 session budget 保护。
+        该方法供 UI 的 "Run Review Now" 调用。它会直接执行模型审查，
+        如果模型路径不可用则退回本地安全校验。
         """
         if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return {
@@ -422,6 +422,7 @@ class UISettingsService:
                 "jobId": "",
                 "reviewedRecordCount": 0,
                 "suggestionCount": 0,
+                "reviewSource": "disabled",
             }
 
         if self._container is None:
@@ -431,13 +432,16 @@ class UISettingsService:
                 "jobId": "",
                 "reviewedRecordCount": 0,
                 "suggestionCount": 0,
+                "reviewSource": "unavailable",
             }
 
         try:
+            from ..quality import LLMReviewService
             from .review_scheduler_service import ReviewSchedulerService
 
             scheduler = self._container.resolve(ReviewSchedulerService)
-            result = scheduler.run_once_now()
+            review_service = self._container.resolve(LLMReviewService)
+            result = scheduler.run_once_now(review_service=review_service)
         except Exception as exc:
             app_logger.log_audio_event(
                 "UI manual review run failed",
@@ -449,6 +453,7 @@ class UISettingsService:
                 "jobId": "",
                 "reviewedRecordCount": 0,
                 "suggestionCount": 0,
+                "reviewSource": "error",
             }
 
         return {
@@ -459,10 +464,11 @@ class UISettingsService:
                 getattr(result, "reviewed_record_count", 0) or 0
             ),
             "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
+            "reviewSource": str(getattr(result, "review_source", "") or "local"),
         }
 
     def run_idle_review_once(self) -> dict[str, Any]:
-        """自动触发一次保守的 idle review。"""
+        """自动触发一次 review。"""
         if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return {
                 "ran": False,
@@ -470,6 +476,7 @@ class UISettingsService:
                 "jobId": "",
                 "reviewedRecordCount": 0,
                 "suggestionCount": 0,
+                "reviewSource": "disabled",
             }
 
         if self._container is None:
@@ -479,13 +486,16 @@ class UISettingsService:
                 "jobId": "",
                 "reviewedRecordCount": 0,
                 "suggestionCount": 0,
+                "reviewSource": "unavailable",
             }
 
         try:
+            from ..quality import LLMReviewService
             from .review_scheduler_service import ReviewSchedulerService
 
             scheduler = self._container.resolve(ReviewSchedulerService)
-            result = scheduler.run_once_if_idle()
+            review_service = self._container.resolve(LLMReviewService)
+            result = scheduler.run_once_if_idle(review_service=review_service)
         except Exception as exc:
             app_logger.log_audio_event(
                 "UI idle review run failed",
@@ -497,6 +507,7 @@ class UISettingsService:
                 "jobId": "",
                 "reviewedRecordCount": 0,
                 "suggestionCount": 0,
+                "reviewSource": "error",
             }
 
         return {
@@ -507,6 +518,7 @@ class UISettingsService:
                 getattr(result, "reviewed_record_count", 0) or 0
             ),
             "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
+            "reviewSource": str(getattr(result, "review_source", "") or "local"),
         }
 
     def get_transcription_service(self):
