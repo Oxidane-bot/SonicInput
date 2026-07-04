@@ -1,13 +1,19 @@
 #!/usr/bin/env sh
 set -eu
 
+# Snapshot unstaged diff so we only fail when Ruff itself changes files
+# (a plain `git diff --quiet` would reject any intentionally unstaged work).
+before=$(git diff -- src tests | git hash-object --stdin)
+
 echo "[pre-commit] Running Ruff formatter..."
 uv run --cache-dir ./.uv_cache ruff format src tests
 
 echo "[pre-commit] Running Ruff linter with auto-fix..."
 uv run --cache-dir ./.uv_cache ruff check src tests --fix
 
-if ! git diff --quiet -- src tests; then
+after=$(git diff -- src tests | git hash-object --stdin)
+
+if [ "$before" != "$after" ]; then
   echo "[pre-commit] Ruff updated files. Review, stage, and commit again."
   exit 1
 fi
