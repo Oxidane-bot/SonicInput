@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
+import time
 from typing import Any
 
 from ..quality import HistoryReviewAgent, LLMReviewService, ReviewRunOutcome
@@ -52,13 +53,16 @@ class ReviewSchedulerService:
     def __init__(
         self,
         *,
-        load_recent_records: Callable[[int], Sequence[Any]],
+        load_recent_records: Callable[[int], Sequence[Any]] | None = None,
+        load_review_records: Callable[[int, dict[str, str] | None], Sequence[Any]]
+        | None = None,
         review_storage: ReviewStorageService,
         review_agent: HistoryReviewAgent | None = None,
         config: ReviewSchedulerConfig | None = None,
         clock: Callable[[], float] | None = None,
     ):
         self._load_recent_records = load_recent_records
+        self._load_review_records = load_review_records
         self._review_storage = review_storage
         self._review_agent = review_agent or HistoryReviewAgent()
         self._config = config or ReviewSchedulerConfig()
@@ -223,7 +227,10 @@ class ReviewSchedulerService:
         count_run: bool,
         review_service: LLMReviewService | None = None,
     ) -> ReviewSchedulerRunResult:
-        records = list(self._load_recent_records(self._config.max_records))
+        cursor = self._review_storage.load_review_cursor()
+        records = self._load_review_batch(cursor)
+        if not records and cursor is not None:
+            records = self._load_review_batch(None)
         if review_service is None:
             outcome = ReviewRunOutcome(
                 review_source="local",
@@ -231,6 +238,7 @@ class ReviewSchedulerService:
             )
         else:
             outcome = review_service.review_records(records)
+        self._save_next_cursor(records)
         job_id = self._review_storage.save_review_run(
             outcome.suggestions,
             record_limit=self._config.max_records,
@@ -256,6 +264,53 @@ class ReviewSchedulerService:
             prompt_version=outcome.prompt_version,
             fallback_reason=outcome.fallback_reason,
         )
+
+    def _load_review_batch(self, cursor: dict[str, str] | None) -> list[Any]:
+        if self._load_review_records is not None:
+            records = list(self._load_review_records(self._config.max_records, cursor))
+            if records:
+                return records
+            if cursor is None:
+                return records
+        if self._load_recent_records is not None:
+            return list(self._load_recent_records(self._config.max_records))
+        return []
+
+    def _save_next_cursor(self, records: Sequence[Any]) -> None:
+        if not records:
+            return
+        last = records[-1]
+        cursor_timestamp = self._record_timestamp_text(last)
+        cursor_id = self._record_id_text(last)
+        if not cursor_timestamp or not cursor_id:
+            return
+        self._review_storage.save_review_cursor(
+            cursor_timestamp=cursor_timestamp,
+            cursor_id=cursor_id,
+        )
+
+    @staticmethod
+    def _record_timestamp_text(record: Any) -> str | None:
+        timestamp = (
+            record.get("timestamp")
+            if isinstance(record, dict)
+            else getattr(record, "timestamp", None)
+        )
+        if timestamp is None:
+            return None
+        if isinstance(timestamp, datetime):
+            return timestamp.isoformat()
+        return str(timestamp)
+
+    @staticmethod
+    def _record_id_text(record: Any) -> str | None:
+        record_id = (
+            record.get("id")
+            if isinstance(record, dict)
+            else getattr(record, "id", None)
+        )
+        text = str(record_id or "").strip()
+        return text or None
 
     def run_once_if_idle(
         self,

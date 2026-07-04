@@ -191,7 +191,8 @@ def test_ai_controller_adds_user_confirmed_lexicon_to_prompt(monkeypatch):
     controller.process_with_ai("我们继续说拍套曲。", update_history=False)
 
     assert "User-confirmed local lexicon" in ai_service.prompt_templates[0]
-    assert "拍套曲 -> PyTorch" in ai_service.prompt_templates[0]
+    assert "Input: 拍套曲" in ai_service.prompt_templates[0]
+    assert "Output: PyTorch" in ai_service.prompt_templates[0]
 
 
 def test_ai_controller_can_disable_user_confirmed_lexicon(monkeypatch):

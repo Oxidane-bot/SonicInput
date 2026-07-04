@@ -36,6 +36,8 @@ class LLMReviewService:
 
     _PROMPT_VERSION = "v1"
     _MAX_OUTPUT_TOKENS = 1400
+    _MAX_TEXT_EXCERPT_CHARS = 30
+    _MAX_ERROR_EXCERPT_CHARS = 80
     _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
     def __init__(
@@ -156,86 +158,86 @@ class LLMReviewService:
 
     def _build_prompt(self) -> str:
         return (
-            "You are SonicInput's review analyst.\n"
-            "Inspect the recent history records and return ONLY valid JSON.\n\n"
-            "Rules:\n"
-            "- Do not modify transcript text.\n"
-            "- Do not invent facts not present in the records.\n"
-            "- Do not output markdown, code fences, or explanations.\n"
-            "- Prefer actionable suggestions a human can inspect.\n"
-            '- If nothing needs attention, return {"suggestions": []}.\n\n'
-            "Return this JSON shape:\n"
-            "{\n"
-            '  "suggestions": [\n'
-            "    {\n"
-            '      "suggestion_type": "assistant_response_leak_alert",\n'
-            '      "confidence": 0.91,\n'
-            '      "risk_level": "high",\n'
-            '      "source_record_ids": ["r1"],\n'
-            '      "title": "AI 输出疑似变成助手回复",\n'
-            '      "detail": "Explain why this sample needs attention.",\n'
-            '      "evidence_count": 1,\n'
-            '      "old_form": "optional",\n'
-            '      "new_form": "optional"\n'
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
-            "Allowed suggestion_type values include:\n"
-            "assistant_response_leak_alert, format_pollution_alert, "
-            "translation_command_leak_alert, unexpected_language_shift_alert, "
-            "low_information_expansion_alert, over_compressed_long_input_alert, "
-            "over_expanded_short_input_alert, collapsed_to_fragment_alert, "
-            "abnormal_repetition_alert, fallback_candidate_alert, "
-            "lexicon_candidate, prompt_failure_pattern, bad_ai_output_alert, "
-            "chunk_boundary_repeat_alert, asr_failure_alert.\n"
-            f"Prompt version: {self._PROMPT_VERSION}."
+            'Return only JSON: {"suggestions":[]}. '
+            "Flag transcript quality issues only. "
+            "No markdown or explanations. "
+            "Use source_record_ids. "
+            "Prompt v1."
         )
 
     def _build_payload(self, records: list[Any]) -> str:
         payload = {
             "records": [self._serialize_record(record) for record in records],
         }
-        return json.dumps(payload, ensure_ascii=False, indent=2)
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
     @staticmethod
     def _serialize_record(record: Any) -> dict[str, Any]:
-        fields = [
-            "id",
-            "timestamp",
-            "duration",
-            "transcription_text",
-            "transcription_provider",
-            "transcription_status",
-            "streaming_mode",
-            "transcription_path",
-            "transcription_decision_reason",
-            "transcription_duration",
-            "used_fallback",
-            "fallback_type",
-            "fallback_reason",
-            "diagnostics_collected",
-            "reprocess_parent_id",
-            "transcription_error",
-            "ai_optimized_text",
-            "ai_provider",
-            "ai_status",
-            "ai_error",
-            "final_text",
-        ]
-        data: dict[str, Any] = {}
-        for field in fields:
-            value = (
+        def _get(field: str, default: Any = None) -> Any:
+            return (
                 record.get(field)
                 if isinstance(record, dict)
-                else getattr(record, field, None)
+                else getattr(record, field, default)
             )
-            if field == "timestamp" and value is not None:
-                try:
-                    value = value.isoformat()
-                except Exception:
-                    value = str(value)
-            data[field] = value
-        return data
+
+        def _clip(value: Any, limit: int) -> str | None:
+            text = str(value or "").strip()
+            if not text:
+                return None
+            if len(text) <= limit:
+                return text
+            return text[: limit - 1].rstrip() + "…"
+
+        timestamp = _get("timestamp")
+        if timestamp is not None:
+            try:
+                timestamp = timestamp.isoformat()
+            except Exception:
+                timestamp = str(timestamp)
+
+        return {
+            "id": str(_get("id", "") or ""),
+            "timestamp": timestamp,
+            "duration": round(float(_get("duration", 0.0) or 0.0), 1),
+            "transcription_status": str(_get("transcription_status", "") or ""),
+            "transcription_provider": str(_get("transcription_provider", "") or ""),
+            "used_fallback": bool(_get("used_fallback", False)),
+            "fallback_type": str(_get("fallback_type", "") or ""),
+            "fallback_reason": _clip(
+                _get("fallback_reason", ""),
+                LLMReviewService._MAX_ERROR_EXCERPT_CHARS,
+            ),
+            "transcription_error": _clip(
+                _get("transcription_error", ""),
+                LLMReviewService._MAX_ERROR_EXCERPT_CHARS,
+            ),
+            "ai_status": str(_get("ai_status", "") or ""),
+            "ai_provider": str(_get("ai_provider", "") or ""),
+            "ai_error": _clip(
+                _get("ai_error", ""),
+                LLMReviewService._MAX_ERROR_EXCERPT_CHARS,
+            ),
+            "raw": _clip(
+                _get("transcription_text", ""),
+                LLMReviewService._MAX_TEXT_EXCERPT_CHARS,
+            ),
+            "ai": _clip(
+                _get("ai_optimized_text", ""),
+                LLMReviewService._MAX_TEXT_EXCERPT_CHARS,
+            ),
+            "out": _clip(
+                _get("final_text", ""),
+                LLMReviewService._MAX_TEXT_EXCERPT_CHARS,
+            ),
+            "dr": _clip(
+                _get("transcription_decision_reason", ""),
+                LLMReviewService._MAX_ERROR_EXCERPT_CHARS,
+            ),
+            "dc": bool(_get("diagnostics_collected", False)),
+            "rp": str(_get("reprocess_parent_id", "") or ""),
+            "sm": str(_get("streaming_mode", "") or ""),
+            "pt": str(_get("transcription_path", "") or ""),
+        }
 
     def _parse_suggestions(
         self,
@@ -277,13 +279,24 @@ class LLMReviewService:
         if not isinstance(item, dict):
             return None
 
+        issue = str(item.get("issue", "") or "").strip()
         suggestion_type = str(item.get("suggestion_type", "") or "").strip()
+        if not suggestion_type:
+            suggestion_type = self._infer_suggestion_type(issue)
+
         title = str(item.get("title", "") or "").strip()
         detail = str(item.get("detail", "") or "").strip()
+        if not title:
+            title = self._derive_title(issue, suggestion_type)
+        if not detail:
+            detail = issue or title
         if not suggestion_type or not title or not detail:
             return None
 
         source_record_ids = item.get("source_record_ids", [])
+        singular_source_record_id = item.get("source_record_id", "")
+        if singular_source_record_id and not source_record_ids:
+            source_record_ids = [singular_source_record_id]
         if isinstance(source_record_ids, str):
             source_record_ids = [source_record_ids]
         if not isinstance(source_record_ids, list):
@@ -329,6 +342,37 @@ class LLMReviewService:
             old_form=old_form,
             new_form=new_form,
         )
+
+    @staticmethod
+    def _infer_suggestion_type(issue: str) -> str:
+        normalized_issue = issue.lower()
+        if "assistant_response_tone" in normalized_issue:
+            return "assistant_response_leak_alert"
+        if "format" in normalized_issue and "pollution" in normalized_issue:
+            return "format_pollution_alert"
+        if "translation" in normalized_issue and "command" in normalized_issue:
+            return "translation_command_leak_alert"
+        if "language" in normalized_issue and "shift" in normalized_issue:
+            return "unexpected_language_shift_alert"
+        if "repetition" in normalized_issue:
+            return "abnormal_repetition_alert"
+        if "collapse" in normalized_issue or "fragment" in normalized_issue:
+            return "collapsed_to_fragment_alert"
+        if "compressed" in normalized_issue:
+            return "over_compressed_long_input_alert"
+        if "expanded" in normalized_issue:
+            return "over_expanded_short_input_alert"
+        if "fallback" in normalized_issue:
+            return "fallback_candidate_alert"
+        if "ai output validation failed" in normalized_issue:
+            return "bad_ai_output_alert"
+        return "bad_ai_output_alert"
+
+    @staticmethod
+    def _derive_title(issue: str, suggestion_type: str) -> str:
+        if issue:
+            return issue[:80]
+        return suggestion_type.replace("_", " ").strip().title() or "Review finding"
 
     @staticmethod
     def _coerce_float(value: Any, default: float) -> float:

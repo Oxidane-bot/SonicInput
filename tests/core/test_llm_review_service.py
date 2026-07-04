@@ -94,3 +94,69 @@ def test_llm_review_service_uses_provider_specific_model_defaults():
 
     assert outcome.provider == "groq"
     assert outcome.model_id == "groq-model"
+
+
+def test_llm_review_service_sends_compact_payload_to_model():
+    client = _Client('{"suggestions": []}')
+    long_text = "这是一段很长的历史记录内容" * 80
+    service = LLMReviewService(
+        _Config(
+            {
+                "ai.provider": "groq",
+                "ai.groq.model_id": "groq-model",
+            }
+        ),
+        client_factory=lambda: client,
+    )
+
+    outcome = service.review_records(
+        [
+            {
+                "id": "r1",
+                "transcription_text": long_text,
+                "ai_optimized_text": long_text,
+                "final_text": long_text,
+                "audio_file_path": "C:/should/not/be/sent.wav",
+            }
+        ]
+    )
+
+    payload = client.calls[0]["text"]
+
+    assert outcome.review_source == "llm"
+    assert '"raw"' in payload
+    assert '"ai"' in payload
+    assert '"out"' in payload
+    assert "audio_file_path" not in payload
+    assert len(payload) < len(long_text)
+
+
+def test_llm_review_service_accepts_compatibility_response_shape():
+    client = _Client(
+        """
+        {
+          "suggestions": [
+            {
+              "source_record_id": "r1",
+              "issue": "AI output validation failed: assistant_response_tone"
+            }
+          ]
+        }
+        """
+    )
+    service = LLMReviewService(
+        _Config(
+            {
+                "ai.provider": "groq",
+                "ai.groq.model_id": "groq-model",
+            }
+        ),
+        client_factory=lambda: client,
+    )
+
+    outcome = service.review_records([{"id": "r1", "transcription_text": "hello"}])
+
+    assert outcome.review_source == "llm"
+    assert len(outcome.suggestions) == 1
+    assert outcome.suggestions[0].suggestion_type == "assistant_response_leak_alert"
+    assert outcome.suggestions[0].source_record_ids == ("r1",)

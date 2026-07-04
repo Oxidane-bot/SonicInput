@@ -127,6 +127,48 @@ class ReviewStorageService:
             conn.commit()
         return job_id
 
+    def load_review_cursor(
+        self, *, cursor_name: str = "llm_review"
+    ) -> dict[str, str] | None:
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            self._create_tables(conn)
+            row = conn.execute(
+                """
+                SELECT cursor_timestamp, cursor_id
+                FROM review_cursors
+                WHERE cursor_name = ?
+                """,
+                (cursor_name,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "cursor_timestamp": str(row["cursor_timestamp"] or ""),
+            "cursor_id": str(row["cursor_id"] or ""),
+        }
+
+    def save_review_cursor(
+        self,
+        *,
+        cursor_timestamp: str | None,
+        cursor_id: str | None,
+        cursor_name: str = "llm_review",
+    ) -> None:
+        with sqlite3.connect(str(self._db_path)) as conn:
+            self._create_tables(conn)
+            conn.execute(
+                """
+                INSERT INTO review_cursors (cursor_name, cursor_timestamp, cursor_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(cursor_name) DO UPDATE SET
+                    cursor_timestamp = excluded.cursor_timestamp,
+                    cursor_id = excluded.cursor_id
+                """,
+                (cursor_name, cursor_timestamp, cursor_id),
+            )
+            conn.commit()
+
     def list_pending_suggestions(self, limit: int = 100) -> list[dict[str, object]]:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
@@ -330,6 +372,15 @@ class ReviewStorageService:
                 decided_at TEXT NOT NULL,
                 note TEXT,
                 FOREIGN KEY(suggestion_id) REFERENCES review_suggestions(suggestion_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS review_cursors (
+                cursor_name TEXT PRIMARY KEY,
+                cursor_timestamp TEXT,
+                cursor_id TEXT
             )
             """
         )

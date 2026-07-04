@@ -133,6 +133,7 @@ def test_ui_settings_service_can_run_review_now_from_container():
         review_source="llm",
         provider="openrouter",
         model_id="demo-model",
+        fallback_reason="token_limit",
     )
 
     class Container:
@@ -157,6 +158,7 @@ def test_ui_settings_service_can_run_review_now_from_container():
         "reviewedRecordCount": 12,
         "suggestionCount": 2,
         "reviewSource": "llm",
+        "fallbackReason": "token_limit",
     }
     scheduler.run_once_now.assert_called_once_with(review_service=review_service)
 

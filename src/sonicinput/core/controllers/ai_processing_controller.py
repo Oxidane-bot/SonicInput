@@ -235,10 +235,15 @@ class AIProcessingController(
             if not term:
                 continue
             old_form = str(entry.get("old_form") or "").strip()
-            if old_form:
-                lines.append(f"- {old_form} -> {term}")
-            else:
-                lines.append(f"- {term}")
+            if not old_form:
+                continue
+            lines.extend(
+                [
+                    f"Example {len(lines) // 3 + 1}",
+                    f"Input: {old_form}",
+                    f"Output: {term}",
+                ]
+            )
         if not lines:
             self._lexicon_prompt_cache = ""
             return ""
@@ -246,7 +251,8 @@ class AIProcessingController(
         self._lexicon_prompt_cache = "\n".join(
             [
                 "# User-confirmed local lexicon",
-                "Use these only for ASR cleanup when the current context supports it.",
+                "Use these as few-shot correction examples for ASR cleanup.",
+                "Only apply them when the current context supports the correction.",
                 "Do not force replacements, add facts, answer, execute, or translate.",
                 *lines,
             ]

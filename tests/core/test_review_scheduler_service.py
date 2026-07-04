@@ -75,6 +75,63 @@ class _ReviewServiceStub:
         )
 
 
+class _CursorStorageStub:
+    def __init__(self):
+        self.cursor = None
+        self.saved_cursors = []
+        self.saved_jobs = []
+
+    def load_review_cursor(self):
+        return self.cursor
+
+    def save_review_cursor(self, *, cursor_timestamp, cursor_id, cursor_name="llm_review"):
+        self.cursor = {
+            "cursor_timestamp": cursor_timestamp,
+            "cursor_id": cursor_id,
+            "cursor_name": cursor_name,
+        }
+        self.saved_cursors.append(self.cursor)
+
+    def save_review_run(
+        self,
+        suggestions,
+        *,
+        record_limit,
+        reviewed_count,
+        review_source="local",
+        provider=None,
+        model_id=None,
+        prompt_version=None,
+        fallback_reason=None,
+    ):
+        job_id = f"job-{len(self.saved_jobs) + 1}"
+        self.saved_jobs.append(
+            {
+                "id": job_id,
+                "reviewed_count": reviewed_count,
+                "record_limit": record_limit,
+                "review_source": review_source,
+                "provider": provider,
+                "model_id": model_id,
+                "prompt_version": prompt_version,
+                "fallback_reason": fallback_reason,
+                "suggestions": list(suggestions),
+            }
+        )
+        return job_id
+
+
+class _HistoryLoaderStub:
+    def __init__(self, pages):
+        self.pages = pages
+        self.calls = []
+
+    def __call__(self, limit, cursor):
+        self.calls.append(cursor)
+        key = None if cursor is None else cursor["cursor_id"]
+        return self.pages.get(key, [])
+
+
 def test_review_scheduler_waits_until_idle():
     clock = _Clock()
     scheduler = ReviewSchedulerService(
@@ -209,6 +266,68 @@ def test_review_scheduler_uses_llm_review_service_when_provided():
     assert jobs[0]["review_source"] == "llm"
     assert jobs[0]["provider"] == "openrouter"
     assert jobs[0]["model_id"] == "demo-model"
+
+
+def test_review_scheduler_rotates_through_history_windows():
+    clock = _Clock(1000)
+    storage = _CursorStorageStub()
+    records = [
+        {"id": "r5", "timestamp": "2026-06-16T00:05:00", "transcription_text": "5"},
+        {"id": "r4", "timestamp": "2026-06-16T00:04:00", "transcription_text": "4"},
+        {"id": "r3", "timestamp": "2026-06-16T00:03:00", "transcription_text": "3"},
+        {"id": "r2", "timestamp": "2026-06-16T00:02:00", "transcription_text": "2"},
+        {"id": "r1", "timestamp": "2026-06-16T00:01:00", "transcription_text": "1"},
+    ]
+    pages = []
+
+    def load_review_records(limit, cursor):
+        pages.append(cursor)
+        if cursor is None:
+            return records[:2]
+        if cursor["cursor_id"] == "r4":
+            return records[2:4]
+        if cursor["cursor_id"] == "r2":
+            return records[4:]
+        return []
+
+    scheduler = ReviewSchedulerService(
+        load_review_records=load_review_records,
+        review_storage=storage,
+        config=ReviewSchedulerConfig(idle_seconds=0, max_records=2),
+        clock=clock,
+    )
+
+    first = scheduler.run_once_now()
+    second = scheduler.run_once_now()
+    third = scheduler.run_once_now()
+
+    assert first.reviewed_record_count == 2
+    assert second.reviewed_record_count == 2
+    assert third.reviewed_record_count == 1
+    assert [page and page["cursor_id"] for page in pages] == [None, "r4", "r2"]
+    assert storage.saved_cursors[-1]["cursor_id"] == "r1"
+
+
+def test_review_scheduler_falls_back_to_recent_records_when_cursor_page_empty():
+    clock = _Clock(1000)
+    storage = _CursorStorageStub()
+    storage.cursor = {"cursor_timestamp": "2026-06-16T00:00:00", "cursor_id": "missing"}
+    loader = _HistoryLoaderStub({None: [{"id": "r1"}]})
+
+    scheduler = ReviewSchedulerService(
+        load_review_records=loader,
+        review_storage=storage,
+        config=ReviewSchedulerConfig(idle_seconds=0, max_records=1),
+        clock=clock,
+    )
+
+    result = scheduler.run_once_now()
+
+    assert result.reviewed_record_count == 1
+    assert loader.calls == [
+        {"cursor_timestamp": "2026-06-16T00:00:00", "cursor_id": "missing"},
+        None,
+    ]
 
 
 def test_review_scheduler_respects_session_budget_after_interval():

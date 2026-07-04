@@ -5,6 +5,7 @@ Only provides essential features actually needed by the application.
 """
 
 from enum import Enum
+from datetime import datetime
 from typing import Any, Callable, Dict, Type, TypeVar
 
 # Interface imports for create_container()
@@ -356,6 +357,15 @@ def create_container() -> "DIContainer":
         review_storage = container.resolve(ReviewStorageService)
         return ReviewSchedulerService(
             load_recent_records=lambda limit: history.search_records(limit=limit),
+            load_review_records=lambda limit, cursor: history.search_records_keyset(
+                limit=limit,
+                cursor_timestamp=(
+                    datetime.fromisoformat(cursor["cursor_timestamp"])
+                    if cursor and cursor.get("cursor_timestamp")
+                    else None
+                ),
+                cursor_id=cursor.get("cursor_id") if cursor else None,
+            ),
             review_storage=review_storage,
             config=ReviewSchedulerService.config_from_service(config),
         )

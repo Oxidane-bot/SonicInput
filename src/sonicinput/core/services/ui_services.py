@@ -465,6 +465,7 @@ class UISettingsService:
             ),
             "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
             "reviewSource": str(getattr(result, "review_source", "") or "local"),
+            "fallbackReason": str(getattr(result, "fallback_reason", "") or ""),
         }
 
     def run_idle_review_once(self) -> dict[str, Any]:
@@ -519,6 +520,7 @@ class UISettingsService:
             ),
             "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
             "reviewSource": str(getattr(result, "review_source", "") or "local"),
+            "fallbackReason": str(getattr(result, "fallback_reason", "") or ""),
         }
 
     def get_transcription_service(self):
