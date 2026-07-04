@@ -90,8 +90,7 @@ quality_audit/
 .release-notes-*.md
 docs/refactor_optimization_plan_*.md
 
-# OpenSpec change management (local development only)
-openspec/
+# Local agent instructions (local development only)
 AGENTS.md
 
 # Temporary analysis files

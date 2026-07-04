@@ -65,7 +65,7 @@ CONTEXT_AWARE_PROMPT = (
 Context-aware terminology:
 - Use nearby context to repair likely ASR errors in technical terms.
 - Preserve acronyms and tool names such as Python, PyTorch, NumPy, Pandas, Qt,
-  QML, SQLite, OpenSpec, API, UI, GPU, and ASR when context supports them.
+  QML, SQLite, API, UI, GPU, and ASR when context supports them.
 - Do not force a technical term if the surrounding text does not justify it.
 """
 )
