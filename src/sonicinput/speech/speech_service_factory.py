@@ -13,6 +13,10 @@ from typing import Optional
 from ..core.interfaces import IConfigService, ISpeechService
 from ..core.services.config import ConfigKeys
 from ..utils import app_logger
+from .sherpa_runtime import (
+    configure_sherpa_dll_search_path,
+    inspect_onnxruntime_candidates,
+)
 
 
 class SpeechServiceFactory:
@@ -33,6 +37,7 @@ class SpeechServiceFactory:
             bool: True if sherpa-onnx is installed, False otherwise
         """
         try:
+            configure_sherpa_dll_search_path()
             import sherpa_onnx  # noqa: F401
 
             return True
@@ -66,21 +71,11 @@ class SpeechServiceFactory:
         exe_dir = Path(sys.executable).resolve().parent
         details["exe_dir"] = str(exe_dir)
 
-        onnxruntime_candidates = [
-            exe_dir / "onnxruntime.dll",
-        ]
-        if spec and spec.submodule_search_locations:
-            base_dir = Path(list(spec.submodule_search_locations)[0])
-            onnxruntime_candidates.append(base_dir / "lib" / "onnxruntime.dll")
-
         system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
-        onnxruntime_candidates.append(system32 / "onnxruntime.dll")
-
-        details["onnxruntime_locations_checked"] = [
-            str(path) for path in onnxruntime_candidates
-        ]
+        onnxruntime_candidates = inspect_onnxruntime_candidates()
+        details["onnxruntime_locations_checked"] = onnxruntime_candidates
         details["onnxruntime_found"] = any(
-            path.exists() for path in onnxruntime_candidates
+            candidate["exists"] for candidate in onnxruntime_candidates
         )
 
         vc_runtime_dlls = [

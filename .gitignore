@@ -63,10 +63,7 @@ nuitka-crash-report-*.xml
 
 # Temporary test files
 test_*.py
-!tests/test_*.py
-!tests/ci/**/test_*.py
-!tests/ui/**/test_*.py
-!tests/core/**/test_*.py
+!tests/**/test_*.py
 analyze_*.py
 check_*.py
 

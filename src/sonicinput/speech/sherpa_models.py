@@ -6,6 +6,7 @@
 import os
 import sys
 import tarfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -29,6 +30,8 @@ from ..core.base.lifecycle_component import LifecycleComponent
 
 class SherpaModelManager(LifecycleComponent):
     """sherpa-onnx 模型管理器"""
+
+    CACHE_SCHEMA_VERSION = 2
 
     MODELS = {
         "paraformer": {
@@ -54,7 +57,7 @@ class SherpaModelManager(LifecycleComponent):
             cache_dir: Optional model cache root. If not set, resolution order is:
                 1) executable sibling models directory
                 2) SONICINPUT_MODELS_DIR environment variable
-                3) ~/.sonicinput/sherpa_models
+                3) ~/.sonicinput/sherpa_models_v2
         """
         super().__init__("SherpaModelManager")
 
@@ -82,7 +85,12 @@ class SherpaModelManager(LifecycleComponent):
         if env_dir:
             return Path(env_dir), "env"
 
-        return Path.home() / ".sonicinput" / "sherpa_models", "default"
+        return (
+            Path.home()
+            / ".sonicinput"
+            / f"sherpa_models_v{SherpaModelManager.CACHE_SCHEMA_VERSION}",
+            "default",
+        )
 
     def is_model_cached(self, model_name: str) -> bool:
         """检查模型是否已缓存
@@ -110,13 +118,24 @@ class SherpaModelManager(LifecycleComponent):
             required_files = ["tokens.txt", "encoder.int8.onnx", "decoder.int8.onnx"]
 
         try:
-            return model_dir.exists() and all(
-                (model_dir / f).exists() for f in required_files
+            return model_dir.is_dir() and all(
+                self._is_readable_file(model_dir / f) for f in required_files
             )
         except OSError as e:
             logger.warning(
                 f"Failed to inspect cached model '{model_name}' at {model_dir}: {e}"
             )
+            return False
+
+    @staticmethod
+    def _is_readable_file(path: Path) -> bool:
+        try:
+            if not path.is_file():
+                return False
+            with open(path, "rb") as handle:
+                handle.read(1)
+            return True
+        except OSError:
             return False
 
     @staticmethod
@@ -129,6 +148,15 @@ class SherpaModelManager(LifecycleComponent):
             )
         if not parsed.netloc:
             raise RuntimeError("Model URL must include a valid host")
+
+    @staticmethod
+    def _should_show_progress_dialog() -> bool:
+        """Only show Qt progress UI on the main GUI thread."""
+        return (
+            PYSIDE6_AVAILABLE
+            and threading.current_thread() is threading.main_thread()
+            and QApplication.instance() is not None
+        )
 
     def _safe_extract_members(
         self, tar: tarfile.TarFile, members: list[tarfile.TarInfo]
@@ -198,7 +226,7 @@ class SherpaModelManager(LifecycleComponent):
 
         # 创建进度对话框 (如果 PySide6 可用)
         progress_dialog = None
-        if PYSIDE6_AVAILABLE:
+        if self._should_show_progress_dialog():
             try:
 
                 def _tr(text: str) -> str:

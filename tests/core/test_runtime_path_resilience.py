@@ -9,6 +9,9 @@ class _InaccessiblePath:
     def exists(self):
         raise PermissionError("denied")
 
+    def is_dir(self):
+        raise PermissionError("denied")
+
 
 def test_is_model_cached_returns_false_when_cache_path_is_inaccessible(monkeypatch):
     manager = SherpaModelManager(cache_dir=".tmp_pytest/models")

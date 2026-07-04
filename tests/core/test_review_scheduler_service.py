@@ -84,7 +84,9 @@ class _CursorStorageStub:
     def load_review_cursor(self):
         return self.cursor
 
-    def save_review_cursor(self, *, cursor_timestamp, cursor_id, cursor_name="llm_review"):
+    def save_review_cursor(
+        self, *, cursor_timestamp, cursor_id, cursor_name="llm_review"
+    ):
         self.cursor = {
             "cursor_timestamp": cursor_timestamp,
             "cursor_id": cursor_id,

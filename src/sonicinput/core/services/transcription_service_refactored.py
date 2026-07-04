@@ -41,6 +41,9 @@ def _init_subprocess_worker(model_config: Dict[str, Any]) -> None:
     _PROCESS_MODEL_CONFIG = model_config
 
     try:
+        from ...speech.sherpa_runtime import configure_sherpa_dll_search_path
+
+        configure_sherpa_dll_search_path()
         import sherpa_onnx
 
         if model_config["model_type"] == "paraformer":

@@ -522,6 +522,12 @@ class StartupDiagnostics:
 
         sherpa_base = None
         try:
+            from sonicinput.speech.sherpa_runtime import (
+                configure_sherpa_dll_search_path,
+                inspect_onnxruntime_candidates,
+            )
+
+            configure_sherpa_dll_search_path()
             spec = importlib.util.find_spec("sherpa_onnx")
             if spec and spec.submodule_search_locations:
                 sherpa_base = Path(list(spec.submodule_search_locations)[0])
@@ -544,17 +550,12 @@ class StartupDiagnostics:
         except Exception as exc:
             result["errors"].append(f"sherpa_onnx inspection failed: {exc}")
 
-        exe_dir = Path(sys.executable).resolve().parent
-        onnx_candidates = [exe_dir / "onnxruntime.dll"]
-        if sherpa_base:
-            onnx_candidates.append(sherpa_base / "lib" / "onnxruntime.dll")
         system32 = Path(os.environ.get("SystemRoot", r"C:\\Windows")) / "System32"
-        onnx_candidates.append(system32 / "onnxruntime.dll")
-
-        result["onnxruntime_locations_checked"] = [
-            str(path) for path in onnx_candidates
-        ]
-        result["onnxruntime_found"] = any(path.exists() for path in onnx_candidates)
+        onnx_candidates = inspect_onnxruntime_candidates()
+        result["onnxruntime_locations_checked"] = onnx_candidates
+        result["onnxruntime_found"] = any(
+            candidate["exists"] for candidate in onnx_candidates
+        )
         if not result["onnxruntime_found"]:
             result["warnings"].append("onnxruntime.dll not found in common locations")
 

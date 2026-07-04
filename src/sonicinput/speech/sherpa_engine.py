@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from loguru import logger
 
+from .sherpa_runtime import configure_sherpa_dll_search_path
+
+configure_sherpa_dll_search_path()
+
 try:
     import sherpa_onnx
 except ImportError:
