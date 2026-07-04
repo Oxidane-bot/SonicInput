@@ -271,7 +271,9 @@ def test_fts_index_syncs_with_save_and_update(tmp_path: Path) -> None:
         db_path.unlink()
 
 
-def test_delete_record_keeps_shared_audio_file_until_last_reference(tmp_path: Path) -> None:
+def test_delete_record_keeps_shared_audio_file_until_last_reference(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "history_delete_shared.db"
     audio_path = tmp_path / "shared_audio.wav"
     audio_path.write_bytes(b"wav")

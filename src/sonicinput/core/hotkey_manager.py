@@ -183,7 +183,7 @@ def get_backend_info(backend: str) -> dict:
 
 
 # Re-export for backward compatibility
-from .hotkey_manager_pynput import PynputHotkeyManager as HotkeyManager
+from .hotkey_manager_pynput import PynputHotkeyManager as HotkeyManager  # noqa: E402
 
 __all__ = [
     "create_hotkey_manager",

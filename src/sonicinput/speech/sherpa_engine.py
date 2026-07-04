@@ -18,10 +18,12 @@ except ImportError:
     logger.error("sherpa-onnx not installed. Please run: uv sync --extra local")
     sherpa_onnx = None
 
-from ..core.base.lifecycle_component import LifecycleComponent
-from ..core.interfaces.speech import ISpeechService
-from .sherpa_models import SherpaModelManager
-from .sherpa_streaming import SherpaStreamingSession
+# 以下导入必须在 configure_sherpa_dll_search_path() 之后(E402 豁免):
+# 它们直接或间接 import sherpa_onnx,DLL 搜索路径需先就位。
+from ..core.base.lifecycle_component import LifecycleComponent  # noqa: E402
+from ..core.interfaces.speech import ISpeechService  # noqa: E402
+from .sherpa_models import SherpaModelManager  # noqa: E402
+from .sherpa_streaming import SherpaStreamingSession  # noqa: E402
 
 
 class SherpaEngine(LifecycleComponent, ISpeechService):

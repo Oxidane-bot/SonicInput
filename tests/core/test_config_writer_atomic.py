@@ -157,14 +157,26 @@ class TestAtomicConfigWrite:
 class TestConfigWriteErrorHandling:
     """Test error handling during config write"""
 
-    @pytest.mark.skip(reason="Windows file permissions test is unreliable")
-    def test_write_to_readonly_directory_fails_gracefully(self, tmp_path):
-        """Test writing to read-only directory fails gracefully
+    def test_write_to_unwritable_directory_fails_gracefully(self, tmp_path):
+        """Test writing to an unwritable directory fails gracefully
 
-        Note: This test is skipped on Windows as file permission enforcement
-        is not reliable for testing purposes.
+        Windows does not reliably enforce read-only directory permissions,
+        so simulate the PermissionError at temp-file creation time instead.
         """
-        pass
+        config_file = tmp_path / "test_config.json"
+        writer = ConfigWriter(config_file)
+        writer.set_config({"test": "value"})
+
+        with patch(
+            "tempfile.NamedTemporaryFile",
+            side_effect=PermissionError("Access is denied"),
+        ):
+            success = writer.save_config()
+
+        # Should fail gracefully without raising, and leave no files behind
+        assert not success
+        assert not config_file.exists()
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_save_with_invalid_json_fails(self, tmp_path):
         """Test saving config with non-serializable data fails gracefully"""

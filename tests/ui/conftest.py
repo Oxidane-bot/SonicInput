@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
-from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog, QWidget
+from PySide6.QtWidgets import QMessageBox, QProgressDialog, QWidget
 
 
 def _assert_valid_parent(method_name: str, parent) -> None:
