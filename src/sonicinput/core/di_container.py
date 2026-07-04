@@ -6,6 +6,7 @@ Only provides essential features actually needed by the application.
 
 from enum import Enum
 from datetime import datetime
+import threading
 from typing import Any, Callable, Dict, Type, TypeVar
 
 # Interface imports for create_container()
@@ -67,6 +68,8 @@ class DIContainer:
         # Core storage
         self._registrations: Dict[Type, tuple[Callable, Lifetime]] = {}
         self._singletons: Dict[Type, Any] = {}
+        # Per-thread resolution chain for circular dependency detection
+        self._resolving = threading.local()
 
     def register_singleton(
         self,
@@ -133,6 +136,7 @@ class DIContainer:
 
         Raises:
             ValueError: If service not registered
+            RuntimeError: If a circular dependency is detected during creation
 
         Example:
             config = container.resolve(IConfigService)
@@ -142,14 +146,44 @@ class DIContainer:
 
         creator, lifetime = self._registrations[interface]
 
-        # Singleton: reuse existing instance
-        if lifetime == Lifetime.SINGLETON:
-            if interface not in self._singletons:
-                self._singletons[interface] = creator()
+        # Singleton: reuse existing instance (no creation -> no cycle possible)
+        if lifetime == Lifetime.SINGLETON and interface in self._singletons:
             return self._singletons[interface]
 
-        # Transient: create new instance
-        return creator()
+        instance = self._invoke_creator(interface, creator)
+
+        if lifetime == Lifetime.SINGLETON:
+            self._singletons[interface] = instance
+        return instance
+
+    def _invoke_creator(self, interface: Type[T], creator: Callable[[], Any]) -> T:
+        """Run a creator with circular dependency detection
+
+        Factories typically call ``container.resolve(...)`` for their own
+        dependencies. We track the per-thread chain of in-progress
+        resolutions; re-entering a type that is still being created means
+        the dependency graph has a cycle, which would otherwise die with an
+        opaque RecursionError.
+
+        Raises:
+            RuntimeError: With the full A -> B -> A chain when a cycle is hit
+        """
+        chain: list[Type] = getattr(self._resolving, "chain", None) or []
+        self._resolving.chain = chain
+
+        if interface in chain:
+            cycle = " -> ".join(t.__name__ for t in [*chain, interface])
+            raise RuntimeError(
+                f"Circular dependency detected: {cycle}. "
+                f"Break the cycle by injecting one side lazily "
+                f"(e.g. resolve it inside a method instead of the factory)."
+            )
+
+        chain.append(interface)
+        try:
+            return creator()
+        finally:
+            chain.pop()
 
     def update_singleton(self, interface: Type[T], new_instance: T) -> None:
         """Update a singleton instance at runtime
@@ -203,10 +237,9 @@ class DIContainer:
             Service instance
 
         Note:
-            This is a simple implementation that does NOT handle:
-            - Constructor parameter injection
-            - Circular dependency detection
-            Circular dependencies must be avoided manually.
+            This is a simple implementation that does NOT handle
+            constructor parameter injection. Circular dependencies between
+            factories are detected in resolve() (see _invoke_creator).
         """
         try:
             # Simple instantiation without dependency injection
