@@ -85,23 +85,32 @@ tmp_pytest*/
 test_analysis/
 temp_export/
 quality_audit/
+artifacts/
+tmp_ocr_folder_check/
+.tmp/
+.tmp_pytest/
+.tmp_gui_pytest/
+.pytest_basetemp/
+.pytest_tmp/
+.pytest_run_*/
+.nuitka_cache/
 
 # Release notes (only used for GitHub releases)
 .release-notes-*.md
+RELEASE_NOTES_*.md
 docs/refactor_optimization_plan_*.md
 
 # Local agent instructions (local development only)
 AGENTS.md
 
 # Temporary analysis files
-bandit_report.json
+bandit-report.json
 bandit_sherpa_check.json
 test_output.txt
 verify_*.py
 
 # Old release notes (keep only latest version)
 RELEASE_NOTES_v0.*.md
-!RELEASE_NOTES_v0.5.8.md
 CLAUDE.md
 
 # Packaging documentation (superseded by BUILD.md)
