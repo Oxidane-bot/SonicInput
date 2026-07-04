@@ -1099,6 +1099,7 @@ class TestFluentSettingsViewModel:
         self, mock_config_service, monkeypatch
     ):
         import sonicinput.ui.qml_bridge as qml_bridge
+        import sonicinput.ui.viewmodels.batch_reprocess as batch_reprocess_module
 
         history_service = Mock()
         history_service.get_total_count.return_value = 2
@@ -1118,7 +1119,9 @@ class TestFluentSettingsViewModel:
             def start(self):
                 self.started = True
 
-        monkeypatch.setattr(qml_bridge, "BatchReprocessingWorker", FakeWorker)
+        monkeypatch.setattr(
+            batch_reprocess_module, "BatchReprocessingWorker", FakeWorker
+        )
 
         view_model = qml_bridge.FluentSettingsViewModel(mock_config_service)
         view_model.startBatchReprocess()
@@ -1133,6 +1136,7 @@ class TestFluentSettingsViewModel:
         self, mock_config_service, monkeypatch
     ):
         import sonicinput.ui.qml_bridge as qml_bridge
+        import sonicinput.ui.viewmodels.history as history_module
 
         record = _make_history_record("h-1", "retry me")
         history_service = Mock()
@@ -1156,7 +1160,7 @@ class TestFluentSettingsViewModel:
             def start(self):
                 self.started = True
 
-        monkeypatch.setattr(qml_bridge, "ReprocessingWorker", FakeWorker)
+        monkeypatch.setattr(history_module, "ReprocessingWorker", FakeWorker)
 
         view_model = qml_bridge.FluentSettingsViewModel(mock_config_service)
         view_model.refreshHistory("")

@@ -97,7 +97,6 @@ module = [
     "sonicinput.ui.apply_transaction",
     "sonicinput.ui.history_formatters",
     "sonicinput.ui.history_workers",
-    "sonicinput.ui.qml_bridge",
     "sonicinput.ui.components.system_tray.tray_controller",
     "sonicinput.ui.components.system_tray.tray_widget",
 ]
