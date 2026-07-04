@@ -31,6 +31,7 @@ dependencies = [
     "wtpsplit-lite==0.2.0",
     "onnxruntime==1.23.2",
     "socksio==1.0.0",
+    "pypinyin>=0.55.0",
 ]
 
 [project.optional-dependencies]

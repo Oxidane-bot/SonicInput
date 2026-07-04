@@ -34,9 +34,9 @@ class LLMReviewService:
     output.
     """
 
-    _PROMPT_VERSION = "v1"
+    _PROMPT_VERSION = "v2"
     _MAX_OUTPUT_TOKENS = 1400
-    _MAX_TEXT_EXCERPT_CHARS = 30
+    _MAX_TEXT_EXCERPT_CHARS = 200
     _MAX_ERROR_EXCERPT_CHARS = 80
     _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
@@ -157,12 +157,28 @@ class LLMReviewService:
         return str(self._config_service.get_setting(key, default_map.get(provider, "")))
 
     def _build_prompt(self) -> str:
+        # v2: 词条挖掘优先 — 审查的产出是「错误形式 → 正确形式」的词汇库
+        # 候选,而不是泛化的质量警报。用户确认后词条才会注入后续转写。
         return (
-            'Return only JSON: {"suggestions":[]}. '
-            "Flag transcript quality issues only. "
-            "No markdown or explanations. "
-            "Use source_record_ids. "
-            "Prompt v1."
+            "You mine ASR dictation history for recurring word-level "
+            "recognition errors: proper nouns, technical terms, names, and "
+            "homophone mistakes the ASR keeps getting wrong. "
+            'Return only JSON: {"suggestions":[{'
+            '"suggestion_type":"lexicon_candidate",'
+            '"old_form":"<misrecognized text as ASR wrote it>",'
+            '"new_form":"<what the user actually meant>",'
+            '"title":"<short summary>",'
+            '"detail":"<evidence: where and why>",'
+            '"confidence":0.8,'
+            '"source_record_ids":["<record id>"]}]}. '
+            "Compare the raw/ai/out fields of each record to spot both "
+            "corrections the AI already made (confirm them as lexicon pairs) "
+            "and errors that survived to the final output. "
+            "Only report concrete word or short-phrase pairs that a user "
+            "would want auto-corrected in future dictation. "
+            "No sentence rewrites, no style feedback, no generic quality "
+            'alerts, no markdown. Return {"suggestions":[]} if nothing '
+            "qualifies. Prompt v2."
         )
 
     def _build_payload(self, records: list[Any]) -> str:
@@ -282,7 +298,13 @@ class LLMReviewService:
         issue = str(item.get("issue", "") or "").strip()
         suggestion_type = str(item.get("suggestion_type", "") or "").strip()
         if not suggestion_type:
-            suggestion_type = self._infer_suggestion_type(issue)
+            # v2 提示词只要求词条候选:带成对形式的条目默认按词条处理
+            if self._optional_string(item.get("old_form")) and self._optional_string(
+                item.get("new_form")
+            ):
+                suggestion_type = "lexicon_candidate"
+            else:
+                suggestion_type = self._infer_suggestion_type(issue)
 
         title = str(item.get("title", "") or "").strip()
         detail = str(item.get("detail", "") or "").strip()
@@ -323,6 +345,9 @@ class LLMReviewService:
 
         old_form = self._optional_string(item.get("old_form"))
         new_form = self._optional_string(item.get("new_form"))
+        # 词条候选缺少任一形式就无法入库/注入,直接丢弃
+        if suggestion_type == "lexicon_candidate" and not (old_form and new_form):
+            return None
         evidence_count = len(normalized_ids)
         return ReviewSuggestion(
             suggestion_id=self._stable_suggestion_id(

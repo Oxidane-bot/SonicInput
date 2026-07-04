@@ -91,7 +91,7 @@ ZH_CN: dict[str, str] = {
     "preset_position": "预设位置",
     "provider": "提供商",
     "quality_review": "模型审查",
-    "quality_review_help": "优先调用你配置的 AI 提供商生成审查建议；如果模型不可用，会退回本地安全校验。",
+    "quality_review_help": "模型会从听写历史中挖掘常被听写错误的词汇，生成「错误形式 → 正确形式」候选；接受后进入本地词汇库。只有当前文本出现同音/近音片段时，词条才会作为提示注入 AI 清理。",
     "provider_credentials": "提供商凭据",
     "recording_overlay": "录音悬浮窗",
     "recording_details": "录音详情",

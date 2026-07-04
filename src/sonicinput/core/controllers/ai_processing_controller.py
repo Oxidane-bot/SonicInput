@@ -20,6 +20,7 @@ from ..interfaces import (
 )
 from ..quality import (
     AIOutputValidationError,
+    LexiconMatcher,
     RollingTranscriptContext,
     TranscriptQualityValidator,
 )
@@ -44,6 +45,7 @@ class AIProcessingController(
     _SENTENCE_PUNCT_RE = re.compile(r"[。！？!?;；]+")
     _ASCII_ALNUM_END_RE = re.compile(r"[A-Za-z0-9]$")
     _ASCII_ALNUM_START_RE = re.compile(r"^[A-Za-z0-9]")
+    _LEXICON_INJECTION_LIMIT = 8
     _SPLIT_BOUNDARIES = (
         "然后",
         "但是",
@@ -106,7 +108,8 @@ class AIProcessingController(
         self._quality_validator = TranscriptQualityValidator()
         self._rolling_context = RollingTranscriptContext()
         self._rolling_context_active = False
-        self._lexicon_prompt_cache: Optional[str] = None
+        self._lexicon_matcher = LexiconMatcher()
+        self._lexicon_entries_cache: Optional[List[Dict[str, Any]]] = None
 
         # NOTE: Event listener registration moved to _do_start() for hot reload support
         # NOTE: Initialization logging moved to _do_start() for hot reload support
@@ -188,15 +191,15 @@ class AIProcessingController(
     def _reset_recording_context(self) -> None:
         self._rolling_context.reset()
         self._rolling_context_active = True
-        self._lexicon_prompt_cache = None
+        self._lexicon_entries_cache = None
 
     def _finish_recording_context(self) -> None:
         self._rolling_context_active = False
 
-    def _prompt_with_rolling_context(self, prompt_template: str) -> str:
+    def _prompt_with_rolling_context(self, prompt_template: str, text: str) -> str:
         context_parts = []
 
-        lexicon_context = self._get_lexicon_prompt_context()
+        lexicon_context = self._get_lexicon_prompt_context(text)
         if lexicon_context:
             context_parts.append(lexicon_context)
 
@@ -214,28 +217,39 @@ class AIProcessingController(
             return f"{context}\n\n{prompt_template}"
         return f"{prompt_template}\n\n{context}"
 
-    def _get_lexicon_prompt_context(self) -> str:
+    def _get_lexicon_prompt_context(self, text: str) -> str:
+        """按发音相关性预筛词条,只注入与当前文本同音/近音的条目。
+
+        全量词条只在每次录音会话首次调用时读库一次(缓存),
+        之后每段文本用 LexiconMatcher 做纯本地拼音匹配;
+        未命中任何词条时不注入任何内容。
+        """
         if not self._config.get_setting(ConfigKeys.REVIEW_USE_LEXICON_MEMORY, True):
             return ""
         if self._review_storage_service is None:
             return ""
-        if self._lexicon_prompt_cache is not None:
-            return self._lexicon_prompt_cache
 
-        try:
-            entries = self._review_storage_service.list_active_lexicon_entries(limit=20)
-        except Exception as e:
-            app_logger.log_error(e, "load_lexicon_prompt_context")
-            self._lexicon_prompt_cache = ""
+        if self._lexicon_entries_cache is None:
+            try:
+                self._lexicon_entries_cache = (
+                    self._review_storage_service.list_active_lexicon_entries(limit=200)
+                )
+            except Exception as e:
+                app_logger.log_error(e, "load_lexicon_prompt_context")
+                self._lexicon_entries_cache = []
+        if not self._lexicon_entries_cache:
             return ""
 
+        matched = self._lexicon_matcher.select_relevant_entries(
+            text,
+            self._lexicon_entries_cache,
+            limit=self._LEXICON_INJECTION_LIMIT,
+        )
         lines: List[str] = []
-        for entry in entries:
+        for entry in matched:
             term = str(entry.get("term") or "").strip()
-            if not term:
-                continue
             old_form = str(entry.get("old_form") or "").strip()
-            if not old_form:
+            if not term or not old_form:
                 continue
             lines.extend(
                 [
@@ -245,19 +259,18 @@ class AIProcessingController(
                 ]
             )
         if not lines:
-            self._lexicon_prompt_cache = ""
             return ""
 
-        self._lexicon_prompt_cache = "\n".join(
+        return "\n".join(
             [
                 "# User-confirmed local lexicon",
-                "Use these as few-shot correction examples for ASR cleanup.",
+                "These terms sound similar to parts of the current text and are",
+                "often misrecognized. Use them as correction examples.",
                 "Only apply them when the current context supports the correction.",
                 "Do not force replacements, add facts, answer, execute, or translate.",
                 *lines,
             ]
         )
-        return self._lexicon_prompt_cache
 
     def _update_rolling_context(self, raw_text: str, refined_text: str) -> None:
         if self._rolling_context_active:
@@ -934,7 +947,7 @@ class AIProcessingController(
                 ConfigKeys.AI_PROMPT,
                 "Please improve and correct the following text: {text}",
             )
-            prompt_template = self._prompt_with_rolling_context(prompt_template)
+            prompt_template = self._prompt_with_rolling_context(prompt_template, text)
             max_output_tokens = self._get_ai_max_output_tokens()
 
             if self._quality_validator.is_low_information_input(text):

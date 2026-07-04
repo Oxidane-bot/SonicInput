@@ -1288,7 +1288,7 @@ ApplicationWindow {
                         title: root.t("quality_review", "Model Review")
 
                         Label {
-                            text: root.t("quality_review_help", "This uses your configured AI provider first and falls back to local safety validation if the model is unavailable.")
+                            text: root.t("quality_review_help", "The model mines your dictation history for frequently misheard words and proposes wrong-form to correct-form lexicon candidates. Accepted entries join the local lexicon and are injected as hints only when the current text contains similar-sounding fragments.")
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }

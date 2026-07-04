@@ -371,14 +371,12 @@ class VoiceInputApp:
         if not self.config.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return ReviewSchedulerRunResult(False, "review_disabled")
         review_service = None
-        container_ref = getattr(self, "_container", None)
-        if container_ref is not None:
-            try:
-                from .quality import LLMReviewService
+        try:
+            from .quality import LLMReviewService
 
-                review_service = container_ref.resolve(LLMReviewService)
-            except Exception:
-                review_service = None
+            review_service = self.container.resolve(LLMReviewService)
+        except Exception:
+            review_service = None
         return self._review_scheduler.run_once_now(review_service=review_service)
 
     def set_recording_overlay(self, recording_overlay) -> None:

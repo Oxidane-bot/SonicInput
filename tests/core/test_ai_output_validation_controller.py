@@ -215,3 +215,58 @@ def test_ai_controller_can_disable_user_confirmed_lexicon(monkeypatch):
     controller.process_with_ai("我们继续说拍套曲。", update_history=False)
 
     assert "User-confirmed local lexicon" not in ai_service.prompt_templates[0]
+
+
+def test_ai_controller_skips_phonetically_unrelated_lexicon_entries(monkeypatch):
+    """与当前文本发音无关的词条不应注入(程序化预筛)。"""
+    config = _Config()
+    events = _Events()
+    history = _History("今天天气不错。")
+    ai_service = _CountingAI("今天天气不错。")
+    controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=_State(),
+        history_service=history,
+        review_storage_service=_ReviewStorage(
+            [
+                {"old_form": "拍套曲", "term": "PyTorch"},
+                {"old_form": "词汇酷", "term": "词汇库"},
+            ]
+        ),
+    )
+    monkeypatch.setattr(controller, "_get_current_ai_service", lambda: ai_service)
+
+    controller.process_with_ai("今天天气不错。", update_history=False)
+
+    assert "User-confirmed local lexicon" not in ai_service.prompt_templates[0]
+    assert "PyTorch" not in ai_service.prompt_templates[0]
+
+
+def test_ai_controller_injects_only_phonetically_matched_lexicon_entries(monkeypatch):
+    """同音异字命中该词条,其余无关词条被过滤。"""
+    config = _Config()
+    events = _Events()
+    history = _History("这个慈会苦要更新了。")
+    ai_service = _CountingAI("这个词汇库要更新了。")
+    controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=_State(),
+        history_service=history,
+        review_storage_service=_ReviewStorage(
+            [
+                {"old_form": "拍套曲", "term": "PyTorch"},
+                {"old_form": "词汇酷", "term": "词汇库"},
+            ]
+        ),
+    )
+    monkeypatch.setattr(controller, "_get_current_ai_service", lambda: ai_service)
+
+    # 慈会苦(ci hui ku)与 词汇库/词汇酷 同音 → 注入该词条
+    controller.process_with_ai("这个慈会苦要更新了。", update_history=False)
+
+    prompt = ai_service.prompt_templates[0]
+    assert "User-confirmed local lexicon" in prompt
+    assert "Output: 词汇库" in prompt
+    assert "PyTorch" not in prompt
