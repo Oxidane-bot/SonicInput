@@ -2,8 +2,6 @@
 
 import os
 import time
-import uuid
-from pathlib import Path
 
 from sonicinput.utils.unified_logger import LogCategory, UnifiedLogger
 
@@ -16,17 +14,8 @@ class DummyConfigService:
         return self._settings.get(key, default)
 
 
-def _make_temp_dir(prefix: str) -> Path:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    path = temp_dir / f"{prefix}_{uuid.uuid4().hex}"
-    path.mkdir()
-    return path
-
-
-def test_logger_invalid_values_fallback(monkeypatch):
+def test_logger_invalid_values_fallback(monkeypatch, tmp_path):
     logger = UnifiedLogger()
-    tmp_path = _make_temp_dir("logging_hygiene_invalid")
 
     monkeypatch.setattr(logger, "_log_file", tmp_path / "app.log", raising=False)
     monkeypatch.setattr(logger, "_file_logging_disabled", False, raising=False)
@@ -54,9 +43,8 @@ def test_logger_invalid_values_fallback(monkeypatch):
     assert logger._enabled_categories == {LogCategory.AUDIO}
 
 
-def test_logger_retention_removes_old_logs(monkeypatch):
+def test_logger_retention_removes_old_logs(monkeypatch, tmp_path):
     logger = UnifiedLogger()
-    tmp_path = _make_temp_dir("logging_hygiene_retention")
 
     log_file = tmp_path / "app.log"
     log_file.write_text("current", encoding="utf-8")

@@ -1,5 +1,4 @@
 import sqlite3
-import uuid
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -68,10 +67,8 @@ def _create_legacy_schema(db_path: Path) -> None:
         conn.close()
 
 
-def test_init_database_adds_diagnostic_columns_for_legacy_db() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_schema_upgrade_{uuid.uuid4().hex}.db"
+def test_init_database_adds_diagnostic_columns_for_legacy_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_schema_upgrade.db"
     _create_legacy_schema(db_path)
 
     service = HistoryStorageService(_DummyConfigService())
@@ -119,10 +116,8 @@ def test_init_database_adds_diagnostic_columns_for_legacy_db() -> None:
         db_path.unlink()
 
 
-def test_save_and_load_record_with_extended_diagnostics() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_save_load_{uuid.uuid4().hex}.db"
+def test_save_and_load_record_with_extended_diagnostics(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_save_load.db"
 
     service = HistoryStorageService(_DummyConfigService())
     service._db_path = db_path
@@ -169,10 +164,8 @@ def test_save_and_load_record_with_extended_diagnostics() -> None:
         db_path.unlink()
 
 
-def test_init_database_logs_current_schema_expectations() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_schema_expectations_{uuid.uuid4().hex}.db"
+def test_init_database_logs_current_schema_expectations(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_schema_expectations.db"
 
     service = HistoryStorageService(_DummyConfigService())
     service._db_path = db_path
@@ -203,10 +196,8 @@ def test_init_database_logs_current_schema_expectations() -> None:
         db_path.unlink()
 
 
-def test_fts_index_syncs_with_save_and_update() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_fts_sync_{uuid.uuid4().hex}.db"
+def test_fts_index_syncs_with_save_and_update(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_fts_sync.db"
 
     service = HistoryStorageService(_DummyConfigService())
     service._db_path = db_path
@@ -280,11 +271,9 @@ def test_fts_index_syncs_with_save_and_update() -> None:
         db_path.unlink()
 
 
-def test_delete_record_keeps_shared_audio_file_until_last_reference() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_delete_shared_{uuid.uuid4().hex}.db"
-    audio_path = temp_dir / f"shared_audio_{uuid.uuid4().hex}.wav"
+def test_delete_record_keeps_shared_audio_file_until_last_reference(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_delete_shared.db"
+    audio_path = tmp_path / "shared_audio.wav"
     audio_path.write_bytes(b"wav")
 
     service = HistoryStorageService(_DummyConfigService())

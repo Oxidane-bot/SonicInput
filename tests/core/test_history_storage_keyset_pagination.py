@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -38,10 +37,8 @@ def _make_record(record_id: str, ts: datetime, text: str) -> HistoryRecord:
     )
 
 
-def test_get_records_keyset_pagination_is_stable_for_same_timestamp() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_keyset_{uuid.uuid4().hex}.db"
+def test_get_records_keyset_pagination_is_stable_for_same_timestamp(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_keyset.db"
 
     service = HistoryStorageService(_DummyConfigService())
     service._db_path = db_path
@@ -85,10 +82,8 @@ def test_get_records_keyset_pagination_is_stable_for_same_timestamp() -> None:
         db_path.unlink()
 
 
-def test_search_records_keyset_pagination_works_with_query() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_search_keyset_{uuid.uuid4().hex}.db"
+def test_search_records_keyset_pagination_works_with_query(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_search_keyset.db"
 
     service = HistoryStorageService(_DummyConfigService())
     service._db_path = db_path
@@ -118,10 +113,8 @@ def test_search_records_keyset_pagination_works_with_query() -> None:
         db_path.unlink()
 
 
-def test_get_records_keyset_supports_ascending_order() -> None:
-    temp_dir = Path(".tmp_pytest")
-    temp_dir.mkdir(exist_ok=True)
-    db_path = temp_dir / f"history_keyset_asc_{uuid.uuid4().hex}.db"
+def test_get_records_keyset_supports_ascending_order(tmp_path: Path) -> None:
+    db_path = tmp_path / "history_keyset_asc.db"
 
     service = HistoryStorageService(_DummyConfigService())
     service._db_path = db_path
