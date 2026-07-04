@@ -148,7 +148,7 @@ class ClipboardInput:
         Returns:
             字典，键为格式ID，值为该格式的数据
         """
-        formats = {}
+        formats: Dict[int, Any] = {}
 
         # 特殊格式：无法备份/恢复
         SKIP_FORMATS = {

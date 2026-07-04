@@ -136,8 +136,7 @@ class BaseController(ABC):
         except Exception as e:
             app_logger.log_error(
                 e,
-                f"emit_event_{event_name}",
-                context={"event": event_name, "has_data": data is not None},
+                f"emit_event_{event_name}(has_data={data is not None})",
             )
 
     def _get_config_setting(self, key: str, default: Optional[Any] = None) -> Any:
@@ -162,8 +161,7 @@ class BaseController(ABC):
         except Exception as e:
             app_logger.log_error(
                 e,
-                "get_config_setting",
-                context={"key": key, "has_default": default is not None},
+                f"get_config_setting(key={key}, has_default={default is not None})",
             )
             return default
 
@@ -189,7 +187,7 @@ class BaseController(ABC):
             self._config.set_setting(key, value)
             return True
         except Exception as e:
-            app_logger.log_error(e, "set_config_setting", context={"key": key})
+            app_logger.log_error(e, f"set_config_setting(key={key})")
             return False
 
     def _track_listener(self, event_name: str, handler: Callable) -> str:
@@ -233,7 +231,6 @@ class BaseController(ABC):
             except Exception as e:
                 app_logger.log_error(
                     e,
-                    "cleanup_event_listener",
-                    context={"event": event_name, "listener_id": listener_id},
+                    f"cleanup_event_listener(event={event_name}, listener_id={listener_id})",
                 )
         self._event_listener_ids.clear()

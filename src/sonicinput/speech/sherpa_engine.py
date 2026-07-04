@@ -178,6 +178,7 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
         """
         if not self.is_model_loaded:
             raise RuntimeError("Model not loaded. Call load_model() first.")
+        assert self.recognizer is not None  # guaranteed by is_model_loaded
 
         try:
             # 确保音频格式正确
@@ -221,6 +222,7 @@ class SherpaEngine(LifecycleComponent, ISpeechService):
         """
         if not self.is_model_loaded:
             raise RuntimeError("Model not loaded. Call load_model() first.")
+        assert self.recognizer is not None  # guaranteed by is_model_loaded
 
         stream = self.recognizer.create_stream()
         return SherpaStreamingSession(self.recognizer, stream)

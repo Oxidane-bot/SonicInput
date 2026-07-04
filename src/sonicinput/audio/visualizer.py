@@ -19,8 +19,9 @@ class AudioVisualizer(QWidget):
         super().__init__(parent)
 
         self.setFixedSize(width, height)
-        self.width = width
-        self.height = height
+        # 使用私有属性存储尺寸，避免遮蔽 QWidget.width()/height() 方法
+        self._width = width
+        self._height = height
 
         # 音频数据缓冲区
         self.audio_buffer = np.zeros(1024)
@@ -106,8 +107,8 @@ class AudioVisualizer(QWidget):
         painter.setPen(QPen(self.grid_color, 1))
 
         # 绘制中心线
-        center_y = self.height // 2
-        painter.drawLine(0, center_y, self.width, center_y)
+        center_y = self._height // 2
+        painter.drawLine(0, center_y, self._width, center_y)
 
         # 绘制提示文本
         painter.setPen(QPen(QColor(120, 120, 120), 1))
@@ -125,8 +126,8 @@ class AudioVisualizer(QWidget):
         # 计算波形点
         points = []
         for i in range(len(self.audio_buffer)):
-            x = int(i * self.width / len(self.audio_buffer))
-            y = int(self.height / 2 - self.audio_buffer[i] * self.height / 3)
+            x = int(i * self._width / len(self.audio_buffer))
+            y = int(self._height / 2 - self.audio_buffer[i] * self._height / 3)
             points.append((x, y))
 
         # 绘制波形线
@@ -161,7 +162,10 @@ class AudioVisualizer(QWidget):
         return float(np.sqrt(np.mean(self.audio_buffer**2)))
 
     def set_colors(
-        self, background: QColor = None, waveform: QColor = None, grid: QColor = None
+        self,
+        background: Optional[QColor] = None,
+        waveform: Optional[QColor] = None,
+        grid: Optional[QColor] = None,
     ) -> None:
         """设置颜色主题"""
         if background:
@@ -181,7 +185,8 @@ class MiniAudioVisualizer(QWidget):
         super().__init__(parent)
 
         self.setFixedSize(size, size)
-        self.size = size
+        # 使用私有属性存储尺寸，避免遮蔽 QWidget.size() 方法
+        self._size = size
 
         # 简化的音频数据
         self.level = 0.0
@@ -214,7 +219,7 @@ class MiniAudioVisualizer(QWidget):
 
         if self.is_recording:
             # 绘制音频级别指示器
-            level_height = int(self.level * (self.size - 4))
+            level_height = int(self.level * (self._size - 4))
 
             # 渐变色表示音频级别
             if self.level < 0.3:
@@ -229,11 +234,11 @@ class MiniAudioVisualizer(QWidget):
 
             # 从底部向上绘制级别条
             painter.drawRect(
-                2, self.size - 2 - level_height, self.size - 4, level_height
+                2, self._size - 2 - level_height, self._size - 4, level_height
             )
         else:
             # 静态状态
             painter.setPen(QPen(QColor(120, 120, 120), 1))
-            painter.drawRect(2, 2, self.size - 4, self.size - 4)
+            painter.drawRect(2, 2, self._size - 4, self._size - 4)
 
         self.animation_phase += 0.2

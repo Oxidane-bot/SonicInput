@@ -6,7 +6,7 @@ reusing the same test logic as the UI implementation.
 """
 
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 import numpy as np
 
@@ -171,9 +171,11 @@ class CLIModelTester:
             start_time = time.time()
 
             try:
-                transcription_result = self.whisper_engine.transcribe(
-                    test_audio,
-                    language=None,  # Auto-detect
+                transcription_result: Union[Dict[str, Any], str] = (
+                    self.whisper_engine.transcribe(
+                        test_audio,
+                        language=None,  # Auto-detect
+                    )
                 )
             except Exception as e:
                 # Handle case where transcribe returns string instead of dict

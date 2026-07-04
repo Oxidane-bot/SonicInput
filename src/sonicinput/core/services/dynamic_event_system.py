@@ -538,7 +538,7 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
         with self._lock:
             return sum(len(listeners) for listeners in self._listeners.values())
 
-    def clear_listeners(self, event_name: str = None) -> int:
+    def clear_listeners(self, event_name: Optional[str] = None) -> int:
         """清除监听器（IEventService接口）"""
         if event_name:
             return self.unsubscribe_all(event_name)

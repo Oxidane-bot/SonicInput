@@ -1,6 +1,6 @@
 """Event constants and metadata."""
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 class Events:
@@ -110,7 +110,7 @@ def iter_event_names() -> List[str]:
     return event_names
 
 
-EVENT_METADATA: Dict[str, Dict[str, object]] = {
+EVENT_METADATA: Dict[str, Dict[str, Any]] = {
     # Recording
     Events.RECORDING_STARTED: {
         "description": "Recording started",

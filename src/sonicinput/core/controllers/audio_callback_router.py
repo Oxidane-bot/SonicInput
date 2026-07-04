@@ -103,7 +103,7 @@ class AudioCallbackRouter(LifecycleComponent):
             self._audio_service.chunk_callback = streaming_chunk_callback
             app_logger.log_audio_event("Chunked mode: chunk callback set", {})
         else:
-            self._audio_service.chunk_callback = None
+            setattr(self._audio_service, "chunk_callback", None)
             app_logger.log_audio_event("Chunked mode: chunk callback not available", {})
 
         # 设置音频数据回调（用于实时波形显示）

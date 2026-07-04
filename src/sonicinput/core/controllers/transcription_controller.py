@@ -15,8 +15,8 @@ from ..interfaces import (
     HistoryRecord,
     IConfigService,
     IEventService,
-    ISpeechService,
     IStateManager,
+    ISyncTranscriptionService,
     ITranscriptionController,
 )
 from ..interfaces.state import AppState
@@ -106,7 +106,7 @@ class TranscriptionController(
 
     def __init__(
         self,
-        speech_service: ISpeechService,
+        speech_service: ISyncTranscriptionService,
         config_service: IConfigService,
         event_service: IEventService,
         state_manager: IStateManager,
@@ -625,6 +625,12 @@ class TranscriptionController(
             error: 错误信息（如果有）
         """
         try:
+            # 调用方保证以下两个字段非空；此处收窄类型并防御性返回
+            record_id = self._current_record_id
+            audio_file_path = self._current_audio_file_path
+            if record_id is None or audio_file_path is None:
+                return
+
             # 获取转录提供商
             provider = self._config.get_setting(
                 ConfigKeys.TRANSCRIPTION_PROVIDER, "local"
@@ -632,9 +638,9 @@ class TranscriptionController(
 
             # 创建历史记录
             record = HistoryRecord(
-                id=self._current_record_id,
+                id=record_id,
                 timestamp=datetime.fromtimestamp(self._recording_stop_time),
-                audio_file_path=self._current_audio_file_path,
+                audio_file_path=audio_file_path,
                 duration=self._audio_duration,
                 transcription_text=text,
                 transcription_provider=provider,

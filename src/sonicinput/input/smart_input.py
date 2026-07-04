@@ -1,7 +1,7 @@
 """智能文本输入策略选择器"""
 
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from ..core.base.lifecycle_component import LifecycleComponent
 from ..core.interfaces import IInputService
@@ -30,8 +30,8 @@ class SmartTextInput(LifecycleComponent, IInputService):
         )
 
         # 故障转移增强：记录方法失败历史
-        self._method_failures = {}
-        self._last_failure_time = {}
+        self._method_failures: Dict[str, int] = {}
+        self._last_failure_time: Dict[str, float] = {}
 
         # 录音期间剪贴板管理（避免中途restore覆盖原始剪贴板）
         self._recording_mode = False
@@ -231,7 +231,7 @@ class SmartTextInput(LifecycleComponent, IInputService):
             app_logger.log_error(e, "_try_sendinput_method")
             return False
 
-    def _backup_clipboard(self) -> str:
+    def _backup_clipboard(self) -> Union[str, Dict[int, Any], ClipboardOleSnapshot]:
         """备份剪贴板内容"""
         return self.clipboard_input.backup_clipboard()
 

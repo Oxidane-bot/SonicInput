@@ -20,13 +20,13 @@ class EnvironmentValidator:
     """Comprehensive environment validation for GUI application startup"""
 
     def __init__(self):
-        self.validation_results = {}
-        self.errors = []
-        self.warnings = []
+        self.validation_results: Dict[str, Any] = {}
+        self.errors: List[str] = []
+        self.warnings: List[str] = []
 
     def validate_pyside6_installation(self) -> Tuple[bool, Dict[str, Any]]:
         """Validate PySide6 installation and compatibility"""
-        validation_results = {
+        validation_results: Dict[str, Any] = {
             "pyside6_available": False,
             "qt_version": None,
             "display_available": False,
@@ -299,7 +299,7 @@ class EnvironmentValidator:
         """Run comprehensive environment validation"""
         app_logger.log_audio_event("Starting comprehensive environment validation", {})
 
-        results = {
+        results: Dict[str, Any] = {
             "overall_success": False,
             "pyside6_validation": {},
             "display_available": False,

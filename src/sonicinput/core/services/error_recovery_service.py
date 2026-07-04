@@ -87,7 +87,7 @@ class ErrorRecoveryService(LifecycleComponent):
             "by_severity": {},
         }
 
-    def _do_start(self) -> None:
+    def _do_start(self) -> bool:
         """启动错误恢复服务
 
         初始化错误跟踪和注册默认恢复动作
@@ -95,8 +95,9 @@ class ErrorRecoveryService(LifecycleComponent):
         # 注册默认恢复动作
         self._register_default_recovery_actions()
         app_logger.log_audio_event("ErrorRecoveryService started", {})
+        return True
 
-    def _do_stop(self) -> None:
+    def _do_stop(self) -> bool:
         """停止错误恢复服务
 
         清理错误历史和恢复动作
@@ -105,6 +106,7 @@ class ErrorRecoveryService(LifecycleComponent):
         self._recovery_actions.clear()
         self._last_recovery_time.clear()
         app_logger.log_audio_event("ErrorRecoveryService stopped", {})
+        return True
 
     def _register_default_recovery_actions(self) -> None:
         """注册默认的恢复动作"""

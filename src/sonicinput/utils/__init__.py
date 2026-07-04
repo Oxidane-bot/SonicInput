@@ -1,5 +1,7 @@
 """Enhanced utilities module with unified logging system"""
 
+from typing import Any, Dict, Optional
+
 from .dependency_diagnostics import dependency_diagnostics  # noqa: F401
 from .environment_validator import environment_validator  # noqa: F401
 from .exceptions import *  # noqa: F403, F401
@@ -7,64 +9,63 @@ from .startup_diagnostics import startup_diagnostics  # noqa: F401
 
 # Import unified logging system (新)
 # 注意：不导入from .logger避免循环导入
-try:
-    from .unified_logger import (  # noqa: F401
-        LogCategory,
-        LogLevel,
-        TraceContext,
-        app_logger_compat,
-        logger,
-        unified_logger,
-    )
+# unified_logger only depends on the standard library, so this import cannot
+# fail with ImportError; the exported loggers are always concrete instances.
+from .unified_logger import (  # noqa: F401
+    LogCategory,
+    LogLevel,
+    TraceContext,
+    app_logger_compat,
+    logger,
+    unified_logger,
+)
 
-    UNIFIED_LOGGING_AVAILABLE = True
+UNIFIED_LOGGING_AVAILABLE = True
 
-    # 向后兼容：保留旧接口别名
-    app_logger = app_logger_compat
-    optimized_logger = logger
-    structured_logger = logger
-except ImportError as e:
-    print(f"Warning: Could not import unified_logger: {e}")
-    UNIFIED_LOGGING_AVAILABLE = False
-    logger = None
-    app_logger = None
-    optimized_logger = None
-    structured_logger = None
+# 向后兼容：保留旧接口别名
+app_logger = app_logger_compat
+optimized_logger = logger
+structured_logger = logger
+
 
 # 兼容旧的函数接口
-if UNIFIED_LOGGING_AVAILABLE:
+def log_component_lifecycle(
+    component: str,
+    event: str,
+    state: Optional[str] = None,
+    details: Optional[dict] = None,
+):
+    """兼容接口"""
+    ctx: Dict[str, Any] = {"event_type": "lifecycle", "lifecycle_event": event}
+    if state:
+        ctx["state"] = state
+    if details:
+        ctx.update(details)
+    logger.info(f"Lifecycle: {component} {event}", LogCategory.STARTUP, ctx, component)
 
-    def log_component_lifecycle(
-        component: str, event: str, state: str = None, details: dict = None
-    ):
-        """兼容接口"""
-        ctx = {"event_type": "lifecycle", "lifecycle_event": event}
-        if state:
-            ctx["state"] = state
-        if details:
-            ctx.update(details)
-        logger.info(
-            f"Lifecycle: {component} {event}", LogCategory.STARTUP, ctx, component
-        )
 
-    def log_configuration_change(
-        setting: str, old_value, new_value, component: str = "config"
-    ):
-        """兼容接口"""
-        ctx = {
-            "event_type": "config_change",
-            "setting": setting,
-            "old_value": old_value,
-            "new_value": new_value,
-        }
-        logger.info(f"Config Change: {setting}", LogCategory.STARTUP, ctx, component)
+def log_configuration_change(
+    setting: str, old_value, new_value, component: str = "config"
+):
+    """兼容接口"""
+    ctx: Dict[str, Any] = {
+        "event_type": "config_change",
+        "setting": setting,
+        "old_value": old_value,
+        "new_value": new_value,
+    }
+    logger.info(f"Config Change: {setting}", LogCategory.STARTUP, ctx, component)
 
-    def log_performance_milestone(
-        operation: str, duration: float, threshold: float = 1.0, component: str = None
-    ):
-        """兼容接口"""
-        if duration >= threshold:
-            logger.performance(operation, duration, details={"threshold": threshold})
+
+def log_performance_milestone(
+    operation: str,
+    duration: float,
+    threshold: float = 1.0,
+    component: Optional[str] = None,
+):
+    """兼容接口"""
+    if duration >= threshold:
+        logger.performance(operation, duration, details={"threshold": threshold})
 
 
 # 保留旧的导入兼容（避免立即破坏）

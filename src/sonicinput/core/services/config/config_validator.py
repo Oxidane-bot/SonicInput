@@ -211,7 +211,7 @@ class ConfigValidator:
                 repaired = True
 
             # 检查其他关键结构
-            required_structures = {
+            required_structures: Dict[str, Dict[str, Any]] = {
                 "audio": {
                     "sample_rate": 16000,
                     "channels": 1,

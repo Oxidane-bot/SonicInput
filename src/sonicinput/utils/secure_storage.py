@@ -3,7 +3,7 @@
 import base64
 import hashlib
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -23,8 +23,8 @@ class SecureStorage:
             app_name: 应用程序名称，用于生成唯一的加密密钥
         """
         self.app_name = app_name
-        self._key = None
-        self._cipher = None
+        self._key: Optional[bytes] = None
+        self._cipher: Optional[Fernet] = None
         self._init_encryption()
 
     def _init_encryption(self) -> None:
@@ -50,7 +50,7 @@ class SecureStorage:
             app_logger.log_error(e, "SecureStorage_init")
             # 降级到不安全存储（仅在Windows环境中）
             self._cipher = None
-            app_logger.log_warning("SecureStorage falling back to plain text", {})
+            app_logger.warning("SecureStorage falling back to plain text")
 
     def _get_machine_id(self) -> str:
         """获取机器唯一标识"""
@@ -71,13 +71,11 @@ class SecureStorage:
                 try:
                     combined_id += source() + "|"
                 except Exception as e:
-                    app_logger.log_error(
+                    app_logger.error(
+                        f"Failed to get machine ID from source #{idx}",
                         e,
-                        "machine_id_source_failed",
-                        {
-                            "context": f"Failed to get machine ID from source #{idx}",
-                            "source_index": idx,
-                        },
+                        context={"source_index": idx},
+                        component="machine_id_source_failed",
                     )
                     continue
 

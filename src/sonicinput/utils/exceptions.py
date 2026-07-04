@@ -553,7 +553,9 @@ def create_exception_from_context(
 
 
 def wrap_exception(
-    original_exception: Exception, message: str = None, exception_type: type = None
+    original_exception: Exception,
+    message: Optional[str] = None,
+    exception_type: Optional[type] = None,
 ) -> VoiceInputError:
     """Wrap a standard exception in VoiceInputError hierarchy
 

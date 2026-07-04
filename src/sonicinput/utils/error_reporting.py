@@ -199,9 +199,9 @@ def safe_call(
     *args,
     component: str = "unknown",
     context: Optional[Dict[str, Any]] = None,
-    default_return: T = None,
+    default_return: Optional[T] = None,
     **kwargs,
-) -> T:
+) -> Optional[T]:
     """Safely call a function with automatic error reporting
 
     Args:

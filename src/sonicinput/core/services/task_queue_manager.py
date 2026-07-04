@@ -78,7 +78,7 @@ class TaskQueueManager(LifecycleComponent):
         self.event_service = event_service
 
         # 任务队列（优先队列）
-        self._task_queue = queue.PriorityQueue(maxsize=100)
+        self._task_queue: queue.PriorityQueue[Task] = queue.PriorityQueue(maxsize=100)
         self._running_tasks: Dict[str, Task] = {}
 
         # 线程管理

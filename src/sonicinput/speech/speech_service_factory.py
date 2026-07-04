@@ -8,7 +8,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ..core.interfaces import IConfigService, ISpeechService
 from ..core.services.config import ConfigKeys
@@ -47,7 +47,7 @@ class SpeechServiceFactory:
 
     @staticmethod
     def _log_local_unavailable(error: Exception) -> None:
-        details = {
+        details: Dict[str, Any] = {
             "exception_type": type(error).__name__,
             "error": str(error),
         }
@@ -232,7 +232,7 @@ class SpeechServiceFactory:
                 from .groq_speech_service import GroqSpeechService
 
                 # Only pass base_url if it's not the default (to use SDK's default)
-                service = GroqSpeechService(
+                service: ISpeechService = GroqSpeechService(
                     api_key=api_key,
                     model=model,
                     base_url=None

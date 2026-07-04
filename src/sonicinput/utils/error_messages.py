@@ -6,7 +6,7 @@ from typing import Optional
 try:
     from PySide6.QtCore import QCoreApplication
 except Exception:
-    QCoreApplication = None
+    QCoreApplication = None  # type: ignore[assignment,misc]
 
 
 def _tr(text: str) -> str:
@@ -131,7 +131,7 @@ class ErrorMessageTranslator:
         }
 
         user_message = context_messages.get(
-            context, "An unknown error occurred during the operation."
+            context or "", "An unknown error occurred during the operation."
         )
 
         return {

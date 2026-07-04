@@ -6,7 +6,7 @@
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 from ...ai import AIClientFactory
 from ...utils import AIOutputTruncatedError, OpenRouterAPIError, app_logger
@@ -229,7 +229,7 @@ class AIProcessingController(
             self._lexicon_prompt_cache = ""
             return ""
 
-        lines = []
+        lines: List[str] = []
         for entry in entries:
             term = str(entry.get("term") or "").strip()
             if not term:
@@ -858,9 +858,10 @@ class AIProcessingController(
         max_output_tokens: int,
     ) -> str:
         try:
-            return ai_service.refine_text(
-                text, prompt_template, model, max_tokens=max_output_tokens
-            )
+            # max_tokens 不在 IAIService.refine_text 接口签名中；具体实现支持时才生效，
+            # 故以动态 kwargs 传入并在 TypeError 时回退
+            extra_kwargs: Dict[str, Any] = {"max_tokens": max_output_tokens}
+            return ai_service.refine_text(text, prompt_template, model, **extra_kwargs)
         except TypeError as e:
             if "max_tokens" not in str(e):
                 raise
@@ -876,12 +877,14 @@ class AIProcessingController(
         max_output_tokens: int,
     ) -> str:
         try:
+            # 同 refine_text：max_tokens 为具体实现的可选参数，接口未声明
+            extra_kwargs: Dict[str, Any] = {"max_tokens": max_output_tokens}
             return ai_service.refine_text_streaming(
                 text,
                 prompt_template,
                 model,
                 on_token=on_token,
-                max_tokens=max_output_tokens,
+                **extra_kwargs,
             )
         except TypeError as e:
             if "max_tokens" not in str(e):
@@ -894,9 +897,10 @@ class AIProcessingController(
         self,
         text: str,
         record_id: Optional[str] = None,
-        incremental_event_data: Optional[Dict[str, Any]] = None,
         update_history: bool = True,
         emit_events: bool = True,
+        *,
+        incremental_event_data: Optional[Dict[str, Any]] = None,
     ) -> str:
         """使用AI优化文本
 
@@ -1070,7 +1074,7 @@ class AIProcessingController(
             else:
                 if self._is_streaming_enabled():
                     streaming_output_used = True
-                    accumulated_tokens: List[str] = []
+                    accumulated_tokens = []
 
                     def plain_token_callback(token: str) -> None:
                         accumulated_tokens.append(token)

@@ -226,7 +226,7 @@ class StartupDiagnostics:
 
     def _collect_system_info(self) -> Dict[str, Any]:
         """Collect comprehensive system information"""
-        system_info = {
+        system_info: Dict[str, Any] = {
             "platform": platform.platform(),
             "system": platform.system(),
             "version": platform.version(),
@@ -361,7 +361,7 @@ class StartupDiagnostics:
 
     def _check_assets(self) -> Dict[str, Any]:
         """Verify packaged assets are present."""
-        result = {
+        result: Dict[str, Any] = {
             "assets_dir": None,
             "icon_present": False,
             "fonts_present": False,
@@ -407,7 +407,7 @@ class StartupDiagnostics:
 
     def _check_samplerate(self) -> Dict[str, Any]:
         """Verify samplerate dependency can resample data."""
-        result = {
+        result: Dict[str, Any] = {
             "available": False,
             "resample_ok": False,
             "errors": [],
@@ -434,7 +434,7 @@ class StartupDiagnostics:
 
     def _check_qt_plugins(self) -> Dict[str, Any]:
         """Check Qt platform plugins are discoverable."""
-        result = {
+        result: Dict[str, Any] = {
             "plugins_path": None,
             "platforms_path": None,
             "checked_paths": [],
@@ -447,7 +447,7 @@ class StartupDiagnostics:
             from PySide6.QtCore import QCoreApplication, QLibraryInfo
 
             candidate_paths = [
-                Path(QLibraryInfo.path(QLibraryInfo.PluginsPath)),
+                Path(QLibraryInfo.path(QLibraryInfo.PluginsPath)),  # type: ignore[attr-defined]
             ]
 
             try:
@@ -500,7 +500,7 @@ class StartupDiagnostics:
 
     def _check_local_asr(self) -> Dict[str, Any]:
         """Check sherpa-onnx local ASR runtime dependencies."""
-        result = {
+        result: Dict[str, Any] = {
             "available": False,
             "sherpa_onnx_found": False,
             "sherpa_onnx_path": None,
@@ -611,7 +611,7 @@ class StartupDiagnostics:
 
     def _generate_summary(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """Generate summary with status and recommendations"""
-        summary = {
+        summary: Dict[str, Any] = {
             "overall_status": "healthy",
             "critical_issues": [],
             "warnings": [],

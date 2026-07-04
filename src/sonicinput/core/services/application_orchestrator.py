@@ -448,22 +448,20 @@ class ApplicationOrchestrator:
         self, model_name: str, download_if_missing: bool = False
     ) -> bool:
         """异步加载语音模型"""
-        if not self._speech_service:
+        speech_service = self._speech_service
+        if not speech_service:
             app_logger.log_audio_event(
                 "Model loading skipped: speech service not available",
                 {"model_name": model_name},
             )
             return False
-        if (
-            hasattr(self._speech_service, "is_running")
-            and not self._speech_service.is_running
-        ):
+        if hasattr(speech_service, "is_running") and not speech_service.is_running:
             app_logger.log_audio_event(
                 "Model loading skipped: speech service not running",
                 {"model_name": model_name},
             )
             return False
-        if not hasattr(self._speech_service, "load_model_async"):
+        if not hasattr(speech_service, "load_model_async"):
             app_logger.log_audio_event(
                 "Model loading skipped: async load not supported",
                 {"model_name": model_name},
@@ -497,13 +495,13 @@ class ApplicationOrchestrator:
 
             # 如果结果中没有model_info，尝试获取
             if not model_info:
-                if hasattr(self._speech_service, "get_model_info"):
-                    model_info = self._speech_service.get_model_info()
+                if hasattr(speech_service, "get_model_info"):
+                    model_info = speech_service.get_model_info()
                 else:
                     model_info = {
                         "model_name": result_model_name,
                         "is_loaded": True,
-                        "device": getattr(self._speech_service, "device", "Unknown"),
+                        "device": getattr(speech_service, "device", "Unknown"),
                     }
 
             self._lazy_model_load_state = "loaded"
@@ -513,7 +511,8 @@ class ApplicationOrchestrator:
         def on_error(error_msg: str):
             self._handle_lazy_model_load_failure(model_name, error_msg)
 
-        self._speech_service.load_model_async(
+        # hasattr 守卫在上方: 只有支持 load_model_async 的实现才会走到这里
+        speech_service.load_model_async(  # type: ignore[attr-defined]
             model_name=model_name,
             callback=on_success,
             error_callback=on_error,

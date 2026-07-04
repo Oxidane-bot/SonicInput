@@ -6,7 +6,7 @@
 import inspect
 import time
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ...utils import ErrorMessageTranslator, app_logger
 from ..base.lifecycle_component import LifecycleComponent
@@ -91,11 +91,11 @@ class RecordingController(LifecycleComponent, IRecordingController):
         """
         # 启动子组件
         if not self._streaming_manager.start():
-            app_logger.log_error(None, "Failed to start StreamingModeManager")
+            app_logger.error("Failed to start StreamingModeManager")
             return False
 
         if not self._callback_router.start():
-            app_logger.log_error(None, "Failed to start AudioCallbackRouter")
+            app_logger.error("Failed to start AudioCallbackRouter")
             self._streaming_manager.stop()
             return False
 
@@ -242,9 +242,11 @@ class RecordingController(LifecycleComponent, IRecordingController):
         try:
             load_model_signature = inspect.signature(self._speech_service.load_model)
             if "download_if_missing" in load_model_signature.parameters:
+                # 部分实现（如本地模型）支持按需下载；此参数不在 ISpeechService
+                # 接口中，故通过运行时签名检查后以动态 kwargs 传入
+                extra_kwargs: Dict[str, Any] = {"download_if_missing": True}
                 load_success = self._speech_service.load_model(
-                    model_name,
-                    download_if_missing=True,
+                    model_name, **extra_kwargs
                 )
             else:
                 load_success = self._speech_service.load_model(model_name)
@@ -279,7 +281,12 @@ class RecordingController(LifecycleComponent, IRecordingController):
 
             # 记录停止时间
             self._recording_stop_time = time.time()
-            wall_clock_duration = self._recording_stop_time - self._recording_start_time
+            if self._recording_start_time is not None:
+                wall_clock_duration = (
+                    self._recording_stop_time - self._recording_start_time
+                )
+            else:
+                wall_clock_duration = actual_duration
 
             # 使用实际音频时长（而非墙上时间）
             self._last_audio_duration = actual_duration

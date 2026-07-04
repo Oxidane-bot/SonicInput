@@ -15,7 +15,8 @@ KEYEVENTF_SCANCODE = 0x0008
 VK_BACK = 0x08
 
 # Define structures for SendInput
-wintypes.ULONG_PTR = wintypes.WPARAM
+# wintypes 未导出 ULONG_PTR，这里以 WPARAM 作为等价的指针宽度整数类型
+ULONG_PTR = wintypes.WPARAM
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -25,7 +26,7 @@ class MOUSEINPUT(ctypes.Structure):
         ("mouseData", wintypes.DWORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", wintypes.ULONG_PTR),
+        ("dwExtraInfo", ULONG_PTR),
     )
 
 
@@ -35,7 +36,7 @@ class KEYBDINPUT(ctypes.Structure):
         ("wScan", wintypes.WORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", wintypes.ULONG_PTR),
+        ("dwExtraInfo", ULONG_PTR),
     )
 
 
@@ -98,7 +99,7 @@ class SendInputMethod:
         try:
             hwnd = win32gui.GetForegroundWindow()
             if not hwnd:
-                app_logger.log_warning(
+                app_logger.warning(
                     "No foreground window found, but attempting SendInput anyway."
                 )
 
@@ -113,7 +114,7 @@ class SendInputMethod:
                     },
                 )
 
-            send_units = []
+            send_units: list[tuple[str, int]] = []
             index = 0
             while index < len(text):
                 char = text[index]
@@ -133,7 +134,7 @@ class SendInputMethod:
                 if 0xDC00 <= code_point <= 0xDFFF:
                     index += 1
                     continue
-                send_units.append(("unicode", char))
+                send_units.append(("unicode", code_point))
                 index += 1
 
             num_events = len(send_units) * 2
@@ -153,7 +154,7 @@ class SendInputMethod:
                     event_index += 2
                     continue
 
-                char_code = ord(unit_value)
+                char_code = unit_value
 
                 # Key down event
                 keydown_input = input_array[event_index]
@@ -226,7 +227,7 @@ class SendInputMethod:
         """设置字符间延迟 (Note: not used in this implementation)"""
         # This method is kept for API compatibility but does nothing in this implementation.
         if delay > 0:
-            app_logger.log_warning(
+            app_logger.warning(
                 "typing_delay is set but not used by the modern SendInput implementation."
             )
 
@@ -260,13 +261,5 @@ class SendInputMethod:
                     return 0xDC00 <= ord(next_char) <= 0xDFFF
             return False
         except Exception as e:
-            app_logger.log_error(
-                e,
-                "surrogate_pair_check_failed",
-                {
-                    "context": "Failed to check Unicode surrogate pair",
-                    "char": repr(char),
-                    "index": index,
-                },
-            )
+            app_logger.log_error(e, "surrogate_pair_check_failed")
             return False

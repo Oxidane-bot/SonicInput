@@ -261,7 +261,10 @@ class HotkeyService(LifecycleComponent, IHotkeyService):
                         "Hotkeys reloaded successfully", {"keys": new_keys}
                     )
                 else:
-                    app_logger.log_error(None, "Hotkey manager doesn't support reload")
+                    app_logger.log_error(
+                        RuntimeError("Hotkey manager doesn't support reload"),
+                        "HotkeyService.on_config_changed",
+                    )
                     return False
 
             return True

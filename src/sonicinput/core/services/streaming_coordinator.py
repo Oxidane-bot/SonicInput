@@ -78,8 +78,8 @@ class StreamingCoordinator(LifecycleComponent):
         self._realtime_debug_last_log = 0.0
         self._realtime_debug_log_interval = 2.0
 
-        # 流式统计
-        self._streaming_stats = {
+        # 流式统计（异构字典：mode 为字符串，其余为数值，_get_stats 还会追加 bool/str 键）
+        self._streaming_stats: Dict[str, Any] = {
             "mode": streaming_mode,
             "total_chunks": 0,
             "completed_chunks": 0,
@@ -739,7 +739,7 @@ class StreamingCoordinator(LifecycleComponent):
         self.start_streaming()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         """退出上下文管理器 - 停止流式转录并清理资源
 
         保证sherpa-onnx会话被正确释放，即使发生异常。

@@ -111,12 +111,13 @@ def format_file_size(size_bytes: int) -> str:
 
     size_names = ["B", "KB", "MB", "GB", "TB"]
     size_index = 0
+    size = float(size_bytes)
 
-    while size_bytes >= 1024 and size_index < len(size_names) - 1:
-        size_bytes /= 1024.0
+    while size >= 1024 and size_index < len(size_names) - 1:
+        size /= 1024.0
         size_index += 1
 
-    return f"{size_bytes:.1f} {size_names[size_index]}"
+    return f"{size:.1f} {size_names[size_index]}"
 
 
 def format_duration(seconds: float) -> str:
@@ -215,7 +216,8 @@ def is_admin() -> bool:
 
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         else:
-            return os.geteuid() == 0
+            # os.geteuid only exists on Unix; this branch never runs on Windows
+            return getattr(os, "geteuid")() == 0
     except Exception:
         return False
 
@@ -423,7 +425,7 @@ def find_available_port(
 class SingletonMeta(type):
     """Singleton metaclass"""
 
-    _instances = {}
+    _instances: Dict[type, Any] = {}
     _lock = threading.Lock()
 
     def __call__(cls, *args, **kwargs):

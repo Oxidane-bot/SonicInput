@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, Optional
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 from . import app_logger
 from .exceptions import NetworkError
@@ -48,15 +48,16 @@ class RequestErrorHandler:
         try:
             return response.json()
         except json.JSONDecodeError as e:
-            app_logger.log_error(
+            app_logger.error(
+                "Failed to parse JSON response",
                 e,
-                "json_parse_error",
-                {
+                context={
                     "provider": provider_name,
                     "status_code": response.status_code,
                     "content_length": len(response.text),
                     "content_preview": response.text[:200],
                 },
+                component="json_parse_error",
             )
             raise NetworkError(
                 f"{provider_name} returned invalid JSON",
@@ -158,14 +159,14 @@ class RequestErrorHandler:
                                 return str(error_value["message"])
                         return str(error_value)
         except Exception as e:
-            app_logger.log_error(
+            app_logger.error(
+                "Failed to extract error message from response",
                 e,
-                "extract_error_message_failed",
-                {
-                    "context": "Failed to extract error message from response",
+                context={
                     "provider": provider_name,
                     "status_code": response.status_code,
                 },
+                component="extract_error_message_failed",
             )
 
         # Fallback to raw text

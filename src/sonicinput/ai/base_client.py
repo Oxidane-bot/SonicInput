@@ -7,7 +7,7 @@
 import re
 import time
 from abc import abstractmethod
-from typing import Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import requests
 
@@ -16,6 +16,9 @@ from ..utils import AIOutputTruncatedError, app_logger
 from ..utils.request_error_handler import RequestErrorHandler
 from .http_client_manager import HTTPClientManager
 from .performance_monitor import AIPerformanceMonitor
+
+if TYPE_CHECKING:
+    from ..utils.secure_storage import SecureStorage
 
 
 class BaseAIClient(IAIService):
@@ -225,7 +228,7 @@ class BaseAIClient(IAIService):
         """
         # 安全存储API密钥
         self._raw_api_key = api_key
-        self._secure_storage = None
+        self._secure_storage: Optional["SecureStorage"] = None
         self._init_secure_storage()
 
         # 使用新的HTTP客户端管理器
@@ -263,8 +266,9 @@ class BaseAIClient(IAIService):
 
             self._secure_storage = get_secure_storage()
         except ImportError as e:
-            app_logger.log_warning(
-                "Secure storage not available, using plain text", {"error": str(e)}
+            app_logger.warning(
+                "Secure storage not available, using plain text",
+                context={"error": str(e)},
             )
             self._secure_storage = None
 
@@ -452,9 +456,9 @@ class BaseAIClient(IAIService):
 
             # 如果等待时间过长，提前放弃
             if wait_time > 30.0:
-                app_logger.log_warning(
+                app_logger.warning(
                     f"Excessive wait time for {provider}, giving up",
-                    {"wait_time": wait_time, "attempt": attempt + 1},
+                    context={"wait_time": wait_time, "attempt": attempt + 1},
                 )
                 raise self._create_api_error(
                     f"Excessive wait time for rate limit with {provider}"

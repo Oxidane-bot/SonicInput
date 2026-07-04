@@ -91,8 +91,7 @@ class ControllerLogging:
                 except Exception as emit_error:
                     app_logger.log_error(
                         emit_error,
-                        "emit_error_event",
-                        context={"event": error_event_name},
+                        f"emit_error_event(event={error_event_name})",
                     )
 
             if not suppress_exceptions:
@@ -145,8 +144,7 @@ class ControllerLogging:
                 except Exception as e:
                     app_logger.log_error(
                         e,
-                        "emit_success_event",
-                        context={"event": success_event},
+                        f"emit_success_event(event={success_event})",
                     )
         else:
             app_logger.log_audio_event(
@@ -159,9 +157,7 @@ class ControllerLogging:
                 try:
                     event_service.emit(error_event, error_message or str(error))
                 except Exception as e:
-                    app_logger.log_error(
-                        e, "emit_error_event", context={"event": error_event}
-                    )
+                    app_logger.log_error(e, f"emit_error_event(event={error_event})")
 
     @staticmethod
     def log_state_change(

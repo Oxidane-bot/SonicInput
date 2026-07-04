@@ -1,7 +1,7 @@
 """配置服务接口定义"""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Dict
 
 
 class IConfigService(ABC):
@@ -18,8 +18,13 @@ class IConfigService(ABC):
         pass
 
     @abstractmethod
-    def save_config(self) -> None:
-        """保存配置"""
+    def get_all_settings(self) -> Dict[str, Any]:
+        """获取全部配置的副本"""
+        pass
+
+    @abstractmethod
+    def save_config(self) -> bool:
+        """保存配置,返回是否成功"""
         pass
 
 

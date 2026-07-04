@@ -70,9 +70,9 @@ class DIContainer:
 
     def register_singleton(
         self,
-        interface: Type[T],
-        implementation: Type[T] = None,
-        factory: Callable[[], T] = None,
+        interface: type,
+        implementation: type | None = None,
+        factory: Callable[[], object] | None = None,
     ) -> "DIContainer":
         """Register a singleton service
 
@@ -88,19 +88,19 @@ class DIContainer:
             container.register_singleton(IConfigService, ConfigService)
             container.register_singleton(ILogger, factory=lambda: Logger("app"))
         """
-        if implementation is None and factory is None:
-            # Self-registration (interface is also implementation)
-            implementation = interface
-
-        creator = factory if factory else lambda: self._create(implementation)
+        # Self-registration: interface doubles as implementation when neither given
+        impl = implementation if implementation is not None else interface
+        creator: Callable[[], object] = (
+            factory if factory is not None else (lambda: self._create(impl))
+        )
         self._registrations[interface] = (creator, Lifetime.SINGLETON)
         return self
 
     def register_transient(
         self,
-        interface: Type[T],
-        implementation: Type[T] = None,
-        factory: Callable[[], T] = None,
+        interface: type,
+        implementation: type | None = None,
+        factory: Callable[[], object] | None = None,
     ) -> "DIContainer":
         """Register a transient service (new instance each time)
 
@@ -115,10 +115,10 @@ class DIContainer:
         Example:
             container.register_transient(IRequestHandler, RequestHandler)
         """
-        if implementation is None and factory is None:
-            implementation = interface
-
-        creator = factory if factory else lambda: self._create(implementation)
+        impl = implementation if implementation is not None else interface
+        creator: Callable[[], object] = (
+            factory if factory is not None else (lambda: self._create(impl))
+        )
         self._registrations[interface] = (creator, Lifetime.TRANSIENT)
         return self
 
@@ -711,7 +711,7 @@ def create_container() -> "DIContainer":
     from ..utils import app_logger
 
     # Services that need to be started (in dependency order)
-    lifecycle_services = [
+    lifecycle_services: list[tuple[type, str]] = [
         (IConfigService, "ConfigService"),
         (IStateManager, "StateManager"),
         (IHotkeyService, "HotkeyService"),
@@ -724,7 +724,7 @@ def create_container() -> "DIContainer":
                 f"Attempting to start {service_name}",
                 {"component": "di_container", "service": service_name},
             )
-            service = container.resolve(service_interface)
+            service: Any = container.resolve(service_interface)
             has_start_method = hasattr(service, "start")
             app_logger.log_audio_event(
                 f"{service_name} resolved",

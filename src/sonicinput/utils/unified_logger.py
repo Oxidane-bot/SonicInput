@@ -27,7 +27,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 # ConfigKeys import moved to method level to avoid circular import
 # from ..core.services.config import ConfigKeys
@@ -80,7 +80,7 @@ class TraceContext:
     parameters: Dict[str, Any] = field(default_factory=dict)
     checkpoints: List[Dict[str, Any]] = field(default_factory=list)
 
-    def checkpoint(self, name: str, data: Dict[str, Any] = None) -> None:
+    def checkpoint(self, name: str, data: Optional[Dict[str, Any]] = None) -> None:
         """添加检查点"""
         self.checkpoints.append(
             {
@@ -148,7 +148,7 @@ class UnifiedLogger:
     @staticmethod
     def _is_dev_mode() -> bool:
         """检查是否为开发模式"""
-        return (
+        return bool(
             "--dev" in sys.argv or os.getenv("VOICE_INPUT_DEV") or "--gui" in sys.argv
         )
 
@@ -451,7 +451,7 @@ class UnifiedLogger:
         level: LogLevel,
         category: LogCategory,
         message: str,
-        context: Dict[str, Any] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """格式化控制台消息（包含context）"""
         timestamp = time.strftime("%H:%M:%S")
@@ -519,8 +519,8 @@ class UnifiedLogger:
         level: LogLevel,
         category: LogCategory,
         message: str,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> str:
         """格式化文件日志消息（详细JSON格式）"""
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -547,8 +547,8 @@ class UnifiedLogger:
         level: LogLevel,
         category: LogCategory,
         message: str,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         """写入日志（控制台 + 文件）"""
         # PERFORMANCE 类别绕过级别检查，总是记录
@@ -617,8 +617,8 @@ class UnifiedLogger:
         self,
         message: str,
         category: LogCategory = LogCategory.STARTUP,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         """记录DEBUG日志"""
         self._write_log(LogLevel.DEBUG, category, message, context, component)
@@ -627,8 +627,8 @@ class UnifiedLogger:
         self,
         message: str,
         category: LogCategory = LogCategory.STARTUP,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         """记录INFO日志"""
         self._write_log(LogLevel.INFO, category, message, context, component)
@@ -637,8 +637,8 @@ class UnifiedLogger:
         self,
         message: str,
         category: LogCategory = LogCategory.ERROR,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         """记录WARNING日志"""
         self._write_log(LogLevel.WARNING, category, message, context, component)
@@ -646,10 +646,10 @@ class UnifiedLogger:
     def error(
         self,
         message: str,
-        exception: Exception = None,
+        exception: Optional[Exception] = None,
         category: LogCategory = LogCategory.ERROR,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         """记录ERROR日志"""
         ctx = context or {}
@@ -661,10 +661,10 @@ class UnifiedLogger:
     def critical(
         self,
         message: str,
-        exception: Exception = None,
+        exception: Optional[Exception] = None,
         category: LogCategory = LogCategory.ERROR,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         """记录CRITICAL日志"""
         ctx = context or {}
@@ -675,7 +675,7 @@ class UnifiedLogger:
 
     # ============ 便捷方法 ============
 
-    def audio(self, event: str, details: Dict[str, Any] = None) -> None:
+    def audio(self, event: str, details: Optional[Dict[str, Any]] = None) -> None:
         """记录音频事件"""
         self.info(f"Audio: {event}", LogCategory.AUDIO, details, "audio")
 
@@ -683,8 +683,8 @@ class UnifiedLogger:
         self,
         operation: str,
         duration: float,
-        audio_duration: float = None,
-        details: Dict[str, Any] = None,
+        audio_duration: Optional[float] = None,
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """记录性能指标（自动格式化）"""
         ctx = details or {}
@@ -700,7 +700,10 @@ class UnifiedLogger:
 
     @contextmanager
     def trace(
-        self, operation: str, component: str = "", parameters: Dict[str, Any] = None
+        self,
+        operation: str,
+        component: str = "",
+        parameters: Optional[Dict[str, Any]] = None,
     ):
         """性能追踪上下文管理器"""
         thread_id = threading.get_ident()
@@ -784,8 +787,8 @@ class LegacyLoggerAdapter:
         self,
         message: str,
         category: LogCategory = LogCategory.STARTUP,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         self._logger.debug(message, category, context, component)
 
@@ -793,8 +796,8 @@ class LegacyLoggerAdapter:
         self,
         message: str,
         category: LogCategory = LogCategory.STARTUP,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         self._logger.info(message, category, context, component)
 
@@ -802,18 +805,18 @@ class LegacyLoggerAdapter:
         self,
         message: str,
         category: LogCategory = LogCategory.ERROR,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
     ) -> None:
         self._logger.warning(message, category, context, component)
 
     def error(
         self,
         message: str,
-        exception: Exception = None,
+        exception: Optional[Exception] = None,
         category: LogCategory = LogCategory.ERROR,
-        context: Dict[str, Any] = None,
-        component: str = None,
+        context: Optional[Dict[str, Any]] = None,
+        component: Optional[str] = None,
         exc_info=None,
     ) -> None:
         """记录错误日志
@@ -823,17 +826,19 @@ class LegacyLoggerAdapter:
         """
         self._logger.error(message, exception, category, context, component)
 
-    def log_audio_event(self, event: str, details: Dict[str, Any] = None) -> None:
+    def log_audio_event(
+        self, event: str, details: Optional[Dict[str, Any]] = None
+    ) -> None:
         self._logger.audio(event, details)
 
-    def audio(self, event: str, details: Dict[str, Any] = None) -> None:
+    def audio(self, event: str, details: Optional[Dict[str, Any]] = None) -> None:
         """记录音频事件"""
         self._logger.audio(event, details)
 
     def log_transcription(
-        self, audio_length: float, text: str, confidence: float = None
+        self, audio_length: float, text: str, confidence: Optional[float] = None
     ) -> None:
-        details = {
+        details: Dict[str, Any] = {
             "audio_length": f"{audio_length:.2f}s",
             "text_preview": text[:50] + "..." if len(text) > 50 else text,
         }
@@ -846,10 +851,10 @@ class LegacyLoggerAdapter:
         service: str,
         response_time: float,
         success: bool,
-        error: str = None,
-        prompt_tokens: int = None,
-        completion_tokens: int = None,
-        total_tokens: int = None,
+        error: Optional[str] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+        total_tokens: Optional[int] = None,
     ) -> None:
         # 基础消息
         message = f"API Call: {service} - {'Success' if success else 'Failed'} in {response_time:.2f}s"
@@ -886,17 +891,29 @@ class LegacyLoggerAdapter:
         else:
             self._logger.error(message, None, LogCategory.API, context, "api")
 
-    def log_error(self, error: Exception, context: str) -> None:
+    def log_error(
+        self,
+        error: Exception,
+        context: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
         # 获取完整的异常堆栈
         tb_lines = traceback.format_exception(type(error), error, error.__traceback__)
         tb_str = "".join(tb_lines)
 
-        # 记录错误和完整堆栈
+        # 记录错误和完整堆栈(details 为调用方补充的结构化上下文)
+        error_context: Dict[str, Any] = {
+            "traceback": tb_str,
+            "error_details": str(error),
+        }
+        if details:
+            error_context.update(details)
+
         self._logger.error(
             f"Error in {context}",
             error,
             LogCategory.ERROR,
-            context={"traceback": tb_str, "error_details": str(error)},
+            context=error_context,
             component=context,
         )
 
@@ -918,16 +935,18 @@ class LegacyLoggerAdapter:
         )
 
     def log_gpu_info(
-        self, gpu_available: bool, memory_usage: Dict[str, float] = None
+        self, gpu_available: bool, memory_usage: Optional[Dict[str, float]] = None
     ) -> None:
-        context = {"gpu_available": gpu_available}
+        context: Dict[str, Any] = {"gpu_available": gpu_available}
         if memory_usage:
             context["memory_usage"] = memory_usage
         self._logger.info(
             f"GPU Available: {gpu_available}", LogCategory.GPU, context, "gpu"
         )
 
-    def log_model_loading_step(self, step: str, details: Dict[str, Any] = None) -> None:
+    def log_model_loading_step(
+        self, step: str, details: Optional[Dict[str, Any]] = None
+    ) -> None:
         self._logger.info(f"Model: {step}", LogCategory.MODEL, details, "model")
 
     def log_gui_operation(

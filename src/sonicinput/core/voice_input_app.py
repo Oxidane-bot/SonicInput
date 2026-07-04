@@ -7,7 +7,7 @@
 - 不再直接处理业务逻辑
 """
 
-from typing import Optional
+from typing import Optional, cast
 
 from ..utils import VoiceInputError, app_logger, logger
 from .controllers import (
@@ -25,6 +25,7 @@ from .interfaces import (
     IInputService,
     ISpeechService,
     IStateManager,
+    ISyncTranscriptionService,
 )
 from .services.application_orchestrator import ApplicationOrchestrator
 from .services.config import ConfigKeys
@@ -183,6 +184,12 @@ class VoiceInputApp:
 
     def _init_controllers(self) -> None:
         """初始化所有控制器"""
+        # 这些服务在 initialize() 中已注入，此处进入前必为非 None
+        assert self._audio_service is not None
+        assert self._speech_service is not None
+        assert self._input_service is not None
+        assert self._history_service is not None
+
         # 录音控制器
         self._recording_controller = RecordingController(
             audio_service=self._audio_service,
@@ -194,8 +201,10 @@ class VoiceInputApp:
         )
 
         # 转录控制器（共享 RecordingController 的 streaming_manager）
+        # cast: DI 工厂交付的服务(RefactoredTranscriptionService/云服务/NullSpeechService)
+        # 均实现 ISyncTranscriptionService 协议,但静态类型只声明为 ISpeechService
         self._transcription_controller = TranscriptionController(
-            speech_service=self._speech_service,
+            speech_service=cast(ISyncTranscriptionService, self._speech_service),
             config_service=self.config,
             event_service=self.events,
             state_manager=self.state,
@@ -244,6 +253,7 @@ class VoiceInputApp:
 
             if self.container.is_registered(UIModelService):
                 model_service = self.container.get(UIModelService)
+                assert self._speech_service is not None
                 model_service.set_speech_service(self._speech_service)
         except Exception as e:
             app_logger.log_error(e, "sync_ui_runtime_services")
@@ -293,6 +303,11 @@ class VoiceInputApp:
     def _recreate_controllers(self) -> None:
         """重建控制器（使用新的 speech service）"""
         try:
+            # 这些服务在 initialize() 中已注入，重建时必为非 None
+            assert self._audio_service is not None
+            assert self._speech_service is not None
+            assert self._history_service is not None
+
             # 停止旧控制器
             if self._recording_controller:
                 self._recording_controller.stop()
@@ -311,7 +326,7 @@ class VoiceInputApp:
 
             # 重建转录控制器（共享 RecordingController 的 streaming_manager）
             self._transcription_controller = TranscriptionController(
-                speech_service=self._speech_service,
+                speech_service=cast(ISyncTranscriptionService, self._speech_service),
                 config_service=self.config,
                 event_service=self.events,
                 state_manager=self.state,
@@ -356,11 +371,12 @@ class VoiceInputApp:
         if not self.config.get_setting(ConfigKeys.REVIEW_ENABLED, False):
             return ReviewSchedulerRunResult(False, "review_disabled")
         review_service = None
-        if getattr(self, "_container", None) is not None:
+        container_ref = getattr(self, "_container", None)
+        if container_ref is not None:
             try:
                 from .quality import LLMReviewService
 
-                review_service = self._container.resolve(LLMReviewService)
+                review_service = container_ref.resolve(LLMReviewService)
             except Exception:
                 review_service = None
         return self._review_scheduler.run_once_now(review_service=review_service)

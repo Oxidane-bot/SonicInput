@@ -1,9 +1,33 @@
 """语音识别服务接口定义"""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 import numpy as np
+
+
+class ISyncTranscriptionService(Protocol):
+    """同步/流式转录扩展协议(结构化类型)
+
+    ISpeechService 之外的扩展 API。TranscriptionController 实际依赖的契约:
+    RefactoredTranscriptionService、CloudTranscriptionBase、NullSpeechService
+    均实现了这些方法;SherpaEngine 不实现(它总是被
+    RefactoredTranscriptionService 包装后才交给控制器)。
+    """
+
+    def transcribe_sync(
+        self,
+        audio_data: np.ndarray,
+        language: Optional[str] = None,
+        temperature: float = 0.0,
+        emit_event: bool = False,
+    ) -> Dict[str, Any]:
+        """同步转录音频数据"""
+        ...
+
+    def stop_streaming(self) -> Dict[str, Any]:
+        """停止流式转录并返回最终结果"""
+        ...
 
 
 class ISpeechService(ABC):

@@ -27,7 +27,7 @@ from .interfaces import IHotkeyService
 class HotkeyConflictError(Exception):
     """Hotkey already registered by another application"""
 
-    def __init__(self, hotkey: str, error_code: int = None):
+    def __init__(self, hotkey: str, error_code: Optional[int] = None):
         self.hotkey = hotkey
         self.error_code = error_code
 
@@ -165,7 +165,7 @@ class Win32HotkeyManager(LifecycleComponent, IHotkeyService):
         self._message_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._next_hotkey_id = 1
-        self._command_queue = queue.Queue()
+        self._command_queue: queue.Queue[Callable[[], None]] = queue.Queue()
         self._message_ready = threading.Event()
 
         app_logger.log_audio_event(
@@ -286,7 +286,7 @@ class Win32HotkeyManager(LifecycleComponent, IHotkeyService):
             action: Action name to pass to callback
         """
         try:
-            if self.callback:
+            if self.callback is not None:
                 self.callback(action)
                 app_logger.log_audio_event(
                     "Win32 hotkey callback completed", {"action": action}
@@ -728,8 +728,7 @@ class Win32HotkeyManager(LifecycleComponent, IHotkeyService):
                 except Exception as e:
                     app_logger.log_error(
                         e,
-                        "hotkey_listener_cleanup",
-                        {"context": "Failed to post WM_QUIT to hotkey listener thread"},
+                        "hotkey_listener_cleanup: Failed to post WM_QUIT to hotkey listener thread",
                     )
 
             # Wait for thread

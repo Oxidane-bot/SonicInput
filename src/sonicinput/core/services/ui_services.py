@@ -21,6 +21,8 @@ from .config import ConfigKeys
 from ..services.storage import HistoryStorageService, ReviewStorageService
 
 if TYPE_CHECKING:
+    from PySide6.QtCore import QTranslator
+
     from .launch_at_login_service import LaunchAtLoginService
 
 _UNSET = object()
@@ -52,7 +54,7 @@ class UIMainService:
 
     def is_recording(self) -> bool:
         """检查是否正在录音"""
-        return self.state.is_recording
+        return self.state.is_recording()
 
     def start_recording(self) -> None:
         """开始录音
@@ -176,7 +178,7 @@ class UISettingsService:
         if hasattr(self.config_service, "save_config"):
             self.config_service.save_config()
 
-    def save_config(self) -> None:
+    def save_config(self) -> bool:
         """保存配置到文件（别名方法）
 
         这个方法是为了兼容不同的调用方式而存在的。
@@ -598,8 +600,8 @@ class UILocalizationService:
     def __init__(self, config_service: IConfigService, event_service: IEventService):
         self.config_service = config_service
         self.event_service = event_service
-        self._translator = None
-        self._current_language = None
+        self._translator: "Optional[QTranslator]" = None
+        self._current_language: Optional[str] = None
         self._translation_dir = self._resolve_translation_dir()
         app_logger.log_audio_event(
             "UILocalizationService initialized",

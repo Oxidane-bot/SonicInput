@@ -833,7 +833,6 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         # 优先使用多进程池进行并行转写（如果有可用池）
         pool = getattr(self, "_transcription_pool", None)
         if pool is not None:
-            pool = self._transcription_pool
 
             def on_pool_result(future) -> None:
                 try:
@@ -1146,7 +1145,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                 "Transcription core not available",
                 Exception("Transcription core not available"),
                 context=error_info,
-                category="transcribe_task_failed",
+                component="transcribe_task_failed",
             )
             raise WhisperLoadError("Transcription core not available")
 
@@ -1251,7 +1250,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                 "Transcription core not available for streaming chunk",
                 Exception("Transcription core not available for streaming chunk"),
                 context=error_info,
-                category="streaming_chunk_failed",
+                component="streaming_chunk_failed",
             )
 
             error_result = {

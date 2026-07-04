@@ -10,7 +10,7 @@ import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar, cast
 
 from ...utils import app_logger
 from ..base.lifecycle_component import LifecycleComponent
@@ -202,7 +202,7 @@ class StateManager(LifecycleComponent, IStateManager):
             },
         )
 
-    def get_state(self, key: str, default: T = None) -> T:
+    def get_state(self, key: str, default: Optional[T] = None) -> T:
         """获取状态值
 
         Args:
@@ -213,7 +213,7 @@ class StateManager(LifecycleComponent, IStateManager):
             状态值，不存在时返回默认值
         """
         with self._lock:
-            return self._states.get(key, default)
+            return cast(T, self._states.get(key, default))
 
     def has_state(self, key: str) -> bool:
         """检查状态是否存在

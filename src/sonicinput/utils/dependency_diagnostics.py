@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Windows平台窗口隐藏标志
 if sys.platform == "win32":
@@ -132,7 +132,7 @@ class DependencyDiagnostics:
 
     def _get_pytorch_info(self) -> Dict[str, Any]:
         """获取PyTorch信息"""
-        pytorch_info = {"installed": False}
+        pytorch_info: Dict[str, Any] = {"installed": False}
 
         try:
             import torch
@@ -177,7 +177,7 @@ class DependencyDiagnostics:
 
     def _get_whisper_info(self) -> Dict[str, Any]:
         """获取Whisper信息"""
-        whisper_info = {"installed": False}
+        whisper_info: Dict[str, Any] = {"installed": False}
 
         try:
             # 延迟导入whisper，避免破坏主应用的延迟导入策略
@@ -314,7 +314,7 @@ class DependencyDiagnostics:
         return recommendations
 
     def save_diagnosis_report(
-        self, diagnosis: Dict[str, Any], filepath: str = None
+        self, diagnosis: Dict[str, Any], filepath: Optional[str] = None
     ) -> str:
         """保存诊断报告到文件"""
         if filepath is None:

@@ -44,7 +44,7 @@ class CloudTranscriptionBase(ISpeechService):
         self._config_service = config_service
 
         # HTTP session with connection pooling
-        self._session = None
+        self._session: Optional[requests.Session] = None
         self._session_lock = threading.RLock()
 
         # Performance tracking

@@ -33,7 +33,7 @@ class SherpaModelManager(LifecycleComponent):
 
     CACHE_SCHEMA_VERSION = 2
 
-    MODELS = {
+    MODELS: Dict[str, Dict[str, Any]] = {
         "paraformer": {
             "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2",
             "size_mb": 226,
@@ -240,7 +240,7 @@ class SherpaModelManager(LifecycleComponent):
                     )
                 )
                 progress_dialog.setCancelButton(None)  # 隐藏取消按钮
-                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
                 progress_dialog.setMinimum(0)
                 progress_dialog.setMaximum(100)
                 progress_dialog.setValue(0)

@@ -85,7 +85,7 @@ class TranscriptionResult:
     text: str = ""
     language: Optional[str] = None
     confidence: float = 0.0
-    segments: list = None
+    segments: Optional[list] = None
     transcription_time: float = 0.0
     error: Optional[str] = None
     recovery_suggestions: Optional[list] = None

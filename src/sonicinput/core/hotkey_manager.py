@@ -9,7 +9,7 @@ Available backends:
 - auto: Automatically selects best backend (admin -> pynput, else win32)
 """
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import sys
 
@@ -24,7 +24,7 @@ class HotkeyBackendError(Exception):
 
 
 def create_hotkey_manager(
-    callback: Callable[[str], None], backend: str = "auto", config: Optional[any] = None
+    callback: Callable[[str], None], backend: str = "auto", config: Optional[Any] = None
 ) -> IHotkeyService:
     """Create hotkey manager with specified backend
 
@@ -64,7 +64,7 @@ def create_hotkey_manager(
         if actual_backend == "win32":
             from .hotkey_manager_win32 import Win32HotkeyManager
 
-            manager = Win32HotkeyManager(callback)
+            manager: IHotkeyService = Win32HotkeyManager(callback)
             app_logger.log_audio_event(
                 "Created Win32 hotkey manager",
                 {"backend": "win32", "admin_required": False},

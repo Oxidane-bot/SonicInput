@@ -62,9 +62,9 @@ class AudioProcessor:
                 )
             except (MemoryError, ValueError) as exc:
                 # 内存不足或重采样失败时，使用更简单的方法
-                app_logger.log_warning(
+                app_logger.warning(
                     "High-quality resampling failed, using linear fallback",
-                    {"error": str(exc)},
+                    context={"error": str(exc)},
                 )
                 resampled = self._resample_linear(audio_data, resample_ratio)
 
@@ -257,7 +257,7 @@ class AudioProcessor:
 
             # 合并语音段
             if voice_segments:
-                result = []
+                result: list[float] = []
                 for start_idx, end_idx in voice_segments:
                     result.extend(audio_data[start_idx:end_idx])
 

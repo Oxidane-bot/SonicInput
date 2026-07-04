@@ -386,8 +386,14 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
         if app_logger.is_debug_enabled():
             import inspect
 
-            caller_frame = inspect.currentframe().f_back
-            caller_info = f"{caller_frame.f_code.co_filename}:{caller_frame.f_lineno}"
+            current_frame = inspect.currentframe()
+            caller_frame = current_frame.f_back if current_frame else None
+            if caller_frame is not None:
+                caller_info = (
+                    f"{caller_frame.f_code.co_filename}:{caller_frame.f_lineno}"
+                )
+            else:
+                caller_info = "<unknown>"
 
             app_logger.log_audio_event(
                 "Hotkey listener restarting",

@@ -58,7 +58,7 @@ class AIService(LifecycleComponent):  # type: ignore[metaclass]
         """
         try:
             # 获取配置
-            config = self._config_service.get_config()
+            config = self._config_service.get_all_settings()
             ai_config = config.get("ai", {})
 
             # 加载配置参数

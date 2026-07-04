@@ -54,15 +54,11 @@ jobs:
         uv run ruff format --check src/ tests/
 
     - name: Run mypy (type checking)
+      # 0 errors across src/ — this gate is REAL (no `|| true`).
+      # Baselined UI modules live in pyproject.toml [tool.mypy.overrides];
+      # remove modules from the baseline as their errors get fixed.
       run: |
-        uv run mypy src/ --ignore-missing-imports || true
-
-    - name: Run mypy (strict on UI surface)
-      # UI files have baselined modules in pyproject.toml [tool.mypy.overrides].
-      # New type errors in non-baselined UI files will FAIL the build (no `|| true`).
-      # See pyproject.toml to remove baselined modules as their errors get fixed.
-      run: |
-        uv run mypy src/sonicinput/ui/
+        uv run mypy src/
 
   # 核心回归测试（跳过 GUI/GPU/E2E）
   tests:

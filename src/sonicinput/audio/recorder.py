@@ -33,13 +33,13 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         self.chunk_size = chunk_size
         self.format = pyaudio.paInt16
 
-        self._audio = None
-        self._stream = None
+        self._audio: Optional[pyaudio.PyAudio] = None
+        self._stream: Optional[Any] = None
         self._recording = False
-        self._audio_data = []
-        self._record_thread = None
-        self._callback = None
-        self._device_id = None  # Initialize device_id
+        self._audio_data: List[np.ndarray] = []
+        self._record_thread: Optional[threading.Thread] = None
+        self._callback: Optional[Callable[[np.ndarray], None]] = None
+        self._device_id: Optional[int] = None  # Initialize device_id
         self._config_service = config_service  # 保存配置服务引用
 
         # 线程安全：保护 _audio_data 的并发访问
@@ -56,7 +56,7 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         self._chunked_samples_sent = 0  # 追踪已发送给chunk_callback的样本数量
 
         # 优化: 累积音频缓存,避免重复拼接 (v0.5.1 性能优化)
-        self._accumulated_audio: np.ndarray = None  # 累积的完整音频数据
+        self._accumulated_audio: Optional[np.ndarray] = None  # 累积的完整音频数据
 
         # Auto-start to maintain backward compatibility
         # (old code called _initialize_audio() in __init__)
@@ -95,10 +95,6 @@ class AudioRecorder(LifecycleComponent, IAudioService):
                     app_logger.log_error(
                         e,
                         "audio_initialization_cleanup_failed",
-                        {
-                            "context": "Failed to terminate PyAudio during cleanup",
-                            "init_error": str(init_error),
-                        },
                     )
                 finally:
                     self._audio = None
@@ -108,9 +104,7 @@ class AudioRecorder(LifecycleComponent, IAudioService):
             if cleanup_error:
                 error_msg += f". Cleanup also failed: {cleanup_error}"
 
-            app_logger.log_error(
-                init_error, "audio_recorder_do_start", {"error_msg": error_msg}
-            )
+            app_logger.error(error_msg, init_error, component="audio_recorder_do_start")
             return False
 
     def _do_stop(self) -> bool:
@@ -129,9 +123,7 @@ class AudioRecorder(LifecycleComponent, IAudioService):
                 try:
                     self._record_thread.join(timeout=2.0)
                     if self._record_thread.is_alive():
-                        app_logger.log_warning(
-                            "Recording thread did not terminate cleanly", {}
-                        )
+                        app_logger.warning("Recording thread did not terminate cleanly")
                 except Exception as e:
                     app_logger.log_error(e, "do_stop_thread_join")
 
@@ -187,6 +179,21 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         except Exception as e:
             app_logger.log_error(e, "validate_configured_device")
 
+    def _require_audio(self) -> "pyaudio.PyAudio":
+        """确保 PyAudio 已初始化并返回实例（必要时启动）。
+
+        Returns:
+            已初始化的 PyAudio 实例
+
+        Raises:
+            AudioRecordingError: 音频系统未能初始化时抛出
+        """
+        if self._audio is None:
+            self.start()
+        if self._audio is None:
+            raise AudioRecordingError("Audio system is not initialized")
+        return self._audio
+
     def get_audio_devices(self) -> List[Dict[str, Any]]:
         """Get available audio input devices
 
@@ -195,12 +202,11 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         """
         devices = []
         try:
-            if not self._audio:
-                self.start()
+            audio = self._require_audio()
 
-            for i in range(self._audio.get_device_count()):
+            for i in range(audio.get_device_count()):
                 try:
-                    info = self._audio.get_device_info_by_index(i)
+                    info = audio.get_device_info_by_index(i)
                     if info["maxInputChannels"] > 0:
                         devices.append(
                             {
@@ -223,11 +229,10 @@ class AudioRecorder(LifecycleComponent, IAudioService):
             if device_id is None:
                 return True  # Use default device
 
-            if not self._audio:
-                self.start()
+            audio = self._require_audio()
 
             # Check if device exists and has input channels
-            device_info = self._audio.get_device_info_by_index(device_id)
+            device_info = audio.get_device_info_by_index(device_id)
             return device_info["maxInputChannels"] > 0
         except Exception as e:
             app_logger.log_error(e, f"validate_device_{device_id}")
@@ -256,11 +261,12 @@ class AudioRecorder(LifecycleComponent, IAudioService):
         # 尝试打开指定设备，失败时fallback到默认设备
         attempted_devices = []
         last_error = None
+        audio = self._require_audio()
 
         # 尝试1：使用指定的设备
         if device_id is not None:
             try:
-                self._stream = self._audio.open(
+                self._stream = audio.open(
                     format=self.format,
                     channels=self.channels,
                     rate=self._sample_rate,
@@ -288,7 +294,7 @@ class AudioRecorder(LifecycleComponent, IAudioService):
 
         # 尝试2：Fallback到系统默认设备
         try:
-            self._stream = self._audio.open(
+            self._stream = audio.open(
                 format=self.format,
                 channels=self.channels,
                 rate=self._sample_rate,

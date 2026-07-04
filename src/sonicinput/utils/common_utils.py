@@ -20,11 +20,11 @@ T = TypeVar("T")
 class ThreadSafeContainer(Generic[T]):
     """Thread-safe container for shared data with automatic locking"""
 
-    def __init__(self, initial_value: T = None):
-        self._value = initial_value
+    def __init__(self, initial_value: Optional[T] = None):
+        self._value: Optional[T] = initial_value
         self._lock = threading.RLock()
 
-    def get(self) -> T:
+    def get(self) -> Optional[T]:
         """Get the current value thread-safely"""
         with self._lock:
             return self._value
@@ -34,11 +34,12 @@ class ThreadSafeContainer(Generic[T]):
         with self._lock:
             self._value = value
 
-    def update(self, updater: Callable[[T], T]) -> T:
+    def update(self, updater: Callable[[Optional[T]], T]) -> T:
         """Update the value using an updater function thread-safely"""
         with self._lock:
-            self._value = updater(self._value)
-            return self._value
+            new_value = updater(self._value)
+            self._value = new_value
+            return new_value
 
     @contextmanager
     def lock_and_get(self):
@@ -80,7 +81,9 @@ class TimestampTracker:
         with self._lock:
             return self._timestamps.get(event)
 
-    def get_duration(self, start_event: str, end_event: str = None) -> Optional[float]:
+    def get_duration(
+        self, start_event: str, end_event: Optional[str] = None
+    ) -> Optional[float]:
         """Get duration between two events
 
         Args:
@@ -124,7 +127,7 @@ class ComponentTracker:
         self._lock = threading.RLock()
 
     def register_component(
-        self, name: str, initial_data: Dict[str, Any] = None
+        self, name: str, initial_data: Optional[Dict[str, Any]] = None
     ) -> None:
         """Register a component for tracking
 
@@ -408,7 +411,7 @@ class PerformanceTracker:
                     result[operation]["average_duration"] = 0.0
             return result
 
-    def reset_metrics(self, operation: str = None) -> None:
+    def reset_metrics(self, operation: Optional[str] = None) -> None:
         """Reset metrics for an operation or all operations
 
         Args:
@@ -466,7 +469,7 @@ def safe_file_operation(
 
 
 def log_with_context(
-    event_name: str, data: Dict[str, Any] = None, component: str = "unknown"
+    event_name: str, data: Optional[Dict[str, Any]] = None, component: str = "unknown"
 ) -> None:
     """Log event with consistent context information
 

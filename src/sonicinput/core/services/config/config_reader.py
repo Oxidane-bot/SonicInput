@@ -3,7 +3,7 @@
 import copy
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeVar
+from typing import Any, Dict, Optional, TypeVar, cast
 
 from ....utils import app_logger
 from .config_defaults import get_default_config
@@ -73,19 +73,19 @@ class ConfigReader:
         """
         try:
             keys = key.split(".")
-            value = self._config
+            value: Any = self._config
 
             for k in keys:
                 if isinstance(value, dict) and k in value:
                     value = value[k]
                 else:
-                    return default
+                    return cast(T, default)
 
-            return value
+            return cast(T, value)
 
         except Exception as e:
             app_logger.log_error(e, f"config_reader_get_{key}")
-            return default
+            return cast(T, default)
 
     def get_all_settings(self) -> Dict[str, Any]:
         """获取所有配置的副本

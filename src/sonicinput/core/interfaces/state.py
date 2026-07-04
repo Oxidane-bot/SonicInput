@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -48,7 +48,7 @@ class IStateManager(ABC):
         pass
 
     @abstractmethod
-    def get_state(self, key: str, default: T = None) -> T:
+    def get_state(self, key: str, default: Optional[T] = None) -> T:
         """获取状态值
 
         Args:

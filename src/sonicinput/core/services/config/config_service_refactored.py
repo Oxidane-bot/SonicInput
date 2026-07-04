@@ -171,7 +171,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
             if not is_valid:
                 raise ConfigurationError(error_msg)
 
-        old_value = self.get_setting(key)
+        old_value: Any = self.get_setting(key)
 
         # 更新配置
         self._writer.set_setting(key, value)
@@ -238,7 +238,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
 
         # 1. 批量更新所有配置项
         for key, value in changes.items():
-            old_value = self.get_setting(key)
+            old_value: Any = self.get_setting(key)
 
             # 更新配置
             self._writer.set_setting(key, value)
@@ -346,7 +346,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
             app_logger.log_audio_event("Configuration reset to defaults", {})
         else:
             # 重置特定配置项
-            old_value = self.get_setting(key)
+            old_value: Any = self.get_setting(key)
             default_value = self._reader._get_default_value(key)
             if default_value is not None:
                 self.set_setting(key, default_value)
@@ -705,7 +705,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
             )
 
     def _validate_transcription_provider(
-        self, provider: str, pending_changes: Optional[Dict[str, Any]] = None
+        self, provider: Any, pending_changes: Optional[Dict[str, Any]] = None
     ) -> tuple[bool, str]:
         """验证转录提供商配置
 

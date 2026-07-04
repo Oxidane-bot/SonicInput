@@ -23,7 +23,7 @@ from .event import EventPriority, IEventService
 from .hotkey import IHotkeyService
 from .input import IInputService
 from .lifecycle import ComponentState, ILifecycleManaged, ILifecycleManager
-from .speech import ISpeechService
+from .speech import ISpeechService, ISyncTranscriptionService
 from .state import AppState, IStateManager, RecordingState
 from .storage import ICacheService, IStorageService
 from .ui import IOverlayComponent, ITrayComponent, IUIComponent
@@ -70,6 +70,7 @@ __all__ = [
     "IConfigService",
     "IAudioService",
     "ISpeechService",
+    "ISyncTranscriptionService",
     "IAIService",
     "IInputService",
     "IHotkeyService",

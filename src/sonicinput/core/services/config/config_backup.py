@@ -58,7 +58,7 @@ class ConfigBackupService:
             if not backup_dir.exists():
                 return []
 
-            backups = []
+            backups: List[Dict[str, Any]] = []
             for backup_file in backup_dir.glob("config_backup_*.json"):
                 stat_info = backup_file.stat()
                 backups.append({
