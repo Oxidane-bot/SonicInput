@@ -1,4 +1,4 @@
-"""SQLite persistence for local review suggestions."""
+"""SQLite persistence for lexicon review and local lexicon memory."""
 
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ from ...quality import ReviewSuggestion
 
 
 class ReviewStorageService:
-    """Persist local review jobs, suggestions, and decisions.
+    """Persist lexicon-only review suggestions and accepted lexicon entries.
 
-    The service is intentionally small and can share the existing history DB.
-    It does not alter history records.
+    Existing review tables are kept for compatibility, but this service only
+    creates and lists ``lexicon_candidate`` suggestions. Old quality/debug review
+    rows can remain in the database; they are not surfaced or accepted here.
     """
 
     def __init__(self, db_path: str | Path):
@@ -41,19 +42,16 @@ class ReviewStorageService:
     ) -> str:
         job_id = f"review_job_{uuid.uuid4().hex[:16]}"
         created_at = datetime.now().isoformat(timespec="seconds")
-        exact_skip_statuses = {"accepted", "rejected", "ignored"}
-        similar_skip_statuses = {"accepted", "rejected", "ignored"}
-        persisted_suggestion_count = 0
-
+        persisted_count = 0
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
             conn.execute(
                 """
                 INSERT INTO review_jobs (
-                    id, created_at, status, record_limit,
-                    reviewed_count, suggestion_count, review_source,
-                    provider, model_id, prompt_version, fallback_reason
+                    id, created_at, status, record_limit, reviewed_count,
+                    suggestion_count, review_source, provider, model_id,
+                    prompt_version, fallback_reason
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -61,8 +59,8 @@ class ReviewStorageService:
                     job_id,
                     created_at,
                     "completed",
-                    record_limit,
-                    reviewed_count,
+                    int(record_limit),
+                    int(reviewed_count),
                     0,
                     review_source,
                     provider,
@@ -72,23 +70,10 @@ class ReviewStorageService:
                 ),
             )
             for suggestion in suggestions:
-                existing = conn.execute(
-                    """
-                    SELECT status
-                    FROM review_suggestions
-                    WHERE suggestion_id = ?
-                    """,
-                    (suggestion.suggestion_id,),
-                ).fetchone()
-                if existing is not None and existing["status"] in exact_skip_statuses:
+                if not self._is_persistable_lexicon_suggestion(suggestion):
                     continue
-                if self._has_processed_similar_suggestion(
-                    conn,
-                    suggestion,
-                    similar_skip_statuses,
-                ):
+                if self._has_processed_similar_suggestion(conn, suggestion):
                     continue
-
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO review_suggestions (
@@ -97,14 +82,12 @@ class ReviewStorageService:
                         evidence_count, old_form, new_form, status,
                         created_at, reviewed_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    VALUES (?, ?, 'lexicon_candidate', ?, 'medium', ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                     """,
                     (
                         suggestion.suggestion_id,
                         job_id,
-                        suggestion.suggestion_type,
                         suggestion.confidence,
-                        suggestion.risk_level,
                         json.dumps(suggestion.source_record_ids, ensure_ascii=False),
                         suggestion.title,
                         suggestion.detail,
@@ -115,20 +98,16 @@ class ReviewStorageService:
                         created_at,
                     ),
                 )
-                persisted_suggestion_count += 1
+                persisted_count += 1
             conn.execute(
-                """
-                UPDATE review_jobs
-                SET suggestion_count = ?
-                WHERE id = ?
-                """,
-                (persisted_suggestion_count, job_id),
+                "UPDATE review_jobs SET suggestion_count = ? WHERE id = ?",
+                (persisted_count, job_id),
             )
             conn.commit()
         return job_id
 
     def load_review_cursor(
-        self, *, cursor_name: str = "llm_review"
+        self, *, cursor_name: str = "lexicon_review"
     ) -> dict[str, str] | None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
@@ -153,7 +132,7 @@ class ReviewStorageService:
         *,
         cursor_timestamp: str | None,
         cursor_id: str | None,
-        cursor_name: str = "llm_review",
+        cursor_name: str = "lexicon_review",
     ) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             self._create_tables(conn)
@@ -170,6 +149,7 @@ class ReviewStorageService:
             conn.commit()
 
     def list_pending_suggestions(self, limit: int = 100) -> list[dict[str, object]]:
+        safe_limit = max(0, int(limit or 0))
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
@@ -178,28 +158,18 @@ class ReviewStorageService:
                 SELECT *
                 FROM review_suggestions
                 WHERE status = 'pending'
-                ORDER BY
-                    CASE risk_level
-                        WHEN 'high' THEN 0
-                        WHEN 'medium' THEN 1
-                        WHEN 'low' THEN 2
-                        ELSE 3
-                    END ASC,
-                    CASE
-                        WHEN suggestion_type = 'lexicon_candidate' THEN 1
-                        ELSE 0
-                    END ASC,
-                    confidence DESC,
-                    evidence_count DESC,
-                    created_at DESC,
-                    suggestion_id DESC
+                  AND suggestion_type = 'lexicon_candidate'
+                  AND COALESCE(old_form, '') != ''
+                  AND COALESCE(new_form, '') != ''
+                ORDER BY confidence DESC, evidence_count DESC, created_at DESC, suggestion_id DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (safe_limit,),
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
     def list_review_jobs(self, limit: int = 20) -> list[dict[str, object]]:
+        safe_limit = max(0, int(limit or 0))
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
@@ -210,11 +180,12 @@ class ReviewStorageService:
                 ORDER BY created_at DESC, id DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (safe_limit,),
             ).fetchall()
         return [dict(row) for row in rows]
 
     def list_active_lexicon_entries(self, limit: int = 200) -> list[dict[str, object]]:
+        safe_limit = max(0, int(limit or 0))
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
@@ -226,24 +197,11 @@ class ReviewStorageService:
                 ORDER BY updated_at DESC, term COLLATE NOCASE ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (safe_limit,),
             ).fetchall()
         return [dict(row) for row in rows]
 
     def clear_lexicon_entries(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
-            self._create_tables(conn)
-            conn.execute("UPDATE local_lexicon_entries SET status = 'archived'")
-            conn.commit()
-
-    def clear_learning_data(self) -> None:
-        """Clear local review-learning state without deleting audit/job history.
-
-        This resets:
-        - accepted lexicon memory entries
-        - review decisions that influence future suggestion suppression
-        - processed suggestion statuses that currently suppress exact/similar items
-        """
         with sqlite3.connect(str(self._db_path)) as conn:
             self._create_tables(conn)
             conn.execute(
@@ -253,12 +211,21 @@ class ReviewStorageService:
                 WHERE status = 'active'
                 """
             )
+            conn.commit()
+
+    def clear_learning_data(self) -> None:
+        with sqlite3.connect(str(self._db_path)) as conn:
+            self._create_tables(conn)
+            conn.execute(
+                "UPDATE local_lexicon_entries SET status = 'archived' WHERE status = 'active'"
+            )
             conn.execute("DELETE FROM review_decisions")
             conn.execute(
                 """
                 UPDATE review_suggestions
                 SET status = 'archived', reviewed_at = NULL
-                WHERE status IN ('accepted', 'rejected', 'ignored')
+                WHERE suggestion_type = 'lexicon_candidate'
+                  AND status IN ('pending', 'accepted', 'rejected', 'ignored')
                 """
             )
             conn.commit()
@@ -281,14 +248,17 @@ class ReviewStorageService:
                 SELECT *
                 FROM review_suggestions
                 WHERE suggestion_id = ?
+                  AND suggestion_type = 'lexicon_candidate'
+                  AND COALESCE(old_form, '') != ''
+                  AND COALESCE(new_form, '') != ''
                 """,
                 (suggestion_id,),
             ).fetchone()
+            if suggestion is None:
+                return
             conn.execute(
                 """
-                INSERT INTO review_decisions (
-                    id, suggestion_id, decision, decided_at, note
-                )
+                INSERT INTO review_decisions (id, suggestion_id, decision, decided_at, note)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
@@ -307,13 +277,21 @@ class ReviewStorageService:
                 """,
                 (decision, decided_at, suggestion_id),
             )
-            if decision == "accepted" and suggestion is not None:
+            if decision == "accepted":
                 self._upsert_lexicon_entry_from_suggestion(
                     conn,
                     suggestion=suggestion,
                     decided_at=decided_at,
                 )
             conn.commit()
+
+    @staticmethod
+    def _is_persistable_lexicon_suggestion(suggestion: ReviewSuggestion) -> bool:
+        return (
+            suggestion.suggestion_type == "lexicon_candidate"
+            and bool(str(suggestion.old_form or "").strip())
+            and bool(str(suggestion.new_form or "").strip())
+        )
 
     @staticmethod
     def _create_tables(conn: sqlite3.Connection) -> None:
@@ -390,14 +368,12 @@ class ReviewStorageService:
                 id TEXT PRIMARY KEY,
                 term TEXT NOT NULL UNIQUE,
                 old_form TEXT,
-                source_suggestion_id TEXT NOT NULL,
-                evidence_count INTEGER NOT NULL,
-                confidence REAL NOT NULL,
+                source_suggestion_id TEXT,
+                evidence_count INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(source_suggestion_id)
-                    REFERENCES review_suggestions(suggestion_id)
+                updated_at TEXT NOT NULL
             )
             """
         )
@@ -433,7 +409,10 @@ class ReviewStorageService:
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
         item = dict(row)
-        item["source_record_ids"] = json.loads(str(item["source_record_ids"]))
+        try:
+            item["source_record_ids"] = json.loads(str(item["source_record_ids"]))
+        except Exception:
+            item["source_record_ids"] = []
         return item
 
     @classmethod
@@ -441,56 +420,24 @@ class ReviewStorageService:
         cls,
         conn: sqlite3.Connection,
         suggestion: ReviewSuggestion,
-        processed_statuses: set[str],
     ) -> bool:
-        rows = conn.execute(
+        old_form = str(suggestion.old_form or "").strip().lower()
+        new_form = str(suggestion.new_form or "").strip().lower()
+        if not old_form or not new_form:
+            return True
+        row = conn.execute(
             """
-            SELECT suggestion_type, source_record_ids, old_form, new_form, status
+            SELECT 1
             FROM review_suggestions
-            WHERE suggestion_type = ?
+            WHERE suggestion_type = 'lexicon_candidate'
+              AND LOWER(COALESCE(old_form, '')) = ?
+              AND LOWER(COALESCE(new_form, '')) = ?
+              AND status IN ('pending', 'accepted', 'rejected', 'ignored')
+            LIMIT 1
             """,
-            (suggestion.suggestion_type,),
-        ).fetchall()
-        target = cls._suggestion_fingerprint(
-            suggestion.suggestion_type,
-            suggestion.source_record_ids,
-            suggestion.old_form,
-            suggestion.new_form,
-        )
-        for row in rows:
-            if row["status"] not in processed_statuses:
-                continue
-            try:
-                source_record_ids = tuple(json.loads(row["source_record_ids"]))
-            except Exception:
-                source_record_ids = ()
-            existing = cls._suggestion_fingerprint(
-                row["suggestion_type"],
-                source_record_ids,
-                row["old_form"],
-                row["new_form"],
-            )
-            if existing == target:
-                return True
-        return False
-
-    @staticmethod
-    def _suggestion_fingerprint(
-        suggestion_type: str,
-        source_record_ids: tuple[str, ...],
-        old_form: str | None,
-        new_form: str | None,
-    ) -> tuple[str, str, str, str]:
-        normalized_old = str(old_form or "").strip().lower()
-        normalized_new = str(new_form or "").strip().lower()
-        if suggestion_type in {
-            "lexicon_candidate",
-            "prompt_failure_pattern",
-        } and (normalized_old or normalized_new):
-            source_key = ""
-        else:
-            source_key = ",".join(sorted(str(item) for item in source_record_ids))
-        return (suggestion_type, source_key, normalized_old, normalized_new)
+            (old_form, new_form),
+        ).fetchone()
+        return row is not None
 
     @staticmethod
     def _upsert_lexicon_entry_from_suggestion(
@@ -499,13 +446,11 @@ class ReviewStorageService:
         suggestion: sqlite3.Row,
         decided_at: str,
     ) -> None:
-        if suggestion["suggestion_type"] != "lexicon_candidate":
+        term = str(suggestion["new_form"] or "").strip()
+        old_form = str(suggestion["old_form"] or "").strip()
+        if not term or not old_form:
             return
-        term = suggestion["new_form"]
-        if not term:
-            return
-
-        entry_id = f"lexicon_{uuid.uuid5(uuid.NAMESPACE_URL, str(term)).hex[:16]}"
+        entry_id = f"lexicon_{uuid.uuid5(uuid.NAMESPACE_URL, term).hex[:16]}"
         conn.execute(
             """
             INSERT INTO local_lexicon_entries (
@@ -516,24 +461,18 @@ class ReviewStorageService:
             ON CONFLICT(term) DO UPDATE SET
                 old_form = excluded.old_form,
                 source_suggestion_id = excluded.source_suggestion_id,
-                evidence_count = MAX(
-                    local_lexicon_entries.evidence_count,
-                    excluded.evidence_count
-                ),
-                confidence = MAX(
-                    local_lexicon_entries.confidence,
-                    excluded.confidence
-                ),
+                evidence_count = MAX(local_lexicon_entries.evidence_count, excluded.evidence_count),
+                confidence = MAX(local_lexicon_entries.confidence, excluded.confidence),
                 status = 'active',
                 updated_at = excluded.updated_at
             """,
             (
                 entry_id,
                 term,
-                suggestion["old_form"],
+                old_form,
                 suggestion["suggestion_id"],
-                suggestion["evidence_count"],
-                suggestion["confidence"],
+                int(suggestion["evidence_count"] or 0),
+                float(suggestion["confidence"] or 0),
                 decided_at,
                 decided_at,
             ),

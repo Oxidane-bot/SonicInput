@@ -1,7 +1,7 @@
-"""Quality guards for transcription and AI refinement."""
+"""Quality helpers for transcript processing."""
 
-from .history_review_agent import HistoryReviewAgent, ReviewSuggestion
 from .lexicon_matcher import LexiconMatcher
+from .lexicon_review_agent import LexiconReviewAgent, ReviewSuggestion
 from .llm_review_service import LLMReviewService, ReviewRunOutcome
 from .rolling_transcript_context import RollingTranscriptContext
 from .transcript_quality_validator import (
@@ -12,12 +12,12 @@ from .transcript_quality_validator import (
 
 __all__ = [
     "AIOutputValidationError",
-    "HistoryReviewAgent",
     "LexiconMatcher",
+    "LexiconReviewAgent",
     "LLMReviewService",
-    "RollingTranscriptContext",
-    "ReviewSuggestion",
     "ReviewRunOutcome",
+    "ReviewSuggestion",
+    "RollingTranscriptContext",
     "TranscriptQualityValidator",
     "TranscriptValidationResult",
 ]

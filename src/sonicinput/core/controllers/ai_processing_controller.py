@@ -19,7 +19,6 @@ from ..interfaces import (
     IStateManager,
 )
 from ..quality import (
-    AIOutputValidationError,
     LexiconMatcher,
     RollingTranscriptContext,
     TranscriptQualityValidator,
@@ -301,40 +300,6 @@ class AIProcessingController(
         )
         return text
 
-    def _mark_ai_validation_failed(
-        self,
-        text: str,
-        actual_record_id: Optional[str],
-        provider: str,
-        error_msg: str,
-        update_history: bool,
-        emit_events: bool,
-    ) -> str:
-        self.last_ai_status = "failed"
-        self.last_ai_error = error_msg
-        self.last_ai_provider = provider
-        app_logger.log_audio_event(
-            "AI output rejected by quality validator",
-            {
-                "error": error_msg,
-                "provider": provider,
-                "original_length": len(text),
-            },
-        )
-
-        if update_history and actual_record_id:
-            self._update_ai_status(
-                record_id=actual_record_id,
-                ai_text=None,
-                status="failed",
-                error=error_msg,
-                final_text=text,
-            )
-
-        if emit_events:
-            self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
-        return text
-
     def _on_recording_started(self, data: Any = None) -> None:
         self._current_record_id = None
         self._last_incremental_output_used = False
@@ -557,11 +522,8 @@ class AIProcessingController(
         if not refined_text:
             refined_text = merged_text
 
-        validation_result = self._quality_validator.validate(merged_text, refined_text)
-        if group_failure_reason or not validation_result.ok:
-            error_msg = group_failure_reason or (
-                f"AI output validation failed: {validation_result.reason_text}"
-            )
+        if group_failure_reason:
+            error_msg = group_failure_reason
             if self._current_record_id:
                 self._update_ai_status(
                     record_id=self._current_record_id,
@@ -572,7 +534,7 @@ class AIProcessingController(
                 )
             self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             app_logger.log_audio_event(
-                "Chunk-triggered AI rejected by quality validator",
+                "Chunk-triggered AI failed while refining a group",
                 {"error": error_msg, "final_length": len(refined_text)},
             )
             return merged_text
@@ -1031,9 +993,6 @@ class AIProcessingController(
                                 model,
                                 max_output_tokens,
                             )
-                        self._quality_validator.validate_or_raise(
-                            group_text, refined_part
-                        )
                         self._update_rolling_context(group_text, refined_part)
                         refined_parts.append(refined_part)
                         self._last_ai_tps = getattr(ai_service, "_last_tps", 0.0)
@@ -1119,17 +1078,6 @@ class AIProcessingController(
                         max_output_tokens,
                     )
 
-            validation_result = self._quality_validator.validate(text, refined_text)
-            if not validation_result.ok:
-                return self._mark_ai_validation_failed(
-                    text=text,
-                    actual_record_id=actual_record_id,
-                    provider=provider,
-                    error_msg=f"AI output validation failed: {validation_result.reason_text}",
-                    update_history=update_history,
-                    emit_events=emit_events,
-                )
-
             self._update_rolling_context(text, refined_text)
 
             app_logger.log_audio_event(
@@ -1207,16 +1155,6 @@ class AIProcessingController(
             if emit_events:
                 self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
             return text
-
-        except AIOutputValidationError as e:
-            return self._mark_ai_validation_failed(
-                text=text,
-                actual_record_id=actual_record_id,
-                provider=provider,
-                error_msg=str(e),
-                update_history=update_history,
-                emit_events=emit_events,
-            )
 
         except requests.exceptions.Timeout as e:
             error_msg = "AI request timeout - API response too slow"

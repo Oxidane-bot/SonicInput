@@ -1,4 +1,4 @@
-"""Conservative idle scheduler for local transcript review."""
+"""Conservative idle scheduler for lexicon review."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import datetime
 import time
 from typing import Any
 
-from ..quality import HistoryReviewAgent, LLMReviewService, ReviewRunOutcome
+from ..quality import LLMReviewService, LexiconReviewAgent, ReviewRunOutcome
 from .config import ConfigKeys
 from .events import Events
 from .storage import ReviewStorageService
@@ -43,12 +43,9 @@ class ReviewSchedulerRunResult:
 
 
 class ReviewSchedulerService:
-    """Run review only when the app is idle and within budget.
+    """Run lexicon review only when idle and within budget."""
 
-    This service deliberately has no background thread. The app can call
-    ``run_once_if_idle`` from an existing timer after updating busy/activity
-    state from events.
-    """
+    _MAX_EFFECTIVE_RECORDS = 8
 
     def __init__(
         self,
@@ -57,14 +54,14 @@ class ReviewSchedulerService:
         load_review_records: Callable[[int, dict[str, str] | None], Sequence[Any]]
         | None = None,
         review_storage: ReviewStorageService,
-        review_agent: HistoryReviewAgent | None = None,
+        review_agent: LexiconReviewAgent | None = None,
         config: ReviewSchedulerConfig | None = None,
         clock: Callable[[], float] | None = None,
     ):
         self._load_recent_records = load_recent_records
         self._load_review_records = load_review_records
         self._review_storage = review_storage
-        self._review_agent = review_agent or HistoryReviewAgent()
+        self._review_agent = review_agent or LexiconReviewAgent()
         self._config = config or ReviewSchedulerConfig()
         self._clock = clock or time.time
         self._last_activity_at = self._clock()
@@ -78,19 +75,19 @@ class ReviewSchedulerService:
 
     @classmethod
     def config_from_service(cls, config_service: Any) -> ReviewSchedulerConfig:
+        configured_max_records = int(
+            config_service.get_setting(
+                ConfigKeys.REVIEW_MAX_RECORDS, cls._MAX_EFFECTIVE_RECORDS
+            )
+        )
         return ReviewSchedulerConfig(
             idle_seconds=float(
                 config_service.get_setting(ConfigKeys.REVIEW_IDLE_SECONDS, 600)
             ),
             min_interval_seconds=float(
-                config_service.get_setting(
-                    ConfigKeys.REVIEW_MIN_INTERVAL_SECONDS,
-                    1800,
-                )
+                config_service.get_setting(ConfigKeys.REVIEW_MIN_INTERVAL_SECONDS, 1800)
             ),
-            max_records=int(
-                config_service.get_setting(ConfigKeys.REVIEW_MAX_RECORDS, 20)
-            ),
+            max_records=max(1, min(configured_max_records, cls._MAX_EFFECTIVE_RECORDS)),
             max_runs_per_session=int(
                 config_service.get_setting(ConfigKeys.REVIEW_MAX_RUNS_PER_SESSION, 3)
             ),
@@ -116,11 +113,8 @@ class ReviewSchedulerService:
         self.mark_activity()
 
     def bind_events(self, event_service: Any) -> None:
-        """Bind app events so scheduler can maintain busy/idle state."""
-
         if self._event_bindings:
             return
-
         bindings = [
             (Events.RECORDING_STARTED, lambda _data=None: self.set_recording(True)),
             (Events.RECORDING_STOPPED, lambda _data=None: self.set_recording(False)),
@@ -158,7 +152,6 @@ class ReviewSchedulerService:
                 lambda _data=None: self.set_ai_processing(False),
             ),
         ]
-
         for event_name, handler in bindings:
             listener_id = event_service.on(event_name, handler)
             self._event_bindings.append((event_name, listener_id))
@@ -175,23 +168,11 @@ class ReviewSchedulerService:
         network_available: bool = True,
     ) -> ReviewSchedulerDecision:
         now = self._clock()
-        if self._recording:
-            return ReviewSchedulerDecision(False, "recording_active")
-        if self._transcribing:
-            return ReviewSchedulerDecision(False, "transcription_active")
-        if self._ai_processing:
-            return ReviewSchedulerDecision(False, "ai_processing_active")
-        if self._ui_busy:
-            return ReviewSchedulerDecision(False, "ui_busy")
-        if not quota_available:
-            return ReviewSchedulerDecision(False, "quota_unavailable")
-        if not network_available:
-            return ReviewSchedulerDecision(False, "network_unavailable")
+        busy_decision = self._busy_decision(quota_available, network_available)
+        if busy_decision is not None:
+            return busy_decision
         if now - self._last_activity_at < self._config.idle_seconds:
             return ReviewSchedulerDecision(False, "not_idle_long_enough")
-        return self._can_run_after_idle_checks(now)
-
-    def _can_run_after_idle_checks(self, now: float) -> ReviewSchedulerDecision:
         if (
             self._last_run_at is not None
             and now - self._last_run_at < self._config.min_interval_seconds
@@ -207,6 +188,15 @@ class ReviewSchedulerService:
         quota_available: bool = True,
         network_available: bool = True,
     ) -> ReviewSchedulerDecision:
+        return self._busy_decision(
+            quota_available, network_available
+        ) or ReviewSchedulerDecision(True, "manual")
+
+    def _busy_decision(
+        self,
+        quota_available: bool,
+        network_available: bool,
+    ) -> ReviewSchedulerDecision | None:
         if self._recording:
             return ReviewSchedulerDecision(False, "recording_active")
         if self._transcribing:
@@ -219,13 +209,41 @@ class ReviewSchedulerService:
             return ReviewSchedulerDecision(False, "quota_unavailable")
         if not network_available:
             return ReviewSchedulerDecision(False, "network_unavailable")
-        return ReviewSchedulerDecision(True, "manual")
+        return None
+
+    def run_once_if_idle(
+        self,
+        *,
+        quota_available: bool = True,
+        network_available: bool = True,
+        review_service: LLMReviewService | None = None,
+    ) -> ReviewSchedulerRunResult:
+        decision = self.can_run(
+            quota_available=quota_available, network_available=network_available
+        )
+        if not decision.can_run:
+            return ReviewSchedulerRunResult(False, decision.reason)
+        return self._run_review_pass(count_run=True, review_service=review_service)
+
+    def run_once_now(
+        self,
+        *,
+        quota_available: bool = True,
+        network_available: bool = True,
+        review_service: LLMReviewService | None = None,
+    ) -> ReviewSchedulerRunResult:
+        decision = self.can_run_now(
+            quota_available=quota_available, network_available=network_available
+        )
+        if not decision.can_run:
+            return ReviewSchedulerRunResult(False, decision.reason)
+        return self._run_review_pass(count_run=False, review_service=review_service)
 
     def _run_review_pass(
         self,
         *,
         count_run: bool,
-        review_service: LLMReviewService | None = None,
+        review_service: LLMReviewService | None,
     ) -> ReviewSchedulerRunResult:
         cursor = self._review_storage.load_review_cursor()
         records = self._load_review_batch(cursor)
@@ -249,6 +267,10 @@ class ReviewSchedulerService:
             prompt_version=outcome.prompt_version,
             fallback_reason=outcome.fallback_reason,
         )
+        recent_jobs = self._review_storage.list_review_jobs(limit=1)
+        persisted_count = (
+            int(recent_jobs[0].get("suggestion_count", 0) or 0) if recent_jobs else 0
+        )
         self._last_run_at = self._clock()
         if count_run:
             self._runs_this_session += 1
@@ -257,7 +279,7 @@ class ReviewSchedulerService:
             "completed",
             job_id=job_id,
             reviewed_record_count=len(records),
-            suggestion_count=len(outcome.suggestions),
+            suggestion_count=min(persisted_count, len(outcome.suggestions)),
             review_source=outcome.review_source,
             provider=outcome.provider,
             model_id=outcome.model_id,
@@ -268,9 +290,7 @@ class ReviewSchedulerService:
     def _load_review_batch(self, cursor: dict[str, str] | None) -> list[Any]:
         if self._load_review_records is not None:
             records = list(self._load_review_records(self._config.max_records, cursor))
-            if records:
-                return records
-            if cursor is None:
+            if records or cursor is None:
                 return records
         if self._load_recent_records is not None:
             return list(self._load_recent_records(self._config.max_records))
@@ -312,32 +332,10 @@ class ReviewSchedulerService:
         text = str(record_id or "").strip()
         return text or None
 
-    def run_once_if_idle(
-        self,
-        *,
-        quota_available: bool = True,
-        network_available: bool = True,
-        review_service: LLMReviewService | None = None,
-    ) -> ReviewSchedulerRunResult:
-        decision = self.can_run(
-            quota_available=quota_available,
-            network_available=network_available,
-        )
-        if not decision.can_run:
-            return ReviewSchedulerRunResult(False, decision.reason)
-        return self._run_review_pass(count_run=True, review_service=review_service)
 
-    def run_once_now(
-        self,
-        *,
-        quota_available: bool = True,
-        network_available: bool = True,
-        review_service: LLMReviewService | None = None,
-    ) -> ReviewSchedulerRunResult:
-        decision = self.can_run_now(
-            quota_available=quota_available,
-            network_available=network_available,
-        )
-        if not decision.can_run:
-            return ReviewSchedulerRunResult(False, decision.reason)
-        return self._run_review_pass(count_run=False, review_service=review_service)
+__all__ = [
+    "ReviewSchedulerConfig",
+    "ReviewSchedulerDecision",
+    "ReviewSchedulerRunResult",
+    "ReviewSchedulerService",
+]

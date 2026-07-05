@@ -275,13 +275,10 @@ def test_run_audit_computes_phase6_metrics_and_labels() -> None:
         assert summary["counts"]["transcription_path_observable_records"] == 5
         assert summary["counts"]["transcription_path_unknown_records"] == 1
 
-        assert summary["anomalies"]["chunk_boundary_repeat"] == 1
-        assert summary["anomalies"]["fallback_candidate"] == 1
         assert summary["anomalies"]["low_information_input"] == 2
 
         assert summary["metrics"]["transcription_duration_p50_seconds"] == 6.0
         assert summary["metrics"]["transcription_rtf_p50"] == 0.2833
-        assert summary["metrics"]["chunk_boundary_repeat_rate"] == 0.1667
         assert summary["metrics"]["empty_result_rate"] == 0.1667
         assert summary["metrics"]["empty_chunked_result_fallback_rate"] == 0.1667
         assert summary["metrics"]["low_quality_chunked_result_fallback_rate"] == 0.1667
@@ -303,7 +300,7 @@ def test_run_audit_computes_phase6_metrics_and_labels() -> None:
             == 0.5
         )
         assert summary["metrics"]["fallback_success_rate"] == 0.5
-        assert summary["metrics"]["final_text_quality_alert_rate"] == 0.5
+        assert summary["metrics"]["final_text_quality_alert_rate"] == 0.3333
 
         rows = [
             json.loads(line)
@@ -318,9 +315,7 @@ def test_run_audit_computes_phase6_metrics_and_labels() -> None:
         assert by_id["r6"]["transcription_path"] == "standard"
         assert by_id["r6"]["transcription_path_observable"] is False
         assert by_id["r6"]["long_recording_cloud_candidate"] is True
-        assert "chunk_boundary_repeat" in by_id["r1"]["anomaly_labels"]
-        assert by_id["r1"]["quality_alert"] is True
-        assert "fallback_candidate" in by_id["r4"]["anomaly_labels"]
+        assert by_id["r1"]["quality_alert"] is False
         assert by_id["r4"]["quality_alert"] is True
         assert by_id["r5"]["quality_alert"] is False
     finally:

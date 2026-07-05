@@ -142,9 +142,10 @@ class ModelTestThread(QThread):
 class MainWindow(QMainWindow):
     """最小化主窗口 - 使用依赖注入的UI服务"""
 
+    _REVIEW_AUTO_TIMER_INTERVAL_MS = 60_000
+
     # 信号定义
     window_closing = Signal()
-    _REVIEW_AUTO_TIMER_INTERVAL_MS = 60_000
 
     def __init__(
         self,
@@ -177,7 +178,6 @@ class MainWindow(QMainWindow):
             self._connect_service_events()
         if self.ui_settings_service:
             self._setup_review_auto_timer()
-
         app_logger.log_audio_event(
             "MainWindow initialized", {"services_injected": ui_main_service is not None}
         )
@@ -286,12 +286,7 @@ class MainWindow(QMainWindow):
         self._setup_review_auto_timer()
 
     def _setup_review_auto_timer(self) -> None:
-        """Start a conservative periodic review tick.
-
-        The timer itself is cheap and the settings service keeps review disabled
-        by default. When enabled, each tick still goes through ReviewSchedulerService
-        idle/busy/min-interval/session-budget gates.
-        """
+        """Start a conservative periodic lexicon-review tick."""
         if not self.ui_settings_service:
             return
         timer = getattr(self, "_review_auto_timer", None)
@@ -310,12 +305,11 @@ class MainWindow(QMainWindow):
         try:
             result = run_review()
         except Exception as e:
-            app_logger.log_error(e, "review_auto_timer")
+            app_logger.log_error(e, "lexicon_review_auto_timer")
             return
-
         if isinstance(result, dict) and result.get("ran"):
             app_logger.log_audio_event(
-                "Idle review completed from auto timer",
+                "Idle lexicon review completed from auto timer",
                 {
                     "job_id": result.get("jobId", ""),
                     "reviewed_record_count": result.get("reviewedRecordCount", 0),
@@ -323,10 +317,8 @@ class MainWindow(QMainWindow):
                 },
             )
             settings = getattr(self, "_settings_window", None)
-            view_model = getattr(settings, "view_model", None)
-            refresh = getattr(view_model, "refreshReviewSuggestions", None)
-            if callable(refresh):
-                refresh()
+            if settings is not None and hasattr(settings, "refresh_review_suggestions"):
+                settings.refresh_review_suggestions()
 
     def _connect_service_events(self) -> None:
         """连接UI服务事件"""

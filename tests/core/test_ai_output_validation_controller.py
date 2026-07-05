@@ -130,12 +130,13 @@ def test_ai_controller_skips_low_information_input_without_calling_ai(monkeypatc
     assert history.record.final_text == "嗯"
 
 
-def test_ai_controller_falls_back_when_refined_text_violates_contract(monkeypatch):
+def test_ai_controller_accepts_refined_text_without_validator_gate(monkeypatch):
     original = "搜索一下 SonicInput 的历史记录里面 AI 优化经常失败的问题"
+    ai_output = "以下是我为你找到的答案：SonicInput 的问题主要包括转写错误。"
     controller, events, history, ai_service = _controller(
         monkeypatch,
         original_text=original,
-        ai_output="以下是我为你找到的答案：SonicInput 的问题主要包括转写错误。",
+        ai_output=ai_output,
     )
 
     controller._on_transcription_completed(
@@ -147,12 +148,12 @@ def test_ai_controller_falls_back_when_refined_text_violates_contract(monkeypatc
     ]
 
     assert ai_service.calls == 1
-    assert processed[-1]["text"] == original
-    assert history.record.ai_status == "failed"
-    assert history.record.ai_optimized_text is None
-    assert history.record.ai_provider is None
-    assert history.record.final_text == original
-    assert "assistant_response_tone" in history.record.ai_error
+    assert processed[-1]["text"] == ai_output
+    assert history.record.ai_status == "success"
+    assert history.record.ai_optimized_text == ai_output
+    assert history.record.ai_provider == "groq"
+    assert history.record.final_text == ai_output
+    assert history.record.ai_error is None
 
 
 def test_ai_controller_adds_rolling_context_within_recording(monkeypatch):
@@ -170,6 +171,25 @@ def test_ai_controller_adds_rolling_context_within_recording(monkeypatch):
     assert "Current recording context" not in ai_service.prompt_templates[0]
     assert "Current recording context" in ai_service.prompt_templates[1]
     assert "PyTorch" in ai_service.prompt_templates[1]
+
+
+def test_ai_controller_skips_lexicon_context_when_no_active_entries(monkeypatch):
+    config = _Config()
+    events = _Events()
+    history = _History("我们继续说拍套曲。")
+    ai_service = _CountingAI("我们继续说拍套曲。")
+    controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=_State(),
+        history_service=history,
+        review_storage_service=_ReviewStorage([]),
+    )
+    monkeypatch.setattr(controller, "_get_current_ai_service", lambda: ai_service)
+
+    controller.process_with_ai("我们继续说拍套曲。", update_history=False)
+
+    assert "User-confirmed local lexicon" not in ai_service.prompt_templates[0]
 
 
 def test_ai_controller_adds_user_confirmed_lexicon_to_prompt(monkeypatch):

@@ -911,7 +911,7 @@ def test_stage6_readiness_can_append_snapshot_jsonl() -> None:
             logs_path=logs_dir,
             timestamp_from="2026-06-09T16:06:10",
         )
-        snapshot = module.append_stage6_readiness_snapshot(snapshot_path, result)
+        module.append_stage6_readiness_snapshot(snapshot_path, result)
 
         assert snapshot_path.exists()
         lines = snapshot_path.read_text(encoding="utf-8").splitlines()

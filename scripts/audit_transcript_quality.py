@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sonicinput.core.quality import HistoryReviewAgent, TranscriptQualityValidator
+from sonicinput.core.quality import TranscriptQualityValidator
 
 _LONG_RECORDING_FILE_THRESHOLD_SECONDS = 90.0
 
@@ -119,7 +119,6 @@ def _ensure_summary_counter_keys(counters: Counter[str]) -> None:
 def _row_to_audit(
     row: sqlite3.Row,
     validator: TranscriptQualityValidator,
-    review_agent: HistoryReviewAgent,
 ) -> dict[str, Any]:
     transcription_text = row["transcription_text"] or ""
     ai_text = row["ai_optimized_text"] or ""
@@ -134,15 +133,6 @@ def _row_to_audit(
     if ai_text:
         result = validator.validate(transcription_text, ai_text)
         labels.extend(result.reasons)
-    if review_agent._detect_chunk_boundary_repeat(transcription_text):
-        labels.append("chunk_boundary_repeat")
-    if review_agent._should_flag_fallback_candidate(
-        raw_text=transcription_text,
-        final_text=final_text,
-        duration=duration,
-        used_fallback=used_fallback,
-    ):
-        labels.append("fallback_candidate")
     transcription_path = _row_value(row, "transcription_path", "standard")
     transcription_path_observable = _is_observable_transcription_path(transcription_path)
     long_recording_cloud_candidate = _is_long_recording_cloud_candidate(row)
@@ -224,7 +214,6 @@ def run_audit(
     filters = filters or AuditFilters()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     validator = TranscriptQualityValidator()
-    review_agent = HistoryReviewAgent(validator=validator)
     schema_columns = _history_schema_columns(db_path)
     rows = _iter_history_rows(db_path, timestamp_from=filters.timestamp_from)
 
@@ -235,7 +224,7 @@ def run_audit(
 
     with output_path.open("w", encoding="utf-8") as fp:
         for row in rows:
-            audit_row = _row_to_audit(row, validator, review_agent)
+            audit_row = _row_to_audit(row, validator)
             if filters.observable_path_only and not audit_row["transcription_path_observable"]:
                 continue
             if (
@@ -304,10 +293,6 @@ def run_audit(
         ),
         "transcription_rtf_p50": _percentile(transcription_rtfs, 50),
         "transcription_rtf_p95": _percentile(transcription_rtfs, 95),
-        "chunk_boundary_repeat_rate": _safe_ratio(
-            anomaly_counters["chunk_boundary_repeat"],
-            total_records,
-        ),
         "empty_result_rate": _safe_ratio(
             counters["empty_transcription_records"],
             total_records,

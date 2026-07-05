@@ -10,16 +10,16 @@
 - No admin needed: Win32 RegisterHotKey (default Ctrl+Alt+Space, customizable), conflict prompts
 - Two recording modes: Realtime (low latency) / Chunked (higher quality with AI)
 - Cloud & local: Groq / OpenRouter / NVIDIA / OpenAI or local sherpa-onnx
-- Quality guardrails: AI cleanup is locally validated and falls back to raw transcription when it crosses product boundaries
-- Local learning: the local rule reviewer can find terminology candidates and quality issues from history; only user-accepted terms enter local memory
+- Local lexicon memory: user-confirmed entries are injected before later AI cleanup only when phonetically relevant
+- Lexicon review: the settings page can ask the configured AI provider to mine raw ASR context for candidate terms
 
 ## What's New (v0.8.0)
-- Added an **AI output quality gate** that rejects markdown/label leaks, assistant-style answers, translation leaks, low-information expansion, over-compressed long dictation, and abnormal repetition; rejected AI output falls back to the raw transcript.
+- Added **local lexicon memory**: user-accepted entries are stored locally and injected before future AI cleanup only after phonetic/near-phonetic pre-filtering.
+- Added **raw-only lexicon review**: the settings page can run a review that only sees raw ASR snippets, reads the full sentence context, and proposes candidate `old_form -> new_form` pairs without treating AI cleanup output as ground truth.
+- Simplified the old review flow: profanity/content-quality/boundary/prompt-failure review cards were removed; the review surface now focuses on user-reviewable lexicon candidates.
+- Removed the real-time AI-output rejection gate: cleanup output is no longer automatically reverted by local compression/translation/boundary validators; low-information skip behavior remains.
 - Added **in-recording rolling context** so later chunk cleanup can reuse terms, paths, and recent context heard in the same recording, improving consistency for technical and mixed-language dictation.
-- Added a **Local Quality Review page** in settings with grouped local suggestions for boundary violations, content distortion, diagnostic samples, lexicon learning, and prompt-quality issues.
-- Added **local lexicon memory**: only accepted terminology candidates are reused; users can export, clear lexicon entries, or clear learning data.
 - Added a long-recording cloud path: cloud recordings over the default 90-second threshold prefer file transcription and record `transcription_path`, decision reason, and fallback type for diagnostics.
-- Added privacy-safe quality tools: `scripts/audit_transcript_quality.py`, `compare_quality_audits.py`, and `evaluate_ai_prompt_profiles.py` for local audit reports and prompt-profile comparisons.
 - Changed the default hotkey to `Ctrl+Alt+Space` to reduce collisions with common editing shortcuts.
 
 ## Performance Notes
@@ -37,10 +37,11 @@
 
 > Tip: keep hotkey backend on `win32` (no admin needed, fewer conflicts). Switch to `pynput` only if you must suppress key events.
 
-## Local Quality Review & Local Learning
-- AI cleanup output is validated locally before insertion. If it looks like an answer, translation, markdown, over-compression, or noise expansion, SonicInput keeps the raw transcript as final text.
-- Automatic scheduling for local quality review is disabled by default; you can manually run a local review from settings to inspect recent-history suggestions.
-- The local rule reviewer does not rewrite history automatically. Accepted lexicon suggestions become local memory and are used only as conservative context for later AI cleanup.
+## Lexicon Review & Local Learning
+- Lexicon review reads only raw ASR text, not `ai_optimized_text` / `final_text`, so AI cleanup mistakes are not treated as ground truth.
+- The review model uses full raw-sentence context to propose candidate terms; a candidate enters local memory only after the user accepts it.
+- Before later AI cleanup, `LexiconMatcher` phonetic/near-phonetic filtering selects only entries relevant to the current raw text.
+- Automatic lexicon review is disabled by default; it can be run manually from settings or enabled for idle scheduling. Legacy review rows stay in the local database but are not part of the new review flow.
 - Local audit scripts omit transcript text by default and store metadata such as lengths, status, path, and anomaly labels for safe prompt/model comparisons.
 
 ## Dev Setup

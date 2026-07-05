@@ -250,24 +250,21 @@ class ConfigKeys:
     HISTORY_STORAGE_PATH = "history.storage_path"
     """历史记录存储路径 (str): "auto"表示自动选择"""
 
-    # ==================== Review (质量审查配置) ====================
+    # ==================== Lexicon Review / Memory (本地词汇审查与记忆配置) ====================
     REVIEW_ENABLED = "review.enabled"
-    """启用空闲质量审查调度 (bool)，默认关闭"""
+    """启用空闲词汇候选审查调度 (bool)"""
 
     REVIEW_IDLE_SECONDS = "review.idle_seconds"
-    """空闲多久后允许运行 review (float): 秒"""
+    """空闲多久后允许运行词汇审查 (float): 秒"""
 
     REVIEW_MIN_INTERVAL_SECONDS = "review.min_interval_seconds"
-    """两次 review 之间的最小间隔 (float): 秒"""
+    """两次词汇审查之间的最小间隔 (float): 秒"""
 
     REVIEW_MAX_RECORDS = "review.max_records"
-    """每次最多审查的历史记录数 (int)"""
+    """每次最多扫描的历史记录数 (int)"""
 
     REVIEW_MAX_RUNS_PER_SESSION = "review.max_runs_per_session"
-    """每个 App session 最多运行 review 的次数 (int)"""
-
-    REVIEW_PERSIST = "review.persist"
-    """是否把 review suggestions 持久化到本地 DB (bool)"""
+    """每个 App session 最多运行词汇审查的次数 (int)"""
 
     REVIEW_USE_LEXICON_MEMORY = "review.use_lexicon_memory"
     """是否在 AI 清理时使用用户已接受的本地词汇记忆 (bool)"""
@@ -480,6 +477,5 @@ class ConfigKeyGroups:
         ConfigKeys.REVIEW_MIN_INTERVAL_SECONDS,
         ConfigKeys.REVIEW_MAX_RECORDS,
         ConfigKeys.REVIEW_MAX_RUNS_PER_SESSION,
-        ConfigKeys.REVIEW_PERSIST,
         ConfigKeys.REVIEW_USE_LEXICON_MEMORY,
     ]

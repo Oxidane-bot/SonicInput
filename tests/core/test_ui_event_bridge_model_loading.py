@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from sonicinput.core.services.events import Events
 from sonicinput.core.services.ui_event_bridge import UIEventBridge
 

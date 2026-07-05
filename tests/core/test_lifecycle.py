@@ -5,7 +5,6 @@ This is a critical foundation for all stateful services in the application.
 """
 
 import pytest
-from unittest.mock import Mock, patch
 
 from sonicinput.core.base.lifecycle_component import LifecycleComponent, ComponentState
 

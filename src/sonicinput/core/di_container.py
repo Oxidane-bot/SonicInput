@@ -4,8 +4,8 @@ Minimal DI container following YAGNI principle.
 Only provides essential features actually needed by the application.
 """
 
-from enum import Enum
 from datetime import datetime
+from enum import Enum
 import threading
 from typing import Any, Callable, Dict, Type, TypeVar
 

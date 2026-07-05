@@ -48,6 +48,9 @@ class FluentSettingsWindow(QObject):
     def refresh_model_status(self) -> None:
         self.view_model.changed.emit()
 
+    def refresh_review_suggestions(self) -> None:
+        self.view_model.refreshReviewSuggestions()
+
     def show(self) -> None:
         self.root.show()
 

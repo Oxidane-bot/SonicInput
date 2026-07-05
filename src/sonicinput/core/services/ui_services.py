@@ -147,7 +147,7 @@ class UISettingsService:
             transcription_service: 转录服务(可选,用于retry processing)
             ai_processing_controller: AI处理控制器(可选,用于retry processing)
             launch_at_login_service: 开机自启系统集成服务（可选）
-            review_storage_service: Review suggestions/lexicon 存储服务（可选）
+            review_storage_service: 本地词汇记忆存储服务（可选）
             container: DI容器(可选,用于热重载后获取最新服务)
         """
         self.config_service = config_service
@@ -237,7 +237,7 @@ class UISettingsService:
         return self.history_service
 
     def get_review_storage_service(self):
-        """获取 Review suggestions/lexicon 存储服务。"""
+        """获取本地词汇记忆存储服务。"""
         if self._review_storage_service is not None:
             return self._review_storage_service
 
@@ -253,14 +253,17 @@ class UISettingsService:
             return None
 
     def list_review_suggestions(self, limit: int = 100) -> list[dict[str, Any]]:
-        """列出待审查 suggestions，供 Review UI 展示。"""
+        """列出待确认的词汇候选。"""
         service = self.get_review_storage_service()
         if service is None:
             return []
-        return service.list_pending_suggestions(limit=limit)
+        list_pending = getattr(service, "list_pending_suggestions", None)
+        if not callable(list_pending):
+            return []
+        return list_pending(limit=limit)
 
     def list_review_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
-        """列出最近的 review jobs，供 Review UI 展示运行状态。"""
+        """列出最近的词汇审查运行。"""
         service = self.get_review_storage_service()
         if service is None:
             return []
@@ -275,11 +278,14 @@ class UISettingsService:
         decision: str,
         note: str | None = None,
     ) -> bool:
-        """接受/拒绝/忽略/归档一条 review suggestion。"""
+        """接受/拒绝/忽略一条词汇候选。"""
         service = self.get_review_storage_service()
         if service is None:
             return False
-        service.record_decision(suggestion_id, decision, note=note)
+        record_decision = getattr(service, "record_decision", None)
+        if not callable(record_decision):
+            return False
+        record_decision(suggestion_id, decision, note=note)
         return True
 
     def list_lexicon_entries(self, limit: int = 200) -> list[dict[str, Any]]:
@@ -298,13 +304,7 @@ class UISettingsService:
         return True
 
     def clear_review_learning_data(self) -> bool:
-        """清空本地 review 学习数据。
-
-        这会重置：
-        - 已接受的 lexicon memory
-        - 用于 suppress 相似建议的 review decisions / processed statuses
-        但不会删除 review jobs 审计记录。
-        """
+        """清空词汇学习数据。"""
         service = self.get_review_storage_service()
         if service is None:
             return False
@@ -314,6 +314,102 @@ class UISettingsService:
         clear_learning_data()
         return True
 
+    def run_review_now(self) -> dict[str, Any]:
+        """手动触发一次词汇候选审查。"""
+        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
+            return {
+                "ran": False,
+                "reason": "review_disabled",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+                "reviewSource": "disabled",
+            }
+        if self._container is None:
+            return {
+                "ran": False,
+                "reason": "review_scheduler_unavailable",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+                "reviewSource": "unavailable",
+            }
+        try:
+            from ..quality import LLMReviewService
+            from .review_scheduler_service import ReviewSchedulerService
+
+            scheduler = self._container.resolve(ReviewSchedulerService)
+            review_service = self._container.resolve(LLMReviewService)
+            result = scheduler.run_once_now(review_service=review_service)
+        except Exception as exc:
+            app_logger.log_audio_event(
+                "UI manual lexicon review failed", {"error": str(exc)}
+            )
+            return {
+                "ran": False,
+                "reason": "review_run_failed",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+                "reviewSource": "error",
+            }
+        return self._format_review_run_result(result)
+
+    def run_idle_review_once(self) -> dict[str, Any]:
+        """自动触发一次词汇候选审查。"""
+        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
+            return {
+                "ran": False,
+                "reason": "review_disabled",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+                "reviewSource": "disabled",
+            }
+        if self._container is None:
+            return {
+                "ran": False,
+                "reason": "review_scheduler_unavailable",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+                "reviewSource": "unavailable",
+            }
+        try:
+            from ..quality import LLMReviewService
+            from .review_scheduler_service import ReviewSchedulerService
+
+            scheduler = self._container.resolve(ReviewSchedulerService)
+            review_service = self._container.resolve(LLMReviewService)
+            result = scheduler.run_once_if_idle(review_service=review_service)
+        except Exception as exc:
+            app_logger.log_audio_event(
+                "UI idle lexicon review failed", {"error": str(exc)}
+            )
+            return {
+                "ran": False,
+                "reason": "review_run_failed",
+                "jobId": "",
+                "reviewedRecordCount": 0,
+                "suggestionCount": 0,
+                "reviewSource": "error",
+            }
+        return self._format_review_run_result(result)
+
+    @staticmethod
+    def _format_review_run_result(result: Any) -> dict[str, Any]:
+        return {
+            "ran": bool(getattr(result, "ran", False)),
+            "reason": str(getattr(result, "reason", "")),
+            "jobId": str(getattr(result, "job_id", "") or ""),
+            "reviewedRecordCount": int(
+                getattr(result, "reviewed_record_count", 0) or 0
+            ),
+            "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
+            "reviewSource": str(getattr(result, "review_source", "") or "local"),
+            "fallbackReason": str(getattr(result, "fallback_reason", "") or ""),
+        }
+
     def export_lexicon_entries(self, file_path: str | None = None) -> dict[str, Any]:
         """导出 active 本地词汇记忆为 JSON 文件。"""
         service = self.get_review_storage_service()
@@ -322,7 +418,7 @@ class UISettingsService:
                 "success": False,
                 "path": "",
                 "count": 0,
-                "reason": "review_storage_unavailable",
+                "reason": "lexicon_storage_unavailable",
             }
 
         entries = service.list_active_lexicon_entries(limit=10000)
@@ -351,178 +447,6 @@ class UISettingsService:
             "success": True,
             "path": str(target_path),
             "count": len(entries),
-        }
-
-    def export_review_debug_report(
-        self,
-        file_path: str | None = None,
-    ) -> dict[str, Any]:
-        """导出 fallback 失败模式建议，供本地调试使用。"""
-        service = self.get_review_storage_service()
-        if service is None:
-            return {
-                "success": False,
-                "path": "",
-                "count": 0,
-                "reason": "review_storage_unavailable",
-            }
-
-        try:
-            suggestions = service.list_pending_suggestions(limit=1000)
-            recent_jobs = service.list_review_jobs(limit=50)
-        except Exception as exc:
-            return {
-                "success": False,
-                "path": "",
-                "count": 0,
-                "reason": str(exc),
-            }
-
-        debug_suggestions = [
-            item
-            for item in suggestions
-            if str(item.get("suggestion_type", "") or "") == "prompt_failure_pattern"
-        ]
-        if file_path:
-            target_path = Path(file_path).expanduser()
-        else:
-            target_path = (
-                Path.home()
-                / "Documents"
-                / "SonicInput"
-                / "exports"
-                / f"review_debug_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            )
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "exported_at": datetime.now().isoformat(timespec="seconds"),
-            "count": len(debug_suggestions),
-            "suggestions": debug_suggestions,
-            "recent_jobs": recent_jobs,
-        }
-        target_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return {
-            "success": True,
-            "path": str(target_path),
-            "count": len(debug_suggestions),
-        }
-
-    def run_review_now(self) -> dict[str, Any]:
-        """手动触发一次本地 review。
-
-        该方法供 UI 的 "Run Review Now" 调用。它会直接执行模型审查，
-        如果模型路径不可用则退回本地安全校验。
-        """
-        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
-            return {
-                "ran": False,
-                "reason": "review_disabled",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "disabled",
-            }
-
-        if self._container is None:
-            return {
-                "ran": False,
-                "reason": "review_scheduler_unavailable",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "unavailable",
-            }
-
-        try:
-            from ..quality import LLMReviewService
-            from .review_scheduler_service import ReviewSchedulerService
-
-            scheduler = self._container.resolve(ReviewSchedulerService)
-            review_service = self._container.resolve(LLMReviewService)
-            result = scheduler.run_once_now(review_service=review_service)
-        except Exception as exc:
-            app_logger.log_audio_event(
-                "UI manual review run failed",
-                {"error": str(exc)},
-            )
-            return {
-                "ran": False,
-                "reason": "review_run_failed",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "error",
-            }
-
-        return {
-            "ran": bool(getattr(result, "ran", False)),
-            "reason": str(getattr(result, "reason", "")),
-            "jobId": str(getattr(result, "job_id", "") or ""),
-            "reviewedRecordCount": int(
-                getattr(result, "reviewed_record_count", 0) or 0
-            ),
-            "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
-            "reviewSource": str(getattr(result, "review_source", "") or "local"),
-            "fallbackReason": str(getattr(result, "fallback_reason", "") or ""),
-        }
-
-    def run_idle_review_once(self) -> dict[str, Any]:
-        """自动触发一次 review。"""
-        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
-            return {
-                "ran": False,
-                "reason": "review_disabled",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "disabled",
-            }
-
-        if self._container is None:
-            return {
-                "ran": False,
-                "reason": "review_scheduler_unavailable",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "unavailable",
-            }
-
-        try:
-            from ..quality import LLMReviewService
-            from .review_scheduler_service import ReviewSchedulerService
-
-            scheduler = self._container.resolve(ReviewSchedulerService)
-            review_service = self._container.resolve(LLMReviewService)
-            result = scheduler.run_once_if_idle(review_service=review_service)
-        except Exception as exc:
-            app_logger.log_audio_event(
-                "UI idle review run failed",
-                {"error": str(exc)},
-            )
-            return {
-                "ran": False,
-                "reason": "review_run_failed",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "error",
-            }
-
-        return {
-            "ran": bool(getattr(result, "ran", False)),
-            "reason": str(getattr(result, "reason", "")),
-            "jobId": str(getattr(result, "job_id", "") or ""),
-            "reviewedRecordCount": int(
-                getattr(result, "reviewed_record_count", 0) or 0
-            ),
-            "suggestionCount": int(getattr(result, "suggestion_count", 0) or 0),
-            "reviewSource": str(getattr(result, "review_source", "") or "local"),
-            "fallbackReason": str(getattr(result, "fallback_reason", "") or ""),
         }
 
     def get_transcription_service(self):

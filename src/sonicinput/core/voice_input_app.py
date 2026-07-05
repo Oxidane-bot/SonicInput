@@ -120,7 +120,6 @@ class VoiceInputApp:
             if self.container.is_registered(ReviewSchedulerService):
                 self._review_scheduler = self.container.get(ReviewSchedulerService)
                 self._review_scheduler.bind_events(self.events)
-
             # 初始化快捷键服务（从 DI 容器获取，确保被注册到 config_reload_registry）
             # HotkeyService 在创建时已经注册了所有热键
             # 通过事件系统处理热键触发
@@ -361,11 +360,7 @@ class VoiceInputApp:
             self._recording_controller.toggle_recording()
 
     def run_idle_review_once(self) -> ReviewSchedulerRunResult:
-        """Run one local review pass if enabled.
-
-        This method is safe for the manual UI action. It bypasses the idle gate
-        but still respects busy-state and session-budget protections.
-        """
+        """Run one lexicon review pass if enabled and currently safe."""
         if not self._review_scheduler:
             return ReviewSchedulerRunResult(False, "review_scheduler_unavailable")
         if not self.config.get_setting(ConfigKeys.REVIEW_ENABLED, False):

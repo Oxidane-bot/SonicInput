@@ -12,10 +12,10 @@ from .transcription_service import TranscriptionResult, TranscriptionService
 
 __all__ = [
     "EventBus",
+    "ReviewSchedulerService",
     "ConfigService",
     "StateManager",
     "TranscriptionService",
     "TranscriptionResult",
     "AIService",
-    "ReviewSchedulerService",
 ]

@@ -69,10 +69,8 @@ def test_ui_settings_service_syncs_runtime_dependencies():
     assert service.get_ai_processing_controller() is fresh_ai_controller
 
 
-def test_ui_settings_service_exposes_review_suggestion_actions():
+def test_ui_settings_service_exposes_lexicon_memory_actions():
     review_storage = Mock(name="review_storage")
-    review_storage.list_pending_suggestions.return_value = [{"suggestion_id": "s1"}]
-    review_storage.list_review_jobs.return_value = [{"id": "job-1"}]
     review_storage.list_active_lexicon_entries.return_value = [{"term": "PyTorch"}]
 
     service = UISettingsService(
@@ -82,142 +80,23 @@ def test_ui_settings_service_exposes_review_suggestion_actions():
         review_storage_service=review_storage,
     )
 
-    assert service.list_review_suggestions(limit=5) == [{"suggestion_id": "s1"}]
-    assert service.list_review_jobs(limit=2) == [{"id": "job-1"}]
-    assert service.decide_review_suggestion("s1", "accepted", note="ok") is True
     assert service.list_lexicon_entries(limit=5) == [{"term": "PyTorch"}]
     assert service.clear_lexicon_entries() is True
-    assert service.clear_review_learning_data() is True
 
-    review_storage.list_pending_suggestions.assert_called_once_with(limit=5)
-    review_storage.list_review_jobs.assert_called_once_with(limit=2)
-    review_storage.record_decision.assert_called_once_with("s1", "accepted", note="ok")
     review_storage.list_active_lexicon_entries.assert_called_once_with(limit=5)
     review_storage.clear_lexicon_entries.assert_called_once_with()
-    review_storage.clear_learning_data.assert_called_once_with()
 
 
-def test_ui_settings_service_review_methods_are_safe_without_storage():
+def test_ui_settings_service_lexicon_methods_are_safe_without_storage():
     service = UISettingsService(
         config_service=Mock(),
         event_service=Mock(),
         history_service=Mock(),
     )
 
-    assert service.list_review_suggestions() == []
-    assert service.list_review_jobs() == []
-    assert service.decide_review_suggestion("missing", "accepted") is False
     assert service.list_lexicon_entries() == []
     assert service.clear_lexicon_entries() is False
-    assert service.clear_review_learning_data() is False
-    assert service.export_review_debug_report()["success"] is False
-
-
-def test_ui_settings_service_can_run_review_now_from_container():
-    from sonicinput.core.services.review_scheduler_service import (
-        ReviewSchedulerRunResult,
-        ReviewSchedulerService,
-    )
-    from sonicinput.core.quality import LLMReviewService
-
-    config = Mock()
-    config.get_setting.return_value = True
-    scheduler = Mock()
-    review_service = Mock(name="review_service")
-    scheduler.run_once_now.return_value = ReviewSchedulerRunResult(
-        True,
-        "completed",
-        job_id="job-1",
-        reviewed_record_count=12,
-        suggestion_count=2,
-        review_source="llm",
-        provider="openrouter",
-        model_id="demo-model",
-        fallback_reason="token_limit",
-    )
-
-    class Container:
-        def resolve(self, interface):
-            if interface is ReviewSchedulerService:
-                return scheduler
-            if interface is LLMReviewService:
-                return review_service
-            raise RuntimeError(f"unsupported interface: {interface}")
-
-    service = UISettingsService(
-        config_service=config,
-        event_service=Mock(),
-        history_service=Mock(),
-        container=Container(),
-    )
-
-    assert service.run_review_now() == {
-        "ran": True,
-        "reason": "completed",
-        "jobId": "job-1",
-        "reviewedRecordCount": 12,
-        "suggestionCount": 2,
-        "reviewSource": "llm",
-        "fallbackReason": "token_limit",
-    }
-    scheduler.run_once_now.assert_called_once_with(review_service=review_service)
-
-
-def test_ui_settings_service_idle_review_respects_disabled_config():
-    config = Mock()
-    config.get_setting.return_value = False
-
-    service = UISettingsService(
-        config_service=config,
-        event_service=Mock(),
-        history_service=Mock(),
-        container=Mock(),
-    )
-
-    result = service.run_idle_review_once()
-
-    assert result["ran"] is False
-    assert result["reason"] == "review_disabled"
-    assert result["reviewSource"] == "disabled"
-
-
-def test_ui_settings_service_auto_idle_review_uses_idle_gate():
-    from sonicinput.core.services.review_scheduler_service import (
-        ReviewSchedulerRunResult,
-        ReviewSchedulerService,
-    )
-    from sonicinput.core.quality import LLMReviewService
-
-    config = Mock()
-    config.get_setting.return_value = True
-    scheduler = Mock()
-    review_service = Mock(name="review_service")
-    scheduler.run_once_if_idle.return_value = ReviewSchedulerRunResult(
-        False,
-        "not_idle_long_enough",
-    )
-
-    class Container:
-        def resolve(self, interface):
-            if interface is ReviewSchedulerService:
-                return scheduler
-            if interface is LLMReviewService:
-                return review_service
-            raise RuntimeError(f"unsupported interface: {interface}")
-
-    service = UISettingsService(
-        config_service=config,
-        event_service=Mock(),
-        history_service=Mock(),
-        container=Container(),
-    )
-
-    result = service.run_idle_review_once()
-
-    assert result["ran"] is False
-    assert result["reason"] == "not_idle_long_enough"
-    assert result["reviewSource"] == "local"
-    scheduler.run_once_if_idle.assert_called_once_with(review_service=review_service)
+    assert service.export_lexicon_entries()["success"] is False
 
 
 def test_ui_model_service_updates_runtime_speech_service():

@@ -238,7 +238,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ---
 
-**最后更新**：2026-06-15
+**最后更新**：2026-07-05
 **适用版本**：v0.8.0+
 
 

@@ -5,10 +5,10 @@ This is a critical feature that allows users to change settings without restarti
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 from typing import List, Dict, Any
 
-from sonicinput.core.services.hot_reload_manager import HotReloadManager, IHotReloadable
+from sonicinput.core.services.hot_reload_manager import HotReloadManager
 
 
 class MockReloadableService:

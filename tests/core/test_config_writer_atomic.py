@@ -4,11 +4,10 @@ Tests for atomic configuration file writing (v0.5.3 fix).
 Ensures configuration writes are atomic to prevent corruption on failure.
 """
 
-import pytest
 import json
 import time
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from sonicinput.core.services.config.config_writer import ConfigWriter
 
@@ -123,7 +122,6 @@ class TestAtomicConfigWrite:
         writer.set_config(test_config)
 
         # Count files before and after
-        files_before = set(tmp_path.glob("*"))
         writer.save_config()
         files_after = set(tmp_path.glob("*"))
 

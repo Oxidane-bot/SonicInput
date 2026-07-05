@@ -111,13 +111,11 @@ def get_default_config() -> Dict[str, Any]:
             "storage_path": "auto",
         },
         "review": {
-            # 默认关闭；后续 UI/实验确认稳定后再开放给用户启用。
             "enabled": False,
             "idle_seconds": 600,
             "min_interval_seconds": 1800,
-            "max_records": 20,
+            "max_records": 8,
             "max_runs_per_session": 3,
-            "persist": True,
             "use_lexicon_memory": True,
         },
         "logging": {

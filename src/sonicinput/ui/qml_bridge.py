@@ -46,7 +46,7 @@ class FluentSettingsViewModel(
         "AI Processing",
         "Audio and Input",
         "History",
-        "Model Review",
+        "Lexicon Memory",
     )
 
     def __init__(self, settings_service, parent: QObject | None = None):
