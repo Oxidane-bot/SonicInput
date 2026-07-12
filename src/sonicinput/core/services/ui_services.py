@@ -257,20 +257,7 @@ class UISettingsService:
         service = self.get_review_storage_service()
         if service is None:
             return []
-        list_pending = getattr(service, "list_pending_suggestions", None)
-        if not callable(list_pending):
-            return []
-        return list_pending(limit=limit)
-
-    def list_review_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
-        """列出最近的词汇审查运行。"""
-        service = self.get_review_storage_service()
-        if service is None:
-            return []
-        list_jobs = getattr(service, "list_review_jobs", None)
-        if not callable(list_jobs):
-            return []
-        return list_jobs(limit=limit)
+        return service.list_pending_suggestions(limit=limit)
 
     def decide_review_suggestion(
         self,
@@ -282,18 +269,17 @@ class UISettingsService:
         service = self.get_review_storage_service()
         if service is None:
             return False
-        record_decision = getattr(service, "record_decision", None)
-        if not callable(record_decision):
-            return False
-        record_decision(suggestion_id, decision, note=note)
+        service.record_decision(suggestion_id, decision, note=note)
+        if decision == "accepted":
+            self._invalidate_lexicon_cache()
         return True
 
-    def list_lexicon_entries(self, limit: int = 200) -> list[dict[str, Any]]:
+    def list_lexicon_entries(self) -> list[dict[str, Any]]:
         """列出 active 本地词汇记忆。"""
         service = self.get_review_storage_service()
         if service is None:
             return []
-        return service.list_active_lexicon_entries(limit=limit)
+        return service.list_active_lexicon_entries()
 
     def clear_lexicon_entries(self) -> bool:
         """清空/归档 active 本地词汇记忆。"""
@@ -301,18 +287,18 @@ class UISettingsService:
         if service is None:
             return False
         service.clear_lexicon_entries()
+        self._invalidate_lexicon_cache()
         return True
 
-    def clear_review_learning_data(self) -> bool:
-        """清空词汇学习数据。"""
+    def remove_lexicon_entry(self, entry_id: str) -> bool:
+        """归档一条 active 本地词汇记忆。"""
         service = self.get_review_storage_service()
         if service is None:
             return False
-        clear_learning_data = getattr(service, "clear_learning_data", None)
-        if not callable(clear_learning_data):
-            return False
-        clear_learning_data()
-        return True
+        success = service.archive_lexicon_entry(entry_id)
+        if success:
+            self._invalidate_lexicon_cache()
+        return success
 
     def run_review_now(self) -> dict[str, Any]:
         """手动触发一次词汇候选审查。"""
@@ -421,7 +407,7 @@ class UISettingsService:
                 "reason": "lexicon_storage_unavailable",
             }
 
-        entries = service.list_active_lexicon_entries(limit=10000)
+        entries = service.list_active_lexicon_entries()
         if file_path:
             target_path = Path(file_path).expanduser()
         else:
@@ -469,6 +455,11 @@ class UISettingsService:
     def get_ai_processing_controller(self):
         """获取AI处理控制器"""
         return self._ai_processing_controller
+
+    def _invalidate_lexicon_cache(self) -> None:
+        controller = self.get_ai_processing_controller()
+        if controller is not None:
+            controller.invalidate_lexicon_cache()
 
     def sync_runtime_dependencies(
         self,

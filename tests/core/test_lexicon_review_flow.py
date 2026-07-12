@@ -7,9 +7,9 @@ from sonicinput.core.services.review_scheduler_service import ReviewSchedulerSer
 from sonicinput.core.services.storage import ReviewStorageService
 
 
-def _suggestion(old_form="拍套曲", new_form="PyTorch"):
+def _suggestion(old_form="拍套曲", new_form="PyTorch", suggestion_id="sug-1"):
     return ReviewSuggestion(
-        suggestion_id="sug-1",
+        suggestion_id=suggestion_id,
         suggestion_type="lexicon_candidate",
         confidence=0.88,
         risk_level="medium",
@@ -39,6 +39,30 @@ def test_review_storage_accepts_lexicon_candidate_into_memory(tmp_path):
     assert len(entries) == 1
     assert entries[0]["term"] == "PyTorch"
     assert entries[0]["old_form"] == "拍套曲"
+
+
+def test_review_storage_keeps_multiple_aliases_for_the_same_term(tmp_path):
+    db_path = tmp_path / "review.db"
+    storage = ReviewStorageService(db_path)
+    storage.initialize()
+    storage.save_review_run(
+        [
+            _suggestion("拍套曲", "PyTorch", "sug-1"),
+            _suggestion("派套曲", "PyTorch", "sug-2"),
+        ],
+        record_limit=20,
+        reviewed_count=2,
+    )
+
+    storage.record_decision("sug-1", "accepted")
+    storage.record_decision("sug-2", "accepted")
+
+    entries = storage.list_active_lexicon_entries()
+    assert {(entry["term"], entry["old_form"]) for entry in entries} == {
+        ("PyTorch", "拍套曲"),
+        ("PyTorch", "派套曲"),
+    }
+    assert len({entry["id"] for entry in entries}) == 2
 
 
 def test_review_storage_filters_non_lexicon_suggestions(tmp_path):
@@ -75,8 +99,8 @@ def test_llm_review_service_only_accepts_lexicon_candidate_json():
                     "suggestions": [
                         {
                             "suggestion_type": "lexicon_candidate",
-                            "old_form": "拍套曲",
-                            "new_form": "PyTorch",
+                            "old_form": "脚本包",
+                            "new_form": "脚本堡",
                             "confidence": 0.9,
                             "source_record_ids": ["r1"],
                         },
@@ -104,17 +128,17 @@ def test_llm_review_service_only_accepts_lexicon_candidate_json():
         [
             {
                 "id": "r1",
-                "transcription_text": "拍套曲",
-                "ai_optimized_text": "PyTorch",
-                "final_text": "PyTorch",
+                "transcription_text": "脚本包",
+                "ai_optimized_text": "脚本堡",
+                "final_text": "脚本堡",
             }
         ]
     )
 
     assert outcome.review_source == "llm"
     assert len(outcome.suggestions) == 1
-    assert outcome.suggestions[0].old_form == "拍套曲"
-    assert outcome.suggestions[0].new_form == "PyTorch"
+    assert outcome.suggestions[0].old_form == "脚本包"
+    assert outcome.suggestions[0].new_form == "脚本堡"
 
 
 def test_review_scheduler_runs_lexicon_review_and_persists_candidates(tmp_path):
@@ -203,6 +227,394 @@ def test_llm_review_filters_candidates_without_raw_evidence():
     assert outcome.suggestions[0].new_form == "纠错"
 
 
+def test_llm_review_rejects_unrelated_topic_guess_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "张话",
+                            "new_form": "过滤",
+                            "confidence": 0.84,
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [
+            {
+                "id": "r1",
+                "transcription_text": "张话说张话，过滤审查功能我们不要。",
+            }
+        ]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_rejects_partially_related_chinese_topic_guess_pairs():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": old_form,
+                            "new_form": new_form,
+                            "source_record_ids": [record_id],
+                        }
+                        for record_id, old_form, new_form in (
+                            ("r1", "张话", "张伟"),
+                            ("r2", "文档", "文件"),
+                            ("r3", "数据处理", "数码处理"),
+                            ("r4", "处理", "出去"),
+                        )
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [
+            {"id": "r1", "transcription_text": "张话需要确认。"},
+            {"id": "r2", "transcription_text": "文档需要更新。"},
+            {"id": "r3", "transcription_text": "数据处理需要优化。"},
+            {"id": "r4", "transcription_text": "处理这个问题。"},
+        ]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_rejects_same_sound_but_semantically_unrelated_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "预览",
+                            "new_form": "玉兰",
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "请先预览这个页面。"}]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_rejects_cross_script_candidate_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "张话",
+                            "new_form": "README",
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "张话需要处理。"}]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_accepts_trimmed_core_homophone_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "梗盖",
+                            "new_form": "梗概",
+                            "confidence": 0.9,
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [
+            {
+                "id": "r1",
+                "transcription_text": "每一级的一个小梗盖都要写清楚。",
+            }
+        ]
+    )
+
+    assert [(item.old_form, item.new_form) for item in outcome.suggestions] == [
+        ("梗盖", "梗概")
+    ]
+
+
+def test_llm_review_accepts_one_conservative_near_sound_syllable():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "英频",
+                            "new_form": "音频",
+                            "confidence": 0.86,
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "这个英频需要重新处理。"}]
+    )
+
+    assert [(item.old_form, item.new_form) for item in outcome.suggestions] == [
+        ("英频", "音频")
+    ]
+
+
+def test_llm_review_rejects_more_than_one_near_sound_syllable():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "英平库",
+                            "new_form": "音频库",
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "英平库需要重新建立。"}]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_trims_generic_shared_prefix_from_candidate_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "小梗盖",
+                            "new_form": "小梗概",
+                            "confidence": 0.9,
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "每一级的一个小梗盖都要写清楚。"}]
+    )
+
+    assert [(item.old_form, item.new_form) for item in outcome.suggestions] == [
+        ("梗盖", "梗概")
+    ]
+
+
+def test_llm_review_trims_multiple_generic_prefixes_from_candidate_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "一个小梗盖",
+                            "new_form": "一个小梗概",
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "一个小梗盖需要补全。"}]
+    )
+
+    assert [(item.old_form, item.new_form) for item in outcome.suggestions] == [
+        ("梗盖", "梗概")
+    ]
+
+
+def test_llm_review_rejects_canonical_equivalent_pair():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "ScriptKit",
+                            "new_form": "script\u200bkit",
+                            "source_record_ids": ["r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [{"id": "r1", "transcription_text": "打开 ScriptKit。"}]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_requires_explicit_and_supported_source_record_ids():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "揪错",
+                            "new_form": "纠错",
+                        },
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "揪错",
+                            "new_form": "纠错",
+                            "source_record_ids": ["missing"],
+                        },
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "揪错",
+                            "new_form": "纠错",
+                            "source_record_ids": ["r1", "r2"],
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [
+            {"id": "r1", "transcription_text": "揪错逻辑需要保留。"},
+            {"id": "r2", "transcription_text": "这个入口需要更新。"},
+        ]
+    )
+
+    assert outcome.suggestions == ()
+
+
+def test_llm_review_uses_only_verified_source_records_for_evidence():
+    class FakeClient:
+        def refine_text(self, *_args, **_kwargs):
+            return json.dumps(
+                {
+                    "suggestions": [
+                        {
+                            "suggestion_type": "lexicon_candidate",
+                            "old_form": "揪错",
+                            "new_form": "纠错",
+                            "source_record_ids": ["r1", "r2", "r1"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    config = Mock()
+    config.get_setting = Mock(side_effect=lambda _key, default=None: default)
+    service = LLMReviewService(config, client_factory=lambda: FakeClient())
+
+    outcome = service.review_records(
+        [
+            {"id": "r1", "transcription_text": "揪错逻辑需要保留。"},
+            {"id": "r2", "transcription_text": "揪错入口需要更新。"},
+        ]
+    )
+
+    assert len(outcome.suggestions) == 1
+    assert outcome.suggestions[0].source_record_ids == ("r1", "r2")
+    assert outcome.suggestions[0].evidence_count == 2
+
+
 def test_llm_review_allows_single_record_chinese_context_candidate():
     class FakeClient:
         def refine_text(self, *_args, **_kwargs):
@@ -274,8 +686,8 @@ def test_llm_review_does_not_need_ai_output_as_target():
                     "suggestions": [
                         {
                             "suggestion_type": "lexicon_candidate",
-                            "old_form": "RME",
-                            "new_form": "README",
+                            "old_form": "脚本包",
+                            "new_form": "脚本堡",
                             "confidence": 0.9,
                             "source_record_ids": ["r1"],
                         }
@@ -289,12 +701,12 @@ def test_llm_review_does_not_need_ai_output_as_target():
     service = LLMReviewService(config, client_factory=lambda: FakeClient())
 
     outcome = service.review_records(
-        [{"id": "r1", "transcription_text": "打开 RME 文件"}]
+        [{"id": "r1", "transcription_text": "打开脚本包文件"}]
     )
 
     assert len(outcome.suggestions) == 1
-    assert outcome.suggestions[0].old_form == "RME"
-    assert outcome.suggestions[0].new_form == "README"
+    assert outcome.suggestions[0].old_form == "脚本包"
+    assert outcome.suggestions[0].new_form == "脚本堡"
 
 
 def test_llm_review_prompt_requires_full_sentence_context_without_corrected_target():
@@ -308,6 +720,12 @@ def test_llm_review_prompt_requires_full_sentence_context_without_corrected_targ
     assert "full-sentence context" in prompt
     assert "context-evidence" in prompt
     assert "AI-cleaned, corrected, or final text" in prompt
+    assert "小梗盖' -> '小梗概'" in prompt
+    assert "张话' -> '过滤'" in prompt
+    assert "single changed character" in prompt
+    assert "source record cannot be named" in prompt
+    assert "预览' -> '玉兰'" in prompt
+    assert "near-sound" in prompt
     assert "new_form must be the intended term from corrected" not in prompt
 
 

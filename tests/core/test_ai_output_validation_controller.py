@@ -89,9 +89,11 @@ class _CountingAI:
 class _ReviewStorage:
     def __init__(self, entries):
         self.entries = entries
+        self.list_calls = 0
 
-    def list_active_lexicon_entries(self, limit=200):
-        return self.entries[:limit]
+    def list_active_lexicon_entries(self):
+        self.list_calls += 1
+        return list(self.entries)
 
 
 def _controller(monkeypatch, original_text, ai_output):
@@ -211,6 +213,37 @@ def test_ai_controller_adds_user_confirmed_lexicon_to_prompt(monkeypatch):
     controller.process_with_ai("我们继续说拍套曲。", update_history=False)
 
     assert "User-confirmed local lexicon" in ai_service.prompt_templates[0]
+    assert "Input: 拍套曲" in ai_service.prompt_templates[0]
+    assert "Output: PyTorch" in ai_service.prompt_templates[0]
+
+
+def test_ai_controller_matches_entries_beyond_ui_page_limit(monkeypatch):
+    config = _Config()
+    events = _Events()
+    history = _History("我们继续说拍套曲。")
+    ai_service = _CountingAI("我们继续说 PyTorch。")
+    entries = [
+        {
+            "old_form": f"unrelated alias {index}",
+            "term": f"UnrelatedTerm{index}",
+            "status": "active",
+        }
+        for index in range(200)
+    ]
+    entries.append({"old_form": "拍套曲", "term": "PyTorch", "status": "active"})
+    review_storage = _ReviewStorage(entries)
+    controller = AIProcessingController(
+        config_service=config,
+        event_service=events,
+        state_manager=_State(),
+        history_service=history,
+        review_storage_service=review_storage,
+    )
+    monkeypatch.setattr(controller, "_get_current_ai_service", lambda: ai_service)
+
+    controller.process_with_ai("我们继续说拍套曲。", update_history=False)
+
+    assert review_storage.list_calls == 1
     assert "Input: 拍套曲" in ai_service.prompt_templates[0]
     assert "Output: PyTorch" in ai_service.prompt_templates[0]
 

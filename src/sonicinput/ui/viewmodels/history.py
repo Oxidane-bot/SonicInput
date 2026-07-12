@@ -134,6 +134,22 @@ class HistoryViewModelMixin(SettingsViewModelBase):
         self._selected_history_detail = {}
         self._history_detail_visible = False
 
+    def _sync_selected_history_detail(self) -> None:
+        """Keep an open detail panel bound to its record across list refreshes."""
+        if self._selected_history_record is None:
+            return
+
+        selected_id = str(getattr(self._selected_history_record, "id", "") or "")
+        for index, record in enumerate(self._history_records):
+            if str(getattr(record, "id", "") or "") != selected_id:
+                continue
+            self._selected_history_index = index
+            self._selected_history_record = record
+            self._selected_history_detail = self._record_to_history_detail(record)
+            return
+
+        self._clear_history_detail()
+
     def _load_history_page(self, append: bool) -> None:
         service = self._get_history_service()
         if not service:
@@ -164,6 +180,7 @@ class HistoryViewModelMixin(SettingsViewModelBase):
             if not append:
                 self._history_records = []
                 self._history_rows = []
+                self._sync_selected_history_detail()
             return
 
         if append:
@@ -176,36 +193,12 @@ class HistoryViewModelMixin(SettingsViewModelBase):
             self._history_rows = [
                 self._record_to_history_row(record) for record in page_records
             ]
+            self._sync_selected_history_detail()
 
         last_record = page_records[-1]
         self._history_page_cursor_timestamp = getattr(last_record, "timestamp", None)
         self._history_page_cursor_id = getattr(last_record, "id", None)
         self._history_has_more_pages = len(page_records) >= self._history_page_size
-
-    def _open_history_record_by_id(self, record_id: str) -> bool:
-        normalized = str(record_id or "").strip()
-        if not normalized:
-            return False
-
-        for index, record in enumerate(self._history_records):
-            if str(getattr(record, "id", "") or "") == normalized:
-                self._selected_history_index = index
-                self._selected_history_record = record
-                self._selected_history_detail = self._record_to_history_detail(record)
-                self._history_detail_visible = True
-                self.changed.emit()
-                return True
-
-        record = self._get_history_record_by_id(normalized)
-        if record is None:
-            return False
-
-        self._selected_history_index = -1
-        self._selected_history_record = record
-        self._selected_history_detail = self._record_to_history_detail(record)
-        self._history_detail_visible = True
-        self.changed.emit()
-        return True
 
     # ---- 单条重试(ReprocessingWorker) ----
 
@@ -238,7 +231,6 @@ class HistoryViewModelMixin(SettingsViewModelBase):
         )
 
         if not transcription_service or not history_service:
-            self._pending_review_reprocess_suggestion_id = ""
             self._history_action_stage = "failed"
             self._history_action_busy = False
             self._history_action_message = (
@@ -290,12 +282,6 @@ class HistoryViewModelMixin(SettingsViewModelBase):
                 self._history_detail_visible = True
 
         self.refreshHistory(self._history_query)
-        if self._pending_review_reprocess_suggestion_id:
-            self._decide_review_suggestion(
-                self._pending_review_reprocess_suggestion_id,
-                "archived",
-            )
-            self._pending_review_reprocess_suggestion_id = ""
         self._history_action_stage = "complete"
         self._history_action_busy = False
         self._history_action_message = "Recording has been successfully reprocessed."
@@ -307,7 +293,6 @@ class HistoryViewModelMixin(SettingsViewModelBase):
                 self._retry_worker.wait(1000)
             self._retry_worker = None
 
-        self._pending_review_reprocess_suggestion_id = ""
         self._history_action_stage = "failed"
         self._history_action_busy = False
         self._history_action_message = (
@@ -322,7 +307,6 @@ class HistoryViewModelMixin(SettingsViewModelBase):
             self._retry_worker.wait(2000)
             self._retry_worker = None
 
-        self._pending_review_reprocess_suggestion_id = ""
         self._history_action_stage = "canceled"
         self._history_action_busy = False
         self._history_action_message = "Reprocessing operation has been canceled."
@@ -365,6 +349,10 @@ class HistoryViewModelMixin(SettingsViewModelBase):
     @Property(str, notify=SettingsViewModelBase.changed)
     def historyActionStage(self) -> str:
         return self._history_action_stage
+
+    @Property(bool, notify=SettingsViewModelBase.changed)
+    def historyHasMore(self) -> bool:
+        return self._history_has_more_pages
 
     # ---- QML Slots ----
 
@@ -432,10 +420,21 @@ class HistoryViewModelMixin(SettingsViewModelBase):
 
     @Slot(result=bool)
     def deleteSelectedHistoryRecord(self) -> bool:
-        if self._selected_history_index < 0:
+        record = self._selected_history_record
+        if record is None:
             return False
-        success = self.deleteHistoryRecord(self._selected_history_index)
+
+        service = self._get_history_service()
+        if not service:
+            return False
+
+        record_id = str(getattr(record, "id", "") or "")
+        if not record_id:
+            return False
+
+        success = bool(service.delete_record(record_id))
         if success:
+            self.refreshHistory(self._history_query)
             self._clear_history_detail()
             self.changed.emit()
         return success

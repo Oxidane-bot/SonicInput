@@ -7,7 +7,6 @@ import pytest
 class TestFluentSettingsRedesign:
     def test_settings_window_uses_fluent_qml_surface(self, settings_window):
         assert settings_window.root.objectName() == "fluentSettingsWindow"
-        assert settings_window.view_model.sectionCount == 7
 
     def test_settings_selection_switches_qml_stack(self, qtbot, settings_window):
         settings_window.root.setProperty("selectedSection", 3)

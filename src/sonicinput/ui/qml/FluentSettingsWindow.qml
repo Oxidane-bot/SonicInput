@@ -23,6 +23,7 @@ ApplicationWindow {
     property string hotkeyCaptureValue: ""
     property string hotkeyCaptureMessage: ""
     property string hotkeyCaptureMode: "add"
+    property int lexiconTabIndex: 0
     property var sectionTitles: [
         root.t("application", "Application"),
         root.t("hotkeys", "Hotkeys"),
@@ -34,8 +35,78 @@ ApplicationWindow {
     ]
 
     onSelectedSectionChanged: {
-        if (root.selectedSection === 6 && root.viewModel) {
+        root.refreshActivePage()
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            root.refreshActivePage()
+        } else {
+            historySearchDebounce.stop()
+            lexiconClearConfirmDialog.close()
+        }
+    }
+
+    function refreshActivePage() {
+        if (!root.viewModel) {
+            return
+        }
+        if (root.selectedSection === 6) {
             root.viewModel.refreshLexiconEntries()
+        } else if (root.selectedSection === 5) {
+            root.refreshHistoryNow(historySearchField.text)
+        }
+    }
+
+    function refreshHistoryNow(query) {
+        historySearchDebounce.stop()
+        if (root.viewModel) {
+            root.viewModel.refreshHistory(query)
+        }
+    }
+
+    function restoreListPosition(listView, previousContentY) {
+        var minimumY = listView.originY
+        var maximumY = Math.max(minimumY, listView.contentHeight - listView.height)
+        listView.contentY = Math.max(minimumY, Math.min(previousContentY, maximumY))
+    }
+
+    function decideReviewSuggestion(listView, suggestionId, decision) {
+        if (!root.viewModel) {
+            return false
+        }
+        var previousContentY = listView.contentY
+        var result = false
+        if (decision === "accepted") {
+            result = root.viewModel.acceptReviewSuggestion(suggestionId)
+        } else if (decision === "rejected") {
+            result = root.viewModel.rejectReviewSuggestion(suggestionId)
+        } else if (decision === "ignored") {
+            result = root.viewModel.ignoreReviewSuggestion(suggestionId)
+        }
+        Qt.callLater(function() {
+            root.restoreListPosition(listView, previousContentY)
+        })
+        return result
+    }
+
+    function removeLexiconEntry(listView, entryId) {
+        if (!root.viewModel) {
+            return false
+        }
+        var previousContentY = listView.contentY
+        var result = root.viewModel.removeLexiconEntry(entryId)
+        Qt.callLater(function() {
+            root.restoreListPosition(listView, previousContentY)
+        })
+        return result
+    }
+
+    function activateSection(index) {
+        if (root.selectedSection === index) {
+            root.refreshActivePage()
+        } else {
+            root.selectedSection = index
         }
     }
 
@@ -291,12 +362,13 @@ ApplicationWindow {
                     width: nav.width
                     text: modelData
                     highlighted: index === root.selectedSection
-                    onClicked: root.selectedSection = index
+                    onClicked: root.activateSection(index)
                 }
             }
         }
 
         StackLayout {
+            id: primaryPageStack
             currentIndex: root.selectedSection
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -1046,7 +1118,11 @@ ApplicationWindow {
                             id: historySearchDebounce
                             interval: 250
                             repeat: false
-                            onTriggered: root.viewModel && root.viewModel.refreshHistory(historySearchField.text)
+                            onTriggered: {
+                                if (root.selectedSection === 5 && root.viewModel) {
+                                    root.refreshHistoryNow(historySearchField.text)
+                                }
+                            }
                         }
 
                         RowLayout {
@@ -1059,13 +1135,13 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 220
                                 onTextChanged: historySearchDebounce.restart()
-                                onAccepted: root.viewModel && root.viewModel.refreshHistory(text)
+                                onAccepted: root.refreshHistoryNow(text)
                             }
                             Button {
                                 objectName: "historyRefreshButton"
                                 text: root.t("refresh", "Refresh")
                                 Layout.preferredWidth: 96
-                                onClicked: root.viewModel && root.viewModel.refreshHistory(historySearchField.text)
+                                onClicked: root.refreshHistoryNow(historySearchField.text)
                             }
                             Button {
                                 objectName: "historyBatchReprocessButton"
@@ -1090,7 +1166,7 @@ ApplicationWindow {
                                 id: historyEmptyState
                                 objectName: "historyEmptyState"
                                 anchors.centerIn: parent
-                                text: root.t("no_history_records_loaded", "No history records loaded")
+                                text: root.t("no_history_records", "No history records")
                                 opacity: 0.62
                                 visible: historyList.count === 0
                             }
@@ -1110,11 +1186,38 @@ ApplicationWindow {
                                 property int delegateControlHeight: 32
                                 property int delegateInnerPadding: 10
                                 property int delegateColumnSpacing: 8
+                                property bool pageAppendInProgress: false
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                                onMovementEnded: {
-                                    if (atYEnd && root.viewModel) {
-                                        root.viewModel.loadMoreHistory()
+                                function maybeLoadMore() {
+                                    if (!root.viewModel
+                                            || root.selectedSection !== 5
+                                            || pageAppendInProgress
+                                            || count === 0
+                                            || !root.viewModel.historyHasMore) {
+                                        return
                                     }
+                                    if (contentHeight <= height + 1 || atYEnd) {
+                                        var previousContentY = contentY
+                                        pageAppendInProgress = true
+                                        root.viewModel.loadMoreHistory()
+                                        Qt.callLater(function() {
+                                            root.restoreListPosition(
+                                                historyList, previousContentY
+                                            )
+                                            historyList.pageAppendInProgress = false
+                                            Qt.callLater(historyList.maybeLoadMore)
+                                        })
+                                    }
+                                }
+                                onCountChanged: Qt.callLater(historyList.maybeLoadMore)
+                                onHeightChanged: Qt.callLater(historyList.maybeLoadMore)
+                                onAtYEndChanged: {
+                                    if (atYEnd) {
+                                        historyList.maybeLoadMore()
+                                    }
+                                }
+                                onMovementEnded: {
+                                    historyList.maybeLoadMore()
                                 }
 
                                 delegate: Rectangle {
@@ -1271,27 +1374,26 @@ ApplicationWindow {
                 }
             }
 
-            Flickable {
+            Item {
                 objectName: "lexiconMemoryPage"
-                contentWidth: width
-                contentHeight: lexiconMemoryColumn.implicitHeight
-                clip: true
-
-                Component.onCompleted: root.viewModel && root.viewModel.refreshLexiconEntries()
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
                 ColumnLayout {
                     id: lexiconMemoryColumn
-                    width: parent.width
-                    spacing: 14
+                    anchors.fill: parent
+                    spacing: 12
+
+                    Label {
+                        objectName: "lexiconMemoryTitle"
+                        text: root.t("lexicon_memory", "Lexicon Memory")
+                        font.pixelSize: 20
+                        font.weight: Font.DemiBold
+                        Layout.fillWidth: true
+                    }
 
                     SettingsCard {
-                        title: root.t("lexicon_memory", "Lexicon Memory")
-
-                        Label {
-                            text: root.t("lexicon_memory_help", "Accepted local lexicon entries are used as phonetic correction hints during AI cleanup. Entries are injected only when the current text contains similar-sounding fragments.")
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
+                        title: root.t("memory_settings", "Memory Settings")
 
                         Switch {
                             objectName: "reviewUseLexiconMemorySwitch"
@@ -1306,6 +1408,35 @@ ApplicationWindow {
                             checked: root.value("review.enabled", false)
                             onToggled: root.setValue("review.enabled", checked)
                         }
+                    }
+
+                    TabBar {
+                        id: lexiconTabBar
+                        objectName: "lexiconTabBar"
+                        currentIndex: root.lexiconTabIndex
+                        Layout.fillWidth: true
+                        onCurrentIndexChanged: root.lexiconTabIndex = currentIndex
+
+                        TabButton {
+                            text: root.t("review_suggestions", "Lexicon Candidates")
+                                + " (" + (root.viewModel ? root.viewModel.reviewSuggestionCount : 0) + ")"
+                        }
+                        TabButton {
+                            text: root.t("saved_vocabulary", "Saved Vocabulary")
+                                + " (" + (root.viewModel ? root.viewModel.lexiconEntryCount : 0) + ")"
+                        }
+                    }
+
+                    StackLayout {
+                        objectName: "lexiconTabStack"
+                        currentIndex: root.lexiconTabIndex
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 10
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1344,14 +1475,17 @@ ApplicationWindow {
                             model: root.viewModel ? root.viewModel.reviewSuggestions : []
                             visible: root.viewModel && root.viewModel.reviewSuggestionCount > 0
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(320, Math.max(132, contentHeight + 8))
+                            Layout.fillHeight: true
                             clip: true
                             spacing: 8
+                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                             delegate: Frame {
                                 width: reviewSuggestionList.width
+                                height: Math.max(112, suggestionContent.implicitHeight + 20)
                                 padding: 10
                                 ColumnLayout {
+                                    id: suggestionContent
                                     anchors.fill: parent
                                     spacing: 8
                                     Label {
@@ -1377,23 +1511,35 @@ ApplicationWindow {
                                         Button {
                                             objectName: "acceptReviewSuggestionButton"
                                             text: root.t("accept", "Accept")
-                                            onClicked: root.viewModel && root.viewModel.acceptReviewSuggestion(modelData.id)
+                                            onClicked: root.decideReviewSuggestion(
+                                                reviewSuggestionList, modelData.id, "accepted"
+                                            )
                                         }
                                         Button {
                                             objectName: "rejectReviewSuggestionButton"
                                             text: root.t("reject", "Reject")
-                                            onClicked: root.viewModel && root.viewModel.rejectReviewSuggestion(modelData.id)
+                                            onClicked: root.decideReviewSuggestion(
+                                                reviewSuggestionList, modelData.id, "rejected"
+                                            )
                                         }
                                         Button {
                                             objectName: "ignoreReviewSuggestionButton"
                                             text: root.t("ignore", "Ignore")
-                                            onClicked: root.viewModel && root.viewModel.ignoreReviewSuggestion(modelData.id)
+                                            onClicked: root.decideReviewSuggestion(
+                                                reviewSuggestionList, modelData.id, "ignored"
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
+                            }
+                        }
 
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 10
                         RowLayout {
                             Layout.fillWidth: true
                             Label {
@@ -1416,7 +1562,7 @@ ApplicationWindow {
                                 objectName: "clearLexiconButton"
                                 text: root.t("clear_lexicon", "Clear Lexicon")
                                 enabled: root.viewModel && root.viewModel.lexiconEntryCount > 0
-                                onClicked: root.viewModel && root.viewModel.clearLexiconEntries()
+                                onClicked: lexiconClearConfirmDialog.open()
                             }
                         }
 
@@ -1442,12 +1588,14 @@ ApplicationWindow {
                             model: root.viewModel ? root.viewModel.lexiconEntries : []
                             visible: root.viewModel && root.viewModel.lexiconEntryCount > 0
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(360, Math.max(120, contentHeight + 8))
+                            Layout.fillHeight: true
                             clip: true
                             spacing: 8
+                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                             delegate: Frame {
                                 width: lexiconEntryList.width
+                                height: 64
                                 padding: 10
                                 RowLayout {
                                     anchors.fill: parent
@@ -1469,12 +1617,54 @@ ApplicationWindow {
                                         text: modelData.evidenceText + " · " + modelData.confidenceText
                                         opacity: 0.75
                                     }
+                                    Button {
+                                        objectName: "removeLexiconEntryButton"
+                                        text: root.t("remove", "Remove")
+                                        onClicked: root.removeLexiconEntry(
+                                            lexiconEntryList, modelData.id
+                                        )
+                                    }
                                 }
                             }
                         }
+                            }
+                        }
+                    }
                     }
                 }
+                }
             }
+
+    Dialog {
+        id: lexiconClearConfirmDialog
+        objectName: "lexiconClearConfirmDialog"
+        modal: true
+        title: root.t("clear_lexicon", "Clear Lexicon")
+        anchors.centerIn: parent
+        width: Math.min(root.width - 64, 440)
+
+        footer: DialogButtonBox {
+            Button {
+                text: root.t("close", "Close")
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: lexiconClearConfirmDialog.close()
+            }
+            Button {
+                text: root.t("clear_lexicon", "Clear Lexicon")
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
+                onClicked: {
+                    if (root.viewModel) {
+                        root.viewModel.clearLexiconEntries()
+                    }
+                    lexiconClearConfirmDialog.close()
+                }
+            }
+        }
+
+        contentItem: Label {
+            text: root.t("clear_lexicon_confirm", "Remove all saved vocabulary?")
+            wrapMode: Text.WordWrap
         }
     }
 

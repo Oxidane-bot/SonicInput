@@ -36,18 +36,8 @@ class FluentSettingsViewModel(
     """Settings bridge used by Fluent QML surfaces.
 
     PySide6 的元类会收集整个 MRO 中(包括普通 mixin 类)的
-    Signal/Slot/Property,因此 QML 可见 API 与拆分前完全一致。
+    Signal/Slot/Property，组成当前 QML 使用的 API。
     """
-
-    _SECTIONS = (
-        "Application",
-        "Hotkeys",
-        "Transcription",
-        "AI Processing",
-        "Audio and Input",
-        "History",
-        "Lexicon Memory",
-    )
 
     def __init__(self, settings_service, parent: QObject | None = None):
         super().__init__(parent)
@@ -83,22 +73,9 @@ class FluentSettingsViewModel(
         self._history_action_message = ""
         self._history_action_stage = "idle"
         self._review_suggestions = []
-        self._review_suggestion_groups = []
         self._lexicon_entries = []
-        self._review_jobs = []
         self._review_run_message = ""
-        self._review_suggestion_overflow_text = ""
-        self._review_category_summaries = []
-        self._review_last_run_result = {}
-        self._review_selected_category = "all"
-        self._review_group_expanded_overrides = {}
-        self._review_source_record_cache = {}
         self._lexicon_export_message = ""
-        self._lexicon_last_export_path = ""
-        self._review_debug_export_message = ""
-        self._review_debug_last_export_path = ""
-        self._review_learning_data_message = ""
-        self._pending_review_reprocess_suggestion_id = ""
 
     # ---- 通用设置读写 ----
 
@@ -131,16 +108,6 @@ class FluentSettingsViewModel(
     def listValue(self, key: str) -> list[Any]:
         value = self._get(key, [])
         return value if isinstance(value, list) else []
-
-    @Property(int, constant=True)
-    def sectionCount(self) -> int:
-        return len(self._SECTIONS)
-
-    @Slot(int, result=str)
-    def sectionLabel(self, index: int) -> str:
-        if 0 <= index < len(self._SECTIONS):
-            return self._SECTIONS[index]
-        return ""
 
     # ---- 应用级设置 Property ----
 

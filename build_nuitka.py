@@ -155,6 +155,16 @@ def stage_qml_runtime() -> Path:
     return staging_dir
 
 
+def _qml_plugin_data_options(staging_dir: Path) -> list[str]:
+    """Keep QML module plugins when Nuitka treats staged DLLs as non-data files."""
+    qml_root = staging_dir / "PySide6" / "qml"
+    options = []
+    for plugin_path in sorted(qml_root.rglob("*plugin.dll")):
+        relative_path = plugin_path.relative_to(staging_dir).as_posix()
+        options.append(f"--include-data-file={plugin_path}={relative_path}")
+    return options
+
+
 def _remove_reserved_files(package_name: str) -> None:
     """Remove Windows-reserved filenames (e.g., NUL) from package data."""
     try:
@@ -333,6 +343,7 @@ nuitka_cmd = [
     "--include-package=sonicinput",  # Main application package
     "--include-package=sherpa_onnx",  # sherpa-onnx package (local ASR engine, includes C extension)
     "--include-package-data=sherpa_onnx",  # Include model/config data (remove NUL file if present)
+    "--include-package-data=pypinyin",  # Runtime dictionaries used by lexicon matching
     f"--include-data-file={onnxruntime_dll}=sherpa_onnx/lib/onnxruntime.dll",
     "--include-module=sonicinput.utils.constants",  # Ensure constants.py is included
     "--include-module=PySide6.QtUiTools",  # qt_material needs QtUiTools at runtime
@@ -370,6 +381,26 @@ nuitka_cmd = [
     "--output-dir=dist",
     "app.py",
 ]
+nuitka_cmd.extend(_qml_plugin_data_options(staged_qml_dir))
+
+qml_runtime_dll_names = [
+    "Qt6LabsQmlModels.dll",
+    "Qt6QmlCore.dll",
+    "Qt6QuickControls2Basic.dll",
+    "Qt6QuickControls2BasicStyleImpl.dll",
+    "Qt6QuickControls2FluentWinUI3StyleImpl.dll",
+    "Qt6QuickControls2Fusion.dll",
+    "Qt6QuickControls2FusionStyleImpl.dll",
+    "Qt6QuickControls2Impl.dll",
+    "Qt6QuickEffects.dll",
+    "Qt6QuickLayouts.dll",
+    "Qt6QuickShapes.dll",
+]
+for dll_name in qml_runtime_dll_names:
+    dll_path = _resolve_pyside6_dll(dll_name)
+    if not dll_path:
+        raise RuntimeError(f"Required QML runtime library not found: {dll_name}")
+    nuitka_cmd.append(f"--include-data-file={dll_path}={dll_name}")
 
 qt_dll_names = [
     "Qt6UiTools.dll",

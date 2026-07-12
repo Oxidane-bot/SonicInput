@@ -13,12 +13,7 @@ from ...quality import ReviewSuggestion
 
 
 class ReviewStorageService:
-    """Persist lexicon-only review suggestions and accepted lexicon entries.
-
-    Existing review tables are kept for compatibility, but this service only
-    creates and lists ``lexicon_candidate`` suggestions. Old quality/debug review
-    rows can remain in the database; they are not surfaced or accepted here.
-    """
+    """Persist lexicon review suggestions and accepted local memory."""
 
     def __init__(self, db_path: str | Path):
         self._db_path = Path(db_path)
@@ -27,6 +22,9 @@ class ReviewStorageService:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(str(self._db_path)) as conn:
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
+            self._archive_pre_v3_pending_suggestions(conn)
+            conn.commit()
 
     def save_review_run(
         self,
@@ -46,6 +44,8 @@ class ReviewStorageService:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
+            self._archive_pre_v3_pending_suggestions(conn)
             conn.execute(
                 """
                 INSERT INTO review_jobs (
@@ -112,6 +112,9 @@ class ReviewStorageService:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
+            self._archive_pre_v3_pending_suggestions(conn)
+            conn.commit()
             row = conn.execute(
                 """
                 SELECT cursor_timestamp, cursor_id
@@ -136,6 +139,7 @@ class ReviewStorageService:
     ) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
             conn.execute(
                 """
                 INSERT INTO review_cursors (cursor_name, cursor_timestamp, cursor_id)
@@ -153,6 +157,9 @@ class ReviewStorageService:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
+            self._archive_pre_v3_pending_suggestions(conn)
+            conn.commit()
             rows = conn.execute(
                 """
                 SELECT *
@@ -173,6 +180,9 @@ class ReviewStorageService:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
+            self._archive_pre_v3_pending_suggestions(conn)
+            conn.commit()
             rows = conn.execute(
                 """
                 SELECT *
@@ -184,26 +194,27 @@ class ReviewStorageService:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_active_lexicon_entries(self, limit: int = 200) -> list[dict[str, object]]:
-        safe_limit = max(0, int(limit or 0))
+    def list_active_lexicon_entries(self) -> list[dict[str, object]]:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
+            conn.commit()
             rows = conn.execute(
                 """
                 SELECT *
                 FROM local_lexicon_entries
                 WHERE status = 'active'
-                ORDER BY updated_at DESC, term COLLATE NOCASE ASC
-                LIMIT ?
-                """,
-                (safe_limit,),
+                ORDER BY updated_at DESC, term COLLATE NOCASE ASC,
+                         old_form COLLATE NOCASE ASC
+                """
             ).fetchall()
         return [dict(row) for row in rows]
 
     def clear_lexicon_entries(self) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
             conn.execute(
                 """
                 UPDATE local_lexicon_entries
@@ -213,22 +224,24 @@ class ReviewStorageService:
             )
             conn.commit()
 
-    def clear_learning_data(self) -> None:
+    def archive_lexicon_entry(self, entry_id: str) -> bool:
+        normalized_entry_id = str(entry_id or "").strip()
+        if not normalized_entry_id:
+            return False
+        archived_at = datetime.now().isoformat(timespec="seconds")
         with sqlite3.connect(str(self._db_path)) as conn:
             self._create_tables(conn)
-            conn.execute(
-                "UPDATE local_lexicon_entries SET status = 'archived' WHERE status = 'active'"
-            )
-            conn.execute("DELETE FROM review_decisions")
-            conn.execute(
+            self._normalize_legacy_context_wrapped_entries(conn)
+            cursor = conn.execute(
                 """
-                UPDATE review_suggestions
-                SET status = 'archived', reviewed_at = NULL
-                WHERE suggestion_type = 'lexicon_candidate'
-                  AND status IN ('pending', 'accepted', 'rejected', 'ignored')
-                """
+                UPDATE local_lexicon_entries
+                SET status = 'archived', updated_at = ?
+                WHERE id = ? AND status = 'active'
+                """,
+                (archived_at, normalized_entry_id),
             )
             conn.commit()
+        return cursor.rowcount > 0
 
     def record_decision(
         self,
@@ -243,6 +256,7 @@ class ReviewStorageService:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             self._create_tables(conn)
+            self._normalize_legacy_context_wrapped_entries(conn)
             suggestion = conn.execute(
                 """
                 SELECT *
@@ -295,9 +309,24 @@ class ReviewStorageService:
 
     @staticmethod
     def _create_tables(conn: sqlite3.Connection) -> None:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if ReviewStorageService._review_schema_is_current(conn):
+                conn.commit()
+                return
+
+            ReviewStorageService._drop_review_tables(conn)
+            ReviewStorageService._create_current_review_tables(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    @staticmethod
+    def _create_current_review_tables(conn: sqlite3.Connection) -> None:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS review_jobs (
+            CREATE TABLE review_jobs (
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -312,17 +341,9 @@ class ReviewStorageService:
             )
             """
         )
-        cls = ReviewStorageService
-        cls._ensure_column(
-            conn, "review_jobs", "review_source", "TEXT NOT NULL DEFAULT 'local'"
-        )
-        cls._ensure_column(conn, "review_jobs", "provider", "TEXT")
-        cls._ensure_column(conn, "review_jobs", "model_id", "TEXT")
-        cls._ensure_column(conn, "review_jobs", "prompt_version", "TEXT")
-        cls._ensure_column(conn, "review_jobs", "fallback_reason", "TEXT")
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS review_suggestions (
+            CREATE TABLE review_suggestions (
                 suggestion_id TEXT PRIMARY KEY,
                 job_id TEXT NOT NULL,
                 suggestion_type TEXT NOT NULL,
@@ -343,7 +364,7 @@ class ReviewStorageService:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS review_decisions (
+            CREATE TABLE review_decisions (
                 id TEXT PRIMARY KEY,
                 suggestion_id TEXT NOT NULL,
                 decision TEXT NOT NULL,
@@ -355,28 +376,14 @@ class ReviewStorageService:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS review_cursors (
+            CREATE TABLE review_cursors (
                 cursor_name TEXT PRIMARY KEY,
                 cursor_timestamp TEXT,
                 cursor_id TEXT
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS local_lexicon_entries (
-                id TEXT PRIMARY KEY,
-                term TEXT NOT NULL UNIQUE,
-                old_form TEXT,
-                source_suggestion_id TEXT,
-                evidence_count INTEGER NOT NULL DEFAULT 0,
-                confidence REAL NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
+        ReviewStorageService._create_local_lexicon_entries_table(conn)
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_review_suggestions_status_created
@@ -390,21 +397,267 @@ class ReviewStorageService:
             """
         )
 
-    @staticmethod
-    def _ensure_column(
-        conn: sqlite3.Connection,
-        table_name: str,
-        column_name: str,
-        column_definition: str,
-    ) -> None:
-        existing_columns = {
-            row[1]
-            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    @classmethod
+    def _review_schema_is_current(cls, conn: sqlite3.Connection) -> bool:
+        expected_columns = {
+            "review_jobs": {
+                "id",
+                "created_at",
+                "status",
+                "record_limit",
+                "reviewed_count",
+                "suggestion_count",
+                "review_source",
+                "provider",
+                "model_id",
+                "prompt_version",
+                "fallback_reason",
+            },
+            "review_suggestions": {
+                "suggestion_id",
+                "job_id",
+                "suggestion_type",
+                "confidence",
+                "risk_level",
+                "source_record_ids",
+                "title",
+                "detail",
+                "evidence_count",
+                "old_form",
+                "new_form",
+                "status",
+                "created_at",
+                "reviewed_at",
+            },
+            "review_decisions": {
+                "id",
+                "suggestion_id",
+                "decision",
+                "decided_at",
+                "note",
+            },
+            "review_cursors": {
+                "cursor_name",
+                "cursor_timestamp",
+                "cursor_id",
+            },
         }
-        if column_name not in existing_columns:
-            conn.execute(
-                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+        for table_name, columns in expected_columns.items():
+            actual_columns = {
+                str(row[1])
+                for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            if actual_columns != columns:
+                return False
+        return cls._local_lexicon_schema_is_current(conn)
+
+    @staticmethod
+    def _drop_review_tables(conn: sqlite3.Connection) -> None:
+        for table_name in (
+            "review_decisions",
+            "review_suggestions",
+            "review_jobs",
+            "review_cursors",
+            "local_lexicon_entries",
+        ):
+            conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+    @staticmethod
+    def _create_local_lexicon_entries_table(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE local_lexicon_entries (
+                id TEXT PRIMARY KEY,
+                term TEXT NOT NULL COLLATE NOCASE,
+                old_form TEXT NOT NULL COLLATE NOCASE,
+                source_suggestion_id TEXT,
+                evidence_count INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (term, old_form)
             )
+            """
+        )
+
+    @staticmethod
+    def _normalize_legacy_context_wrapped_entries(conn: sqlite3.Connection) -> None:
+        """Replace an unambiguous legacy shared context prefix with its core term."""
+        prefixes = ("这个", "那个", "每个", "一个", "一些", "小")
+        core_prefixes = ("梗", "段", "节", "点", "类", "版")
+        rows = conn.execute(
+            """
+            SELECT id, term, old_form, source_suggestion_id, evidence_count,
+                   confidence, status, created_at, updated_at
+            FROM local_lexicon_entries
+            WHERE status = 'active'
+            """
+        ).fetchall()
+        for row in rows:
+            old_form = str(row[2] or "").strip()
+            term = str(row[1] or "").strip()
+            core_old, core_term = ReviewStorageService._trim_legacy_context_prefix(
+                old_form,
+                term,
+                prefixes=prefixes,
+                core_prefixes=core_prefixes,
+            )
+            if (core_old, core_term) == (old_form, term):
+                continue
+            normalized_id = ReviewStorageService._lexicon_entry_id(core_term, core_old)
+            conn.execute(
+                """
+                INSERT INTO local_lexicon_entries (
+                    id, term, old_form, source_suggestion_id, evidence_count,
+                    confidence, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                ON CONFLICT(term, old_form) DO UPDATE SET
+                    evidence_count = MAX(
+                        local_lexicon_entries.evidence_count,
+                        excluded.evidence_count
+                    ),
+                    confidence = MAX(
+                        local_lexicon_entries.confidence,
+                        excluded.confidence
+                    ),
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    normalized_id,
+                    core_term,
+                    core_old,
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[7],
+                    row[8],
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE local_lexicon_entries
+                SET status = 'archived', updated_at = ?
+                WHERE id = ?
+                """,
+                (row[8], row[0]),
+            )
+
+    @staticmethod
+    def _archive_pre_v3_pending_suggestions(conn: sqlite3.Connection) -> None:
+        """Archive pending candidates that predate the strict provenance gate."""
+        conn.execute(
+            """
+            UPDATE review_suggestions
+            SET status = 'archived', reviewed_at = created_at
+            WHERE status = 'pending'
+              AND suggestion_type = 'lexicon_candidate'
+              AND job_id IN (
+                  SELECT id
+                  FROM review_jobs
+                  WHERE prompt_version IN ('lexicon-raw-v1', 'lexicon-core-term-v2')
+              )
+            """
+        )
+
+    @staticmethod
+    def _trim_legacy_context_prefix(
+        old_form: str,
+        term: str,
+        *,
+        prefixes: tuple[str, ...],
+        core_prefixes: tuple[str, ...],
+    ) -> tuple[str, str]:
+        current_old = old_form
+        current_term = term
+        for _ in range(3):
+            matching_prefix = next(
+                (
+                    prefix
+                    for prefix in sorted(prefixes, key=len, reverse=True)
+                    if current_old.startswith(prefix)
+                    and current_term.startswith(prefix)
+                ),
+                None,
+            )
+            if matching_prefix is None:
+                break
+            candidate_old = current_old[len(matching_prefix) :].strip()
+            candidate_term = current_term[len(matching_prefix) :].strip()
+            if (
+                len(candidate_old) < 2
+                or len(candidate_term) < 2
+                or len(candidate_old) != len(candidate_term)
+            ):
+                break
+            if (
+                candidate_old[0] in core_prefixes
+                and candidate_old[0] == candidate_term[0]
+            ):
+                current_old = candidate_old
+                current_term = candidate_term
+                continue
+            if any(
+                candidate_old.startswith(prefix) and candidate_term.startswith(prefix)
+                for prefix in prefixes
+            ):
+                current_old = candidate_old
+                current_term = candidate_term
+                continue
+            break
+        return current_old, current_term
+
+    @staticmethod
+    def _local_lexicon_schema_is_current(conn: sqlite3.Connection) -> bool:
+        columns = {
+            str(row[1]): row
+            for row in conn.execute(
+                "PRAGMA table_info(local_lexicon_entries)"
+            ).fetchall()
+        }
+        required_columns = {
+            "id",
+            "term",
+            "old_form",
+            "source_suggestion_id",
+            "evidence_count",
+            "confidence",
+            "status",
+            "created_at",
+            "updated_at",
+        }
+        if not required_columns.issubset(columns):
+            return False
+        if not bool(columns["old_form"][3]):
+            return False
+
+        has_pair_constraint = False
+        for index_row in conn.execute(
+            "PRAGMA index_list(local_lexicon_entries)"
+        ).fetchall():
+            if not bool(index_row[2]):
+                continue
+            index_name = str(index_row[1]).replace('"', '""')
+            key_rows = [
+                row
+                for row in conn.execute(
+                    f'PRAGMA index_xinfo("{index_name}")'
+                ).fetchall()
+                if bool(row[5])
+            ]
+            columns = tuple(row[2] for row in key_rows)
+            collations = tuple(str(row[4]).upper() for row in key_rows)
+            if columns == ("term",):
+                return False
+            if bool(index_row[4]):
+                continue
+            if columns == ("term", "old_form") and collations == (
+                "NOCASE",
+                "NOCASE",
+            ):
+                has_pair_constraint = True
+        return has_pair_constraint
 
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
@@ -440,6 +693,17 @@ class ReviewStorageService:
         return row is not None
 
     @staticmethod
+    def _lexicon_entry_id(term: str, old_form: str) -> str:
+        ascii_lowercase = str.maketrans(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"
+        )
+        pair_key = (
+            f"{term.translate(ascii_lowercase)}\x1f"
+            f"{old_form.translate(ascii_lowercase)}"
+        )
+        return f"lexicon_{uuid.uuid5(uuid.NAMESPACE_URL, pair_key).hex[:16]}"
+
+    @staticmethod
     def _upsert_lexicon_entry_from_suggestion(
         conn: sqlite3.Connection,
         *,
@@ -450,7 +714,7 @@ class ReviewStorageService:
         old_form = str(suggestion["old_form"] or "").strip()
         if not term or not old_form:
             return
-        entry_id = f"lexicon_{uuid.uuid5(uuid.NAMESPACE_URL, term).hex[:16]}"
+        entry_id = ReviewStorageService._lexicon_entry_id(term, old_form)
         conn.execute(
             """
             INSERT INTO local_lexicon_entries (
@@ -458,7 +722,8 @@ class ReviewStorageService:
                 confidence, status, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
-            ON CONFLICT(term) DO UPDATE SET
+            ON CONFLICT(term, old_form) DO UPDATE SET
+                term = excluded.term,
                 old_form = excluded.old_form,
                 source_suggestion_id = excluded.source_suggestion_id,
                 evidence_count = MAX(local_lexicon_entries.evidence_count, excluded.evidence_count),

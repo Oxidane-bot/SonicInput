@@ -13,14 +13,13 @@
 - Local lexicon memory: user-confirmed entries are injected before later AI cleanup only when phonetically relevant
 - Lexicon review: the settings page can ask the configured AI provider to mine raw ASR context for candidate terms
 
-## What's New (v0.8.0)
-- Added **local lexicon memory**: user-accepted entries are stored locally and injected before future AI cleanup only after phonetic/near-phonetic pre-filtering.
-- Added **raw-only lexicon review**: the settings page can run a review that only sees raw ASR snippets, reads the full sentence context, and proposes candidate `old_form -> new_form` pairs without treating AI cleanup output as ground truth.
-- Simplified the old review flow: profanity/content-quality/boundary/prompt-failure review cards were removed; the review surface now focuses on user-reviewable lexicon candidates.
-- Removed the real-time AI-output rejection gate: cleanup output is no longer automatically reverted by local compression/translation/boundary validators; low-information skip behavior remains.
-- Added **in-recording rolling context** so later chunk cleanup can reuse terms, paths, and recent context heard in the same recording, improving consistency for technical and mixed-language dictation.
-- Added a long-recording cloud path: cloud recordings over the default 90-second threshold prefer file transcription and record `transcription_path`, decision reason, and fallback type for diagnostics.
-- Changed the default hotkey to `Ctrl+Alt+Space` to reduce collisions with common editing shortcuts.
+## What's New (v0.8.1)
+- **Local lexicon memory is now a top-level settings page** with separate tabs and independently scrolling lists for candidates and saved vocabulary. The nested AI-page management entry has been removed.
+- **History loads immediately** when entered, re-entered, or selected again. It also prefetches additional pages until the viewport is filled instead of waiting for a manual refresh.
+- **Candidate extraction is more precise** and stores the smallest complete reusable term. For example, `小梗盖 -> 小梗概` in context is stored as `梗盖 -> 梗概`.
+- **Homophone and controlled near-homophone correction** accepts exact phonetic matches or one conservative sound confusion while rejecting semantic jumps, cross-script pairs, and candidates without verifiable source records.
+- **Lexicon storage and recall are corrected**: one canonical term can retain multiple mistaken forms, mutations invalidate the runtime cache immediately, and active entries are no longer truncated by a fixed limit.
+- **The old review implementation is hard-cut**. Incompatible review/lexicon schemas are rebuilt, so old pending candidates and saved entries are not guaranteed to survive. Export the lexicon before upgrading.
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -31,7 +30,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.8.0-win64.exe` from [v0.8.0 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.8.0)
+1. Download `SonicInput-v0.8.1-win64.exe` from [v0.8.1 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.8.1)
 2. Run the exe; default hotkey is Ctrl+Alt+Space (customize it in settings if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 
@@ -39,9 +38,11 @@
 
 ## Lexicon Review & Local Learning
 - Lexicon review reads only raw ASR text, not `ai_optimized_text` / `final_text`, so AI cleanup mistakes are not treated as ground truth.
-- The review model uses full raw-sentence context to propose candidate terms; a candidate enters local memory only after the user accepts it.
+- Local lexicon memory is a top-level settings page with separate candidate and saved-vocabulary views.
+- The review model extracts the smallest complete term from full raw-sentence context. Every candidate must reference verifiable source records and enters local memory only after user acceptance.
 - Before later AI cleanup, `LexiconMatcher` phonetic/near-phonetic filtering selects only entries relevant to the current raw text.
-- Automatic lexicon review is disabled by default; it can be run manually from settings or enabled for idle scheduling. Legacy review rows stay in the local database but are not part of the new review flow.
+- Automatic lexicon review is disabled by default; it can be run manually from settings or enabled for idle scheduling.
+- v0.8.1 does not retain a compatibility migration for obsolete review schemas. An incompatible review/lexicon schema is rebuilt; export from the old settings page before upgrading. Configuration and transcription history are unaffected.
 - Local audit scripts omit transcript text by default and store metadata such as lengths, status, path, and anomaly labels for safe prompt/model comparisons.
 
 ## Dev Setup

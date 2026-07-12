@@ -80,10 +80,13 @@ def test_ui_settings_service_exposes_lexicon_memory_actions():
         review_storage_service=review_storage,
     )
 
-    assert service.list_lexicon_entries(limit=5) == [{"term": "PyTorch"}]
+    assert service.list_lexicon_entries() == [{"term": "PyTorch"}]
+    review_storage.archive_lexicon_entry.return_value = True
+    assert service.remove_lexicon_entry("lex-1") is True
     assert service.clear_lexicon_entries() is True
 
-    review_storage.list_active_lexicon_entries.assert_called_once_with(limit=5)
+    review_storage.list_active_lexicon_entries.assert_called_once_with()
+    review_storage.archive_lexicon_entry.assert_called_once_with("lex-1")
     review_storage.clear_lexicon_entries.assert_called_once_with()
 
 
@@ -95,6 +98,7 @@ def test_ui_settings_service_lexicon_methods_are_safe_without_storage():
     )
 
     assert service.list_lexicon_entries() == []
+    assert service.remove_lexicon_entry("missing") is False
     assert service.clear_lexicon_entries() is False
     assert service.export_lexicon_entries()["success"] is False
 

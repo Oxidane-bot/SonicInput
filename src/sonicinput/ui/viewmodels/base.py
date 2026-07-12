@@ -70,24 +70,11 @@ class SettingsViewModelBase(_TypingBase):
     _batch_reprocess_message: str
     _batch_reprocess_result: dict[str, Any]
 
-    # review 状态(history 的 retry 回调也会读写 pending id)
+    # review 状态
     _review_suggestions: list[dict[str, Any]]
-    _review_suggestion_groups: list[dict[str, Any]]
     _lexicon_entries: list[dict[str, Any]]
-    _review_jobs: list[dict[str, Any]]
     _review_run_message: str
-    _review_suggestion_overflow_text: str
-    _review_category_summaries: list[dict[str, Any]]
-    _review_last_run_result: dict[str, Any]
-    _review_selected_category: str
-    _review_group_expanded_overrides: dict[str, bool]
-    _review_source_record_cache: dict[str, Any]
     _lexicon_export_message: str
-    _lexicon_last_export_path: str
-    _review_debug_export_message: str
-    _review_debug_last_export_path: str
-    _review_learning_data_message: str
-    _pending_review_reprocess_suggestion_id: str
 
     _ZH_CN = ZH_CN
 
@@ -141,25 +128,10 @@ class SettingsViewModelBase(_TypingBase):
     def refreshHistory(self, query: str = "") -> None:  # noqa: N802 (Qt 命名)
         raise NotImplementedError
 
-    def refreshReviewSuggestions(self) -> None:  # noqa: N802
-        raise NotImplementedError
-
     def _retry_history_record(self, record: Any) -> None:
         raise NotImplementedError
 
-    def _decide_review_suggestion(self, suggestion_id: str, decision: str) -> bool:
-        raise NotImplementedError
-
     def _record_to_history_detail(self, record: Any) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def _get_history_record_by_id(self, record_id: str) -> Any:
-        raise NotImplementedError
-
-    def _open_history_record_by_id(self, record_id: str) -> bool:
-        raise NotImplementedError
-
-    def _first_viewable_source_record_id(self, source_record_ids: list[str]) -> str:
         raise NotImplementedError
 
 

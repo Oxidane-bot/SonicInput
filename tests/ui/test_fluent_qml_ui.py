@@ -4,6 +4,7 @@ import pytest
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtTest import QTest
 from unittest.mock import Mock
 from datetime import datetime
 
@@ -46,7 +47,6 @@ def _load_settings_qml(qapp, view_model):
     engine.load(QUrl.fromLocalFile(str(qml_path("FluentSettingsWindow.qml"))))
     root = engine.rootObjects()[0]
     root.setProperty("visible", True)
-    root.setProperty("selectedSection", 5)
     qapp.processEvents()
     qapp.processEvents()
     return engine, root
@@ -69,21 +69,6 @@ class TestFluentSettingsViewModel:
         assert mock_config_service.get_setting("ui.start_minimized") is True
         assert mock_config_service.get_setting("ui.tray_notifications") is False
 
-    def test_section_model_exposes_lexicon_memory_section(self):
-        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
-
-        settings_service = Mock()
-        settings_service.get_setting = Mock(
-            side_effect=lambda _key, default=None: default
-        )
-
-        view_model = FluentSettingsViewModel(settings_service)
-
-        assert view_model.sectionCount == 7
-        assert view_model.sectionLabel(0) == "Application"
-        assert view_model.sectionLabel(3) == "AI Processing"
-        assert view_model.sectionLabel(6) == "Lexicon Memory"
-
     def test_lexicon_bridge_exposes_entries_export_and_clear(self):
         from sonicinput.ui.qml_bridge import FluentSettingsViewModel
 
@@ -104,7 +89,6 @@ class TestFluentSettingsViewModel:
                 }
             ]
         )
-        settings_service.list_review_jobs = Mock(return_value=[])
         settings_service.decide_review_suggestion = Mock(return_value=True)
         settings_service.list_lexicon_entries = Mock(
             return_value=[
@@ -119,6 +103,7 @@ class TestFluentSettingsViewModel:
             ]
         )
         settings_service.clear_lexicon_entries = Mock(return_value=True)
+        settings_service.remove_lexicon_entry = Mock(return_value=True)
         settings_service.export_lexicon_entries = Mock(
             return_value={
                 "success": True,
@@ -130,10 +115,10 @@ class TestFluentSettingsViewModel:
         view_model = FluentSettingsViewModel(settings_service)
         view_model.refreshLexiconEntries()
 
+        settings_service.list_lexicon_entries.assert_called_once_with()
         assert view_model.reviewSuggestionCount == 1
         assert view_model.reviewSuggestions[0]["oldForm"] == "拍套曲"
         assert view_model.reviewSuggestions[0]["newForm"] == "PyTorch"
-        assert view_model.reviewJobs == []
         assert view_model.lexiconEntryCount == 1
         assert view_model.lexiconEntries[0]["term"] == "SonicInput"
         assert view_model.lexiconEntries[0]["oldForm"] == "Sonic Input"
@@ -145,29 +130,21 @@ class TestFluentSettingsViewModel:
             "Exported 1 lexicon entries to quality_audit/lexicon.json"
         )
 
+        lexicon_refresh_count = settings_service.list_lexicon_entries.call_count
+        assert view_model.removeLexiconEntry("lex-1") is True
+        settings_service.remove_lexicon_entry.assert_called_once_with("lex-1")
+        assert (
+            settings_service.list_lexicon_entries.call_count
+            == lexicon_refresh_count + 1
+        )
+
         assert view_model.acceptReviewSuggestion("sug-1") is True
-        settings_service.decide_review_suggestion.assert_called_once_with("sug-1", "accepted")
+        settings_service.decide_review_suggestion.assert_called_once_with(
+            "sug-1", "accepted"
+        )
 
         assert view_model.clearLexiconEntries() is True
         settings_service.clear_lexicon_entries.assert_called_once()
-
-    def test_lexicon_bridge_falls_back_safely_without_storage(self):
-        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
-
-        class SettingsWithoutLexiconStorage:
-            def get_setting(self, _key, default=None):
-                return default
-
-        view_model = FluentSettingsViewModel(SettingsWithoutLexiconStorage())
-
-        view_model.refreshLexiconEntries()
-
-        assert view_model.reviewSuggestions == []
-        assert view_model.lexiconEntries == []
-        assert view_model.exportLexiconEntries()["success"] is False
-        assert view_model.clearLexiconEntries() is False
-        assert view_model.runReviewNow()["ran"] is False
-        assert view_model.acceptReviewSuggestion("missing") is False
 
     def test_history_refresh_uses_history_service_and_updates_stats(
         self, mock_config_service
@@ -308,6 +285,55 @@ class TestFluentSettingsViewModel:
         history_service.delete_record.assert_called_once_with("h-1")
         assert view_model.historyDetailVisible is False
         assert view_model.historyRecords == []
+
+    def test_selected_history_delete_uses_selected_record_after_refresh_reorders_list(
+        self, mock_config_service
+    ):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        selected = _make_history_record("h-selected", "selected")
+        newer = _make_history_record("h-newer", "newer")
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [
+            [selected],
+            [newer, selected],
+            [newer],
+        ]
+        history_service.get_aggregate_stats.return_value = (2, 5.0, 2)
+        history_service.delete_record.return_value = True
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("")
+        view_model.openHistoryDetail(0)
+        view_model.refreshHistory("")
+
+        assert view_model.selectedHistoryDetail["id"] == "h-selected"
+        assert view_model.deleteSelectedHistoryRecord() is True
+        history_service.delete_record.assert_called_once_with("h-selected")
+        assert view_model.historyDetailVisible is False
+        assert [item["id"] for item in view_model.historyRecords] == ["h-newer"]
+
+    def test_history_refresh_closes_detail_when_selected_record_is_not_in_page(
+        self, mock_config_service
+    ):
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        selected = _make_history_record("h-selected", "selected")
+        replacement = _make_history_record("h-replacement", "replacement")
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [[selected], [replacement]]
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model.refreshHistory("")
+        view_model.openHistoryDetail(0)
+        view_model.refreshHistory("")
+
+        assert view_model.historyDetailVisible is False
+        assert view_model.selectedHistoryDetail == {}
+        assert view_model.deleteSelectedHistoryRecord() is False
 
     def test_history_batch_reprocess_opens_qml_confirmation_without_widget_dialogs(
         self, mock_config_service
@@ -584,6 +610,9 @@ class TestFluentSettingsParity:
 
         for object_name in [
             "lexiconMemoryPage",
+            "lexiconMemoryTitle",
+            "lexiconTabBar",
+            "lexiconTabStack",
             "reviewUseLexiconMemorySwitch",
             "reviewEnabledSwitch",
             "reviewSuggestionCountLabel",
@@ -599,10 +628,27 @@ class TestFluentSettingsParity:
             "exportLexiconButton",
             "lexiconExportMessageLabel",
             "clearLexiconButton",
+            "removeLexiconEntryButton",
             "lexiconEntryList",
             "lexiconEmptyState",
         ]:
             assert f'objectName: "{object_name}"' in qml_source
+
+        for declaration in [
+            "property int lexiconTabIndex:",
+            "function activateSection(index)",
+        ]:
+            assert declaration in qml_source
+
+        for removed_secondary_page_api in [
+            "lexiconMemoryOpen",
+            "lexiconMemoryEntryButton",
+            "lexiconMemoryBackButton",
+            "openLexiconMemory",
+            "closeLexiconMemory",
+            "back_to_ai_processing",
+        ]:
+            assert removed_secondary_page_api not in qml_source
 
         assert 'root.t("lexicon_memory", "Lexicon Memory")' in qml_source
         assert 'root.setValue("review.use_lexicon_memory", checked)' in qml_source
@@ -613,6 +659,228 @@ class TestFluentSettingsParity:
         assert 'root.setValue("review.enabled", checked)' in qml_source
         assert "exportReviewDebugReportButton" not in qml_source
         assert "reviewJobsFrame" not in qml_source
+
+    def test_lexicon_memory_is_a_primary_page(self, qapp, mock_config_service):
+        from PySide6.QtCore import QObject
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        mock_config_service.list_review_suggestions = Mock(return_value=[])
+        mock_config_service.list_lexicon_entries = Mock(return_value=[])
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+        lexicon_page = root.findChild(QObject, "lexiconMemoryPage")
+        section_titles = root.property("sectionTitles")
+        if hasattr(section_titles, "toVariant"):
+            section_titles = section_titles.toVariant()
+
+        assert len(section_titles) == 7
+        assert root.property("lexiconTabIndex") == 0
+        assert callable(root.activateSection)
+        assert lexicon_page is not None
+
+        review_loads_before_entry = (
+            mock_config_service.list_review_suggestions.call_count
+        )
+        entry_loads_before_entry = mock_config_service.list_lexicon_entries.call_count
+        root.activateSection(6)
+        root.setProperty("lexiconTabIndex", 1)
+        qapp.processEvents()
+
+        assert root.property("selectedSection") == 6
+        assert root.property("lexiconTabIndex") == 1
+        assert lexicon_page.property("visible") is True
+        assert (
+            mock_config_service.list_review_suggestions.call_count
+            > review_loads_before_entry
+        )
+        assert (
+            mock_config_service.list_lexicon_entries.call_count
+            > entry_loads_before_entry
+        )
+
+        review_loads_after_entry = (
+            mock_config_service.list_review_suggestions.call_count
+        )
+        entry_loads_after_entry = mock_config_service.list_lexicon_entries.call_count
+        root.activateSection(6)
+        qapp.processEvents()
+
+        assert (
+            mock_config_service.list_review_suggestions.call_count
+            > review_loads_after_entry
+        )
+        assert (
+            mock_config_service.list_lexicon_entries.call_count
+            > entry_loads_after_entry
+        )
+
+        root.activateSection(3)
+        qapp.processEvents()
+
+        assert root.property("selectedSection") == 3
+        assert lexicon_page.property("visible") is False
+
+    def test_lexicon_tabs_have_one_visible_list_without_outer_flickable(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtCore import QObject
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        mock_config_service.list_review_suggestions = Mock(
+            return_value=[
+                {
+                    "suggestion_id": "sug-1",
+                    "old_form": "拍套曲",
+                    "new_form": "PyTorch",
+                    "detail": "Repeated correction",
+                    "evidence_count": 2,
+                    "confidence": 0.86,
+                    "created_at": "2026-06-09T03:00:00",
+                }
+            ]
+        )
+        mock_config_service.list_lexicon_entries = Mock(
+            return_value=[
+                {
+                    "id": "lex-1",
+                    "term": "PyTorch",
+                    "old_form": "拍套曲",
+                    "evidence_count": 3,
+                    "confidence": 0.9,
+                    "updated_at": "2026-06-09T03:01:00",
+                }
+            ]
+        )
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+        root.activateSection(6)
+        qapp.processEvents()
+
+        lexicon_page = root.findChild(QObject, "lexiconMemoryPage")
+        tab_bar = root.findChild(QObject, "lexiconTabBar")
+        tab_stack = root.findChild(QObject, "lexiconTabStack")
+        suggestion_list = root.findChild(QObject, "reviewSuggestionList")
+        entry_list = root.findChild(QObject, "lexiconEntryList")
+
+        assert lexicon_page.metaObject().indexOfProperty("contentY") == -1
+        assert tab_bar.property("currentIndex") == 0
+        assert tab_stack.property("currentIndex") == 0
+        assert suggestion_list.property("visible") is True
+        assert entry_list.property("visible") is False
+
+        root.setProperty("lexiconTabIndex", 1)
+        qapp.processEvents()
+
+        assert tab_bar.property("currentIndex") == 1
+        assert tab_stack.property("currentIndex") == 1
+        assert suggestion_list.property("visible") is False
+        assert entry_list.property("visible") is True
+
+    def test_saved_lexicon_remove_preserves_scroll_position(
+        self, qapp, qtbot, mock_config_service
+    ):
+        from PySide6.QtCore import QObject
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        entries = [
+            {
+                "id": f"lex-{index}",
+                "term": f"Term {index}",
+                "old_form": f"Old form {index}",
+                "evidence_count": 2,
+                "confidence": 0.9,
+                "updated_at": "2026-06-09T03:01:00",
+            }
+            for index in range(30)
+        ]
+        mock_config_service.list_review_suggestions = Mock(return_value=[])
+        mock_config_service.list_lexicon_entries = Mock(
+            side_effect=lambda: list(entries)
+        )
+
+        def remove_entry(entry_id):
+            entries[:] = [item for item in entries if item["id"] != entry_id]
+            return True
+
+        mock_config_service.remove_lexicon_entry = Mock(side_effect=remove_entry)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+        root.activateSection(6)
+        root.setProperty("lexiconTabIndex", 1)
+        qapp.processEvents()
+
+        entry_list = root.findChild(QObject, "lexiconEntryList")
+        assert entry_list.property("count") == 30
+        assert entry_list.property("contentHeight") > entry_list.property("height")
+
+        previous_content_y = min(
+            500.0,
+            entry_list.property("contentHeight") - entry_list.property("height") - 1,
+        )
+        assert previous_content_y > 0
+        entry_list.setProperty("contentY", previous_content_y)
+        qapp.processEvents()
+
+        assert root.removeLexiconEntry(entry_list, "lex-29") is True
+        qtbot.waitUntil(
+            lambda: entry_list.property("count") == 29
+            and abs(entry_list.property("contentY") - previous_content_y) < 1,
+            timeout=1000,
+        )
+
+        mock_config_service.remove_lexicon_entry.assert_called_once_with("lex-29")
+        assert entry_list.property("contentY") == pytest.approx(
+            previous_content_y, abs=1
+        )
+
+    def test_lexicon_clear_dialog_does_not_survive_window_reopen(
+        self, qapp, qtbot, mock_config_service
+    ):
+        from PySide6.QtCore import QObject
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        mock_config_service.list_review_suggestions = Mock(return_value=[])
+        mock_config_service.list_lexicon_entries = Mock(
+            return_value=[
+                {
+                    "id": "lex-1",
+                    "term": "PyTorch",
+                    "old_form": "拍套曲",
+                    "evidence_count": 2,
+                    "confidence": 0.9,
+                    "updated_at": "2026-06-09T03:01:00",
+                }
+            ]
+        )
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+        root.activateSection(6)
+        root.setProperty("lexiconTabIndex", 1)
+        qapp.processEvents()
+
+        clear_button = root.findChild(QObject, "clearLexiconButton")
+        clear_dialog = root.findChild(QObject, "lexiconClearConfirmDialog")
+        clear_button.clicked.emit()
+        qtbot.waitUntil(lambda: clear_dialog.property("visible"), timeout=1000)
+
+        root.setProperty("visible", False)
+        qtbot.waitUntil(lambda: not clear_dialog.property("visible"), timeout=1000)
+        root.setProperty("visible", True)
+        qapp.processEvents()
+
+        assert root.property("visible") is True
+        assert clear_dialog.property("visible") is False
 
     def test_hotkeys_section_uses_standard_shortcut_management_ui(self):
         from sonicinput.ui.qml_bridge import qml_path
@@ -800,7 +1068,7 @@ class TestFluentSettingsParity:
         view_model = FluentSettingsViewModel(mock_config_service)
         _engine, root = _load_settings_qml(qapp, view_model)
 
-        view_model.refreshHistory("")
+        root.activateSection(5)
         qapp.processEvents()
 
         history_list = root.findChild(QObject, "historyList")
@@ -827,7 +1095,7 @@ class TestFluentSettingsParity:
         view_model = FluentSettingsViewModel(mock_config_service)
         _engine, root = _load_settings_qml(qapp, view_model)
 
-        view_model.refreshHistory("")
+        root.activateSection(5)
         qapp.processEvents()
 
         history_list = root.findChild(QObject, "historyList")
@@ -835,6 +1103,147 @@ class TestFluentSettingsParity:
 
         assert history_list.property("count") == 0
         assert empty_state.property("visible") is True
+
+    def test_settings_qml_reentering_history_refreshes_records(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [
+            [_make_history_record("h-1", "first visit")],
+            [_make_history_record("h-2", "second visit")],
+        ]
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+
+        root.activateSection(5)
+        qapp.processEvents()
+        assert view_model.historyRecords[0]["id"] == "h-1"
+
+        root.activateSection(3)
+        root.activateSection(5)
+        qapp.processEvents()
+
+        assert view_model.historyRecords[0]["id"] == "h-2"
+        assert history_service.get_records_keyset.call_count == 2
+
+    def test_settings_qml_reactivating_history_refreshes_records(
+        self, qapp, mock_config_service
+    ):
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [
+            [_make_history_record("h-1", "first activation")],
+            [_make_history_record("h-2", "repeated activation")],
+        ]
+        history_service.get_aggregate_stats.return_value = (1, 2.5, 1)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+
+        root.activateSection(5)
+        root.activateSection(5)
+        qapp.processEvents()
+
+        assert view_model.historyRecords[0]["id"] == "h-2"
+        assert history_service.get_records_keyset.call_count == 2
+
+    def test_settings_qml_history_append_preserves_scroll_position(
+        self, qapp, qtbot, mock_config_service
+    ):
+        from PySide6.QtCore import QObject
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        first_page = [
+            _make_history_record(f"h-{index}", f"record {index}") for index in range(10)
+        ]
+        second_page = [
+            _make_history_record(f"h-{index}", f"record {index}")
+            for index in range(10, 20)
+        ]
+        history_service = Mock()
+        history_service.get_records_keyset.side_effect = [first_page, second_page]
+        history_service.get_aggregate_stats.return_value = (20, 50.0, 20)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        view_model._history_page_size = 10
+        _engine, root = _load_settings_qml(qapp, view_model)
+        root.activateSection(5)
+        qapp.processEvents()
+
+        history_list = root.findChild(QObject, "historyList")
+        assert history_list.property("count") == 10
+        assert history_list.property("contentHeight") > history_list.property("height")
+
+        previous_content_y = history_list.property(
+            "contentHeight"
+        ) - history_list.property("height")
+        assert previous_content_y > 0
+        history_list.setProperty("contentY", previous_content_y)
+
+        qtbot.waitUntil(
+            lambda: history_list.property("count") == 20
+            and not history_list.property("pageAppendInProgress"),
+            timeout=1000,
+        )
+
+        assert history_service.get_records_keyset.call_count == 2
+        assert history_list.property("contentY") == pytest.approx(
+            previous_content_y, abs=1
+        )
+        assert history_list.property("contentY") > 0
+
+    @pytest.mark.parametrize("explicit_action", ["refresh", "enter"])
+    def test_settings_qml_explicit_history_search_cancels_pending_debounce(
+        self, qapp, mock_config_service, explicit_action
+    ):
+        from PySide6.QtCore import QObject
+        from PySide6.QtQuickControls2 import QQuickStyle
+        from sonicinput.ui.qml_bridge import FluentSettingsViewModel
+
+        history_service = Mock()
+        history_service.get_records_keyset.return_value = []
+        history_service.search_records_keyset.return_value = []
+        history_service.get_aggregate_stats.return_value = (0, 0.0, 0)
+        mock_config_service.get_history_service = Mock(return_value=history_service)
+
+        QQuickStyle.setStyle("FluentWinUI3")
+        view_model = FluentSettingsViewModel(mock_config_service)
+        _engine, root = _load_settings_qml(qapp, view_model)
+        root.activateSection(5)
+        qapp.processEvents()
+
+        history_service.search_records_keyset.reset_mock()
+        history_service.get_aggregate_stats.reset_mock()
+        search_field = root.findChild(QObject, "historySearchField")
+        refresh_button = root.findChild(QObject, "historyRefreshButton")
+        search_field.setProperty("text", "needle")
+
+        if explicit_action == "refresh":
+            refresh_button.clicked.emit()
+        else:
+            search_field.accepted.emit()
+        qapp.processEvents()
+
+        assert history_service.search_records_keyset.call_count == 1
+        QTest.qWait(300)
+        qapp.processEvents()
+
+        history_service.search_records_keyset.assert_called_once()
+        history_service.get_aggregate_stats.assert_called_once_with(query="needle")
 
     def test_settings_qml_history_list_fills_available_panel_height(
         self, qapp, mock_config_service
@@ -854,7 +1263,7 @@ class TestFluentSettingsParity:
         view_model = FluentSettingsViewModel(mock_config_service)
         _engine, root = _load_settings_qml(qapp, view_model)
         root.setHeight(820)
-        view_model.refreshHistory("")
+        root.activateSection(5)
         qapp.processEvents()
 
         history_list_frame = root.findChild(QObject, "historyListFrame")
@@ -881,7 +1290,7 @@ class TestFluentSettingsParity:
         view_model = FluentSettingsViewModel(mock_config_service)
         _engine, root = _load_settings_qml(qapp, view_model)
         root.setWidth(900)
-        view_model.refreshHistory("")
+        root.activateSection(5)
         qapp.processEvents()
 
         history_list = root.findChild(QObject, "historyList")
@@ -939,7 +1348,7 @@ class TestFluentSettingsParity:
         QQuickStyle.setStyle("FluentWinUI3")
         view_model = FluentSettingsViewModel(mock_config_service)
         _engine, root = _load_settings_qml(qapp, view_model)
-        view_model.refreshHistory("")
+        root.activateSection(5)
         view_model.openHistoryDetail(0)
         qapp.processEvents()
 
@@ -1179,7 +1588,7 @@ class TestLexiconUiSyntheticFlow:
                     "lex-1",
                     "PyTorch",
                     "拍套曲",
-                    "legacy-suggestion",
+                    "test-suggestion",
                     2,
                     0.8,
                     "2026-06-09T02:00:00",
@@ -1202,7 +1611,6 @@ class TestLexiconUiSyntheticFlow:
         view_model.refreshLexiconEntries()
 
         assert view_model.reviewSuggestionCount == 0
-        assert view_model.reviewJobCount == 0
         assert view_model.lexiconEntryCount == 1
         assert view_model.lexiconEntries[0]["term"] == "PyTorch"
         assert view_model.lexiconEntries[0]["oldForm"] == "拍套曲"

@@ -98,6 +98,11 @@ class IAIProcessingController(ABC):
         """AI是否启用"""
         pass
 
+    @abstractmethod
+    def invalidate_lexicon_cache(self) -> None:
+        """使本地词汇记忆缓存失效。"""
+        pass
+
 
 class IInputController(ABC):
     """输入控制器接口

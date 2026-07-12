@@ -190,7 +190,12 @@ class AIProcessingController(
     def _reset_recording_context(self) -> None:
         self._rolling_context.reset()
         self._rolling_context_active = True
+        self.invalidate_lexicon_cache()
+
+    def invalidate_lexicon_cache(self) -> None:
+        """Discard cached active lexicon entries after a memory update."""
         self._lexicon_entries_cache = None
+        self._lexicon_matcher.invalidate_entry_index()
 
     def _finish_recording_context(self) -> None:
         self._rolling_context_active = False
@@ -231,7 +236,7 @@ class AIProcessingController(
         if self._lexicon_entries_cache is None:
             try:
                 self._lexicon_entries_cache = (
-                    self._review_storage_service.list_active_lexicon_entries(limit=200)
+                    self._review_storage_service.list_active_lexicon_entries()
                 )
             except Exception as e:
                 app_logger.log_error(e, "load_lexicon_prompt_context")

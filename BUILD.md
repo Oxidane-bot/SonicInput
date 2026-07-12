@@ -33,7 +33,7 @@ uv run python build_nuitka.py
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小：~66MB+（v0.8.0，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
+- 文件大小：~71MB+（v0.8.1，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
 
 ## 构建说明
 
@@ -52,6 +52,7 @@ uv run python build_nuitka.py
 "--include-data-dir=assets=assets"  # UI assets (i18n, fonts)
 "--include-data-dir=build/qml_staging=." # 精简 QML runtime staging
 "--include-package-data=sherpa_onnx"# 包含 sherpa-onnx 数据文件和 C 扩展
+"--include-package-data=pypinyin"   # 包含词汇匹配所需的拼音词典 JSON
 
 # 排除项
 "--nofollow-import-to=pytest"       # 排除测试依赖
@@ -61,6 +62,7 @@ uv run python build_nuitka.py
 ```
 
 Qt Quick / QML UI 使用 `build_nuitka.py` 中的 `stage_qml_runtime()` 精简复制必要 QML imports。不要重新启用 `--include-qt-plugins=qml` 作为默认构建参数；该参数会全量打包 `PySide6/qml`，容易把 `Qt6WebEngineCore.dll` 等未使用的大体积模块带入 exe。
+构建脚本会对 staging 内的 QML module plugin DLL 使用显式 `--include-data-file`，确保 `QtQuick.Controls`、`QtQuick.Layouts` 和 FluentWinUI3 style 在 onefile 解包后可加载，同时保持 QML runtime 范围可控。
 
 ### sherpa-onnx C 扩展处理
 
@@ -175,6 +177,8 @@ uv run python build_nuitka.py
 - [ ] 验证快捷键功能
 - [ ] 检查系统托盘图标
 - [ ] 测试 AI 文本优化（如启用）
+- [ ] 验证本地词汇一级页面、候选/已保存 Tab 与独立滚动
+- [ ] 验证进入和重新进入历史页会自动加载记录
 - [ ] 在干净的 Windows 系统上测试
 
 
@@ -186,7 +190,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.8.0-win64.exe
+SonicInput-v0.8.1-win64.exe
 ```
 
 ## 技术细节
@@ -238,8 +242,8 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ---
 
-**最后更新**：2026-07-05
-**适用版本**：v0.8.0+
+**最后更新**：2026-07-12
+**适用版本**：v0.8.1+
 
 
 ## Release Script

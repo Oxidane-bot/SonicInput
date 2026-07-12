@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
+from pypinyin import lazy_pinyin
 
 from ...ai.factory import AIClientFactory
 from ..services.config import ConfigKeys
+from .lexicon_matcher import is_conservative_phonetic_confusion
 from .lexicon_review_agent import LexiconReviewAgent, ReviewSuggestion
 
 
@@ -21,7 +24,7 @@ class ReviewRunOutcome:
     suggestions: tuple[ReviewSuggestion, ...]
     provider: str | None = None
     model_id: str | None = None
-    prompt_version: str = "lexicon-raw-v1"
+    prompt_version: str = "lexicon-core-term-v3"
     fallback_reason: str | None = None
     parser_error: str | None = None
     raw_response: str | None = None
@@ -30,11 +33,14 @@ class ReviewRunOutcome:
 class LLMReviewService:
     """Ask the configured AI provider to mine only lexicon candidates."""
 
-    _PROMPT_VERSION = "lexicon-raw-v1"
-    _MAX_OUTPUT_TOKENS = 2000
+    _PROMPT_VERSION = "lexicon-core-term-v3"
+    _MAX_OUTPUT_TOKENS = 1200
     _MAX_TEXT_EXCERPT_CHARS = 280
-    _MAX_OLD_FORM_CHARS = 24
-    _MAX_NEW_FORM_CHARS = 64
+    _MAX_CORE_TERM_CHARS = 12
+    _MIN_CJK_CORE_CHARS = 2
+    _GENERIC_PREFIXES = ("这个", "那个", "每个", "一个", "一些")
+    _GENERIC_SINGLE_CHAR_PREFIXES = ("小",)
+    _GENERIC_PREFIX_SUFFIXES = ("梗", "段", "节", "点", "类", "版")
     _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
     def __init__(
@@ -148,22 +154,38 @@ class LLMReviewService:
             "Return a single JSON object only. No markdown, prose, analysis, or "
             "extra keys. You only receive raw ASR transcript snippets; there is no "
             "AI-cleaned, corrected, or final text. Mine only candidates that could "
-            "help the next AI cleanup pass before it runs. Before choosing any "
-            "candidate, internally read the whole raw snippet and infer the topic, "
-            "object being discussed, and local phrase role. Use that full-sentence "
-            "context to distinguish homophones. Each old_form must be an exact short "
-            "substring from raw. Each new_form is your conservative hypothesis for "
-            "the intended domain term, proper noun, API/product name, or stable "
-            "homophone correction. Only suggest when old_form is semantically odd in "
-            "that context and new_form makes the raw sentence more coherent as a "
-            "reusable lexicon term. Do not audit content, style, safety, prompt "
+            "help the next AI cleanup pass before it runs. Read the whole raw snippet "
+            "and use full-sentence context only to reject uncertain candidates. Never "
+            "infer a target from the topic, "
+            "a nearby word, or a corrected/final answer. Each old_form and new_form "
+            "must be the smallest reusable complete term containing the ASR error, "
+            "normally a 2-6 character same-sound or conservatively near-sound "
+            "replacement. A near-sound pair may differ in only one syllable through "
+            "a common ASR confusion such as zh/z, ch/c, sh/s, n/l, or a nearby nasal "
+            "final. Do not output a single changed character. Strip only clearly "
+            "generic shared prefixes, "
+            "classifier words, verbs, particles, and surrounding noun phrases; never "
+            "strip a meaningful shared stem. Example: raw '每一级的一个小梗盖' must yield "
+            "old_form '梗盖' and new_form '梗概', never '小梗盖' -> '小梗概' and never "
+            "'盖' -> '概'. Only suggest a pair when the raw form is an exact substring "
+            "and the replacement is a high-confidence same-sound intended domain "
+            "term, proper noun, API/product name, or stable homophone correction. The "
+            "two forms must be a local substitution for the same term, not a rewrite "
+            "to another word elsewhere in the sentence. Do not use semantic topic "
+            "guesses to replace an ordinary phrase with an unrelated word. Example: "
+            "do not infer '张话' -> '过滤' merely because the nearby topic mentions "
+            "filtering. Do not replace a natural ordinary phrase with a merely "
+            "same-sounding word. Example: do not infer '预览' -> '玉兰'. Do not output "
+            "equal or formatting-only pairs. Do not audit "
+            "content, style, safety, prompt "
             "quality, transcript quality, punctuation, grammar, translation, or "
             "generic rewrites. If the raw phrase could be ordinary wording, if "
-            "multiple homophones are plausible, or if you would need a corrected/final "
-            "answer to know the target, return no suggestion. Prefer no suggestion "
-            "over a guess. Return at most 6 suggestions. The detail must be one short "
-            "context-evidence sentence based only on raw text; do not output a "
-            "reasoning chain and never say it was corrected by AI. Use this exact "
+            "multiple homophones are plausible, if the changed portion cannot be "
+            "isolated, or if a source record cannot be named, return no suggestion. "
+            "Prefer no suggestion over a guess. Return "
+            "at most 4 suggestions. The detail must be one short context-evidence "
+            "sentence based only on raw text; do not output a reasoning chain and "
+            "never say it was corrected by AI. Use this exact "
             "JSON shape: "
             '{"suggestions":[{"suggestion_type":"lexicon_candidate",'
             '"old_form":"<substring from raw>",'
@@ -224,8 +246,8 @@ class LLMReviewService:
 
         valid: list[ReviewSuggestion] = []
         seen: set[tuple[str, str]] = set()
-        for index, item in enumerate(items):
-            suggestion = self._coerce_suggestion(item, records, index)
+        for item in items:
+            suggestion = self._coerce_suggestion(item, records)
             if suggestion is None:
                 continue
             key = (suggestion.old_form or "", suggestion.new_form or "")
@@ -240,7 +262,6 @@ class LLMReviewService:
         self,
         item: Any,
         records: list[Any],
-        index: int,
     ) -> ReviewSuggestion | None:
         if not isinstance(item, dict):
             return None
@@ -251,7 +272,13 @@ class LLMReviewService:
             return None
         if not old_form or not new_form:
             return None
-        if old_form.strip().lower() == new_form.strip().lower():
+        old_form, new_form = self._trim_generic_shared_prefix(old_form, new_form)
+        if self._canonical_form(old_form) == self._canonical_form(new_form):
+            return None
+        if (
+            len(old_form) > self._MAX_CORE_TERM_CHARS
+            or len(new_form) > self._MAX_CORE_TERM_CHARS
+        ):
             return None
 
         source_record_ids = item.get("source_record_ids", [])
@@ -260,25 +287,19 @@ class LLMReviewService:
         if not isinstance(source_record_ids, list):
             source_record_ids = []
         normalized_ids = tuple(
-            str(value).strip() for value in source_record_ids if str(value).strip()
+            dict.fromkeys(
+                str(value).strip() for value in source_record_ids if str(value).strip()
+            )
         )
-        if not normalized_ids and records:
-            fallback_record = records[min(index, len(records) - 1)]
-            record_id = str(
-                fallback_record.get("id", "")
-                if isinstance(fallback_record, dict)
-                else getattr(fallback_record, "id", "")
-            ).strip()
-            if record_id:
-                normalized_ids = (record_id,)
         if not normalized_ids:
             return None
-        if not self._candidate_supported_by_records(
+        supporting_ids = self._supporting_record_ids(
             old_form,
             new_form,
             normalized_ids,
             records,
-        ):
+        )
+        if not supporting_ids:
             return None
 
         confidence = self._coerce_float(item.get("confidence"), default=0.75)
@@ -291,7 +312,7 @@ class LLMReviewService:
         return ReviewSuggestion(
             suggestion_id=self._stable_suggestion_id(
                 "lexicon_candidate",
-                normalized_ids,
+                supporting_ids,
                 old_form,
                 new_form,
                 title,
@@ -299,24 +320,24 @@ class LLMReviewService:
             suggestion_type="lexicon_candidate",
             confidence=round(confidence, 3),
             risk_level="medium",
-            source_record_ids=normalized_ids,
+            source_record_ids=supporting_ids,
             title=title,
             detail=detail,
-            evidence_count=len(normalized_ids),
+            evidence_count=len(supporting_ids),
             old_form=old_form,
             new_form=new_form,
         )
 
     @classmethod
-    def _candidate_supported_by_records(
+    def _supporting_record_ids(
         cls,
         old_form: str,
         new_form: str,
         source_record_ids: tuple[str, ...],
         records: list[Any],
-    ) -> bool:
+    ) -> tuple[str, ...]:
         if not cls._forms_look_like_lexicon_pair(old_form, new_form):
-            return False
+            return ()
         by_id = {
             str(
                 record.get("id", "")
@@ -325,15 +346,17 @@ class LLMReviewService:
             ).strip(): record
             for record in records
         }
+        supported: list[str] = []
         for record_id in source_record_ids:
             record = by_id.get(record_id)
             if record is None:
-                continue
+                return ()
             serialized = cls._serialize_record(record)
             raw = str(serialized.get("raw") or "")
-            if cls._contains_form(raw, old_form):
-                return True
-        return False
+            if not cls._contains_form(raw, old_form):
+                return ()
+            supported.append(record_id)
+        return tuple(supported)
 
     @classmethod
     def _forms_look_like_lexicon_pair(cls, old_form: str, new_form: str) -> bool:
@@ -341,17 +364,131 @@ class LLMReviewService:
         new = new_form.strip()
         if not old or not new:
             return False
-        if old.lower() == new.lower():
+        if cls._canonical_form(old) == cls._canonical_form(new):
             return False
-        if len(old) > cls._MAX_OLD_FORM_CHARS or len(new) > cls._MAX_NEW_FORM_CHARS:
+        if len(old) > cls._MAX_CORE_TERM_CHARS or len(new) > cls._MAX_CORE_TERM_CHARS:
             return False
-        if cls._has_ascii_letters(old) or cls._has_ascii_letters(new):
-            return cls._has_ascii_term_shape(old) or cls._has_ascii_term_shape(new)
-        return cls._cjk_count(old) >= 2 and cls._cjk_count(new) >= 2
+        old_has_ascii = cls._has_ascii_letters(old)
+        new_has_ascii = cls._has_ascii_letters(new)
+        if old_has_ascii != new_has_ascii:
+            return False
+        if old_has_ascii:
+            return cls._ascii_forms_are_locally_related(old, new)
+        return cls._cjk_forms_are_locally_related(old, new)
+
+    @classmethod
+    def _trim_generic_shared_prefix(
+        cls, old_form: str, new_form: str
+    ) -> tuple[str, str]:
+        trimmed_old = old_form
+        trimmed_new = new_form
+        prefixes = sorted(
+            (*cls._GENERIC_PREFIXES, *cls._GENERIC_SINGLE_CHAR_PREFIXES),
+            key=len,
+            reverse=True,
+        )
+        while True:
+            for prefix in prefixes:
+                if not (
+                    trimmed_old.startswith(prefix) and trimmed_new.startswith(prefix)
+                ):
+                    continue
+                next_old = trimmed_old[len(prefix) :].strip()
+                next_new = trimmed_new[len(prefix) :].strip()
+                if cls._can_trim_generic_prefix(next_old, next_new):
+                    trimmed_old = next_old
+                    trimmed_new = next_new
+                    break
+            else:
+                return trimmed_old, trimmed_new
+
+    @classmethod
+    def _can_trim_generic_prefix(cls, old_form: str, new_form: str) -> bool:
+        if (
+            cls._cjk_count(old_form) < cls._MIN_CJK_CORE_CHARS
+            or cls._cjk_count(new_form) < cls._MIN_CJK_CORE_CHARS
+        ):
+            return False
+        if cls._has_generic_core_prefix(old_form, new_form):
+            return True
+        return any(
+            old_form.startswith(prefix) and new_form.startswith(prefix)
+            for prefix in (*cls._GENERIC_PREFIXES, *cls._GENERIC_SINGLE_CHAR_PREFIXES)
+        )
+
+    @classmethod
+    def _has_generic_core_prefix(cls, old_form: str, new_form: str) -> bool:
+        if len(old_form) != len(new_form) or len(old_form) < 2:
+            return False
+        return (
+            old_form[0] == new_form[0] and old_form[0] in cls._GENERIC_PREFIX_SUFFIXES
+        )
+
+    @classmethod
+    def _cjk_forms_are_locally_related(cls, old_form: str, new_form: str) -> bool:
+        if (
+            cls._cjk_count(old_form) < cls._MIN_CJK_CORE_CHARS
+            or cls._cjk_count(new_form) < cls._MIN_CJK_CORE_CHARS
+        ):
+            return False
+        old_syllables = tuple(lazy_pinyin(old_form))
+        new_syllables = tuple(lazy_pinyin(new_form))
+        if len(old_syllables) != len(new_syllables):
+            return False
+        if not any(
+            old_char == new_char
+            for old_char, new_char in zip(old_form, new_form)
+            if cls._is_cjk(old_char) and cls._is_cjk(new_char)
+        ):
+            return False
+        near_sound_count = 0
+        for old_syllable, new_syllable in zip(old_syllables, new_syllables):
+            if old_syllable == new_syllable:
+                continue
+            if not is_conservative_phonetic_confusion(old_syllable, new_syllable):
+                return False
+            near_sound_count += 1
+        return near_sound_count <= 1
+
+    @classmethod
+    def _ascii_forms_are_locally_related(cls, old_form: str, new_form: str) -> bool:
+        if not (
+            cls._has_ascii_term_shape(old_form) or cls._has_ascii_term_shape(new_form)
+        ):
+            return False
+        old_tokens = cls._ascii_tokens(old_form)
+        new_tokens = cls._ascii_tokens(new_form)
+        if not old_tokens or not new_tokens:
+            return False
+        if set(old_tokens) & set(new_tokens):
+            return True
+        return any(
+            cls._is_subsequence(left, right) or cls._is_subsequence(right, left)
+            for left in old_tokens
+            for right in new_tokens
+        )
+
+    @staticmethod
+    def _is_subsequence(left: str, right: str) -> bool:
+        if len(left) < 3 or len(left) >= len(right):
+            return False
+        iterator = iter(right)
+        return all(char in iterator for char in left)
+
+    @staticmethod
+    def _ascii_tokens(text: str) -> tuple[str, ...]:
+        return tuple(token.casefold() for token in re.findall(r"[A-Za-z0-9]+", text))
 
     @staticmethod
     def _contains_form(text: str, form: str) -> bool:
-        return form.strip().lower() in text.lower()
+        return LLMReviewService._canonical_form(
+            form
+        ) in LLMReviewService._canonical_form(text)
+
+    @staticmethod
+    def _canonical_form(text: str) -> str:
+        normalized = unicodedata.normalize("NFKC", str(text or ""))
+        return re.sub(r"[\s\u200b-\u200d\ufeff]+", "", normalized).casefold()
 
     @staticmethod
     def _has_ascii_letters(text: str) -> bool:

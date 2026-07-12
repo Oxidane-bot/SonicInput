@@ -117,8 +117,6 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
                 self._listener.stop()
 
                 # 等待 listener 线程完全退出，避免进程泄漏
-                import time
-
                 for _ in range(10):  # 最多等待 1 秒
                     if not self._listener.is_alive():
                         break
@@ -409,8 +407,6 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
             self._listener.stop()
 
             # ⭐ 改进：等待 listener 线程完全退出，避免进程泄漏
-            import time
-
             timeout = 2.0  # 超时时间增加到 2 秒
             start_time = time.time()
 
@@ -913,8 +909,6 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
             self._listener.stop()
 
             # 等待 listener 线程完全退出，避免状态冲突
-            import time
-
             timeout = 2.0
             start_time = time.time()
 
