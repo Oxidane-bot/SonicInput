@@ -610,7 +610,7 @@ class ReviewStorageService:
 
     @staticmethod
     def _local_lexicon_schema_is_current(conn: sqlite3.Connection) -> bool:
-        columns = {
+        table_columns = {
             str(row[1]): row
             for row in conn.execute(
                 "PRAGMA table_info(local_lexicon_entries)"
@@ -627,9 +627,9 @@ class ReviewStorageService:
             "created_at",
             "updated_at",
         }
-        if not required_columns.issubset(columns):
+        if not required_columns.issubset(table_columns):
             return False
-        if not bool(columns["old_form"][3]):
+        if not bool(table_columns["old_form"][3]):
             return False
 
         has_pair_constraint = False
@@ -646,13 +646,13 @@ class ReviewStorageService:
                 ).fetchall()
                 if bool(row[5])
             ]
-            columns = tuple(row[2] for row in key_rows)
+            indexed_columns = tuple(row[2] for row in key_rows)
             collations = tuple(str(row[4]).upper() for row in key_rows)
-            if columns == ("term",):
+            if indexed_columns == ("term",):
                 return False
             if bool(index_row[4]):
                 continue
-            if columns == ("term", "old_form") and collations == (
+            if indexed_columns == ("term", "old_form") and collations == (
                 "NOCASE",
                 "NOCASE",
             ):

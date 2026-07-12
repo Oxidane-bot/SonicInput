@@ -88,6 +88,9 @@ addopts = "-v"
 [tool.mypy]
 ignore_missing_imports = true
 no_implicit_optional = true
+# SonicInput is a Windows desktop application. Keep mypy's target platform
+# consistent across local development and the Ubuntu lint runner.
+platform = "win32"
 # type-abstract disabled: the DI container legitimately resolves abstract
 # interfaces (container.resolve(IFoo)); mypy forbids Type[T] with abstract
 # classes (python/mypy#4717), which would force ignores at every call site.

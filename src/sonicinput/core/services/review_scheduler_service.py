@@ -268,8 +268,9 @@ class ReviewSchedulerService:
             fallback_reason=outcome.fallback_reason,
         )
         recent_jobs = self._review_storage.list_review_jobs(limit=1)
+        persisted_raw = recent_jobs[0].get("suggestion_count", 0) if recent_jobs else 0
         persisted_count = (
-            int(recent_jobs[0].get("suggestion_count", 0) or 0) if recent_jobs else 0
+            int(persisted_raw) if isinstance(persisted_raw, (int, str)) else 0
         )
         self._last_run_at = self._clock()
         if count_run:
