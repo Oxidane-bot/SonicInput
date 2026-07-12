@@ -5,7 +5,7 @@ class AppInfo:
     """Application metadata constants."""
 
     NAME = "Sonic Input"
-    VERSION = "0.8.1"
+    VERSION = "0.8.2"
     DESCRIPTION = "AI-powered voice input software with speech recognition"
     AUTHOR = "Sonic Input Team"
     COPYRIGHT = "c 2024 Sonic Input"

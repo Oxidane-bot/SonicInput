@@ -73,7 +73,7 @@ def test_main_window_uses_only_fluent_settings(qapp, monkeypatch, mock_config_se
 @pytest.mark.gui
 @pytest.mark.e2e
 def test_app_creates_only_fluent_recording_overlay():
-    source = Path("app.py").read_text(encoding="utf-8")
+    source = Path("src/sonicinput/main.py").read_text(encoding="utf-8")
 
     assert "FluentRecordingOverlay" in source
     assert "from sonicinput.ui.recording_overlay import RecordingOverlay" not in source

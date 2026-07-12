@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import importlib.util
 import os
 import sys
@@ -12,14 +13,63 @@ from loguru import logger
 
 _DLL_HANDLES: list[object] = []
 _CONFIGURED = False
+_PRELOADED_SHERPA_ORT: Path | None = None
+
+
+def _sherpa_onnxruntime_dll_candidates() -> list[Path]:
+    """Find the ORT DLL that is ABI-compatible with ``sherpa_onnx``."""
+    candidates = [Path(__file__).resolve().parents[2] / "onnxruntime.dll"]
+
+    spec = importlib.util.find_spec("sherpa_onnx")
+    if spec and spec.submodule_search_locations:
+        sherpa_dir = Path(list(spec.submodule_search_locations)[0]).resolve()
+        candidates.append(sherpa_dir / "lib" / "onnxruntime.dll")
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique.append(candidate)
+    return unique
+
+
+def _preload_sherpa_onnxruntime() -> Path | None:
+    """Load Sherpa's ORT before Python onnxruntime can load an incompatible DLL."""
+    global _PRELOADED_SHERPA_ORT
+    if _PRELOADED_SHERPA_ORT is not None:
+        return _PRELOADED_SHERPA_ORT
+    if sys.platform != "win32":
+        return None
+
+    for dll_path in _sherpa_onnxruntime_dll_candidates():
+        if not dll_path.is_file():
+            continue
+        try:
+            _DLL_HANDLES.append(ctypes.WinDLL(str(dll_path)))
+        except OSError as exc:
+            logger.debug(f"Failed to preload sherpa ORT DLL {dll_path}: {exc}")
+            continue
+        _PRELOADED_SHERPA_ORT = dll_path
+        logger.debug(f"Preloaded sherpa-onnx ORT DLL: {dll_path}")
+        return dll_path
+
+    return None
 
 
 def _candidate_dll_dirs() -> list[Path]:
     dirs: list[Path] = []
 
+    runtime_root = Path(__file__).resolve().parents[2]
+    dirs.append(runtime_root)
     exe_dir = Path(sys.executable).resolve().parent
     dirs.append(exe_dir)
 
+    dirs.extend(path.parent for path in _sherpa_onnxruntime_dll_candidates())
+
+    # This import loads Python ORT's native extension. It must remain after the
+    # Sherpa-compatible ORT preload in configure_sherpa_dll_search_path().
     try:
         import onnxruntime
 
@@ -27,11 +77,6 @@ def _candidate_dll_dirs() -> list[Path]:
         dirs.extend([ort_dir / "capi", ort_dir])
     except Exception as exc:  # noqa: BLE001
         logger.debug(f"onnxruntime package not available for DLL setup: {exc}")
-
-    spec = importlib.util.find_spec("sherpa_onnx")
-    if spec and spec.submodule_search_locations:
-        sherpa_dir = Path(list(spec.submodule_search_locations)[0]).resolve()
-        dirs.extend([sherpa_dir / "lib", sherpa_dir])
 
     env_dll = os.environ.get("ONNXRUNTIME_DLL_PATH") or os.environ.get(
         "ONNXRUNTIME_DLL"
@@ -56,6 +101,7 @@ def configure_sherpa_dll_search_path() -> List[str]:
     if _CONFIGURED:
         return [str(path) for path in _candidate_dll_dirs() if path.exists()]
 
+    _preload_sherpa_onnxruntime()
     configured: list[str] = []
     for dll_dir in _candidate_dll_dirs():
         if not dll_dir.exists():

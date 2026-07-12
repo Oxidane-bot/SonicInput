@@ -48,7 +48,11 @@ def _iter_log_files(logs_path: Path) -> list[Path]:
         return [logs_path]
     if not logs_path.exists():
         return []
-    files = [path for path in logs_path.iterdir() if path.is_file() and path.name.startswith("app.log")]
+    files = [
+        path
+        for path in logs_path.iterdir()
+        if path.is_file() and path.name.startswith("app.log")
+    ]
     return sorted(files, key=lambda path: (path.stat().st_mtime, path.name))
 
 
@@ -83,7 +87,11 @@ def _parse_log_line(line: str) -> dict[str, Any] | None:
         "timestamp": match.group("timestamp"),
         "level": str(match.group("level") or "").strip(),
         "category": str(match.group("category") or "").strip(),
-        "component": (str(match.group("component")).strip("[]") if match.group("component") else None),
+        "component": (
+            str(match.group("component")).strip("[]")
+            if match.group("component")
+            else None
+        ),
         "message": message,
         "event": event,
         "context": context or {},
@@ -107,7 +115,9 @@ def inspect_recent_transcription_path_logs(
     counts_by_decision_reason: Counter[str] = Counter()
 
     for log_file in log_files:
-        for line_number, line in enumerate(log_file.read_text(encoding="utf-8").splitlines(), start=1):
+        for line_number, line in enumerate(
+            log_file.read_text(encoding="utf-8").splitlines(), start=1
+        ):
             parsed = _parse_log_line(line)
             if parsed is None:
                 continue
@@ -115,7 +125,11 @@ def inspect_recent_transcription_path_logs(
             if parsed["event"] not in _TARGET_EVENTS:
                 continue
             parsed_timestamp = _parse_timestamp(parsed["timestamp"].replace(" ", "T"))
-            if timestamp_from_dt is not None and parsed_timestamp is not None and parsed_timestamp < timestamp_from_dt:
+            if (
+                timestamp_from_dt is not None
+                and parsed_timestamp is not None
+                and parsed_timestamp < timestamp_from_dt
+            ):
                 continue
             context = dict(parsed.get("context") or {})
             if record_id and str(context.get("record_id") or "") != record_id:

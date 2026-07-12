@@ -817,13 +817,8 @@ class LegacyLoggerAdapter:
         category: LogCategory = LogCategory.ERROR,
         context: Optional[Dict[str, Any]] = None,
         component: Optional[str] = None,
-        exc_info=None,
     ) -> None:
-        """记录错误日志
-
-        Args:
-            exc_info: 兼容参数，被忽略（因为我们已经有 exception 参数）
-        """
+        """记录错误日志。"""
         self._logger.error(message, exception, category, context, component)
 
     def log_audio_event(

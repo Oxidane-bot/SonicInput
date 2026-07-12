@@ -7,18 +7,14 @@
 import re
 import time
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
 from ..core.interfaces import IAIService
 from ..utils import AIOutputTruncatedError, app_logger
-from ..utils.request_error_handler import RequestErrorHandler
 from .http_client_manager import HTTPClientManager
 from .performance_monitor import AIPerformanceMonitor
-
-if TYPE_CHECKING:
-    from ..utils.secure_storage import SecureStorage
 
 
 class BaseAIClient(IAIService):
@@ -226,10 +222,7 @@ class BaseAIClient(IAIService):
             max_retries: 最大重试次数
             filter_thinking: 是否过滤 AI 思考标签 (<think>...</think>)
         """
-        # 安全存储API密钥
         self._raw_api_key = api_key
-        self._secure_storage: Optional["SecureStorage"] = None
-        self._init_secure_storage()
 
         # 使用新的HTTP客户端管理器
         self._http_client = HTTPClientManager(timeout)
@@ -252,25 +245,9 @@ class BaseAIClient(IAIService):
             {
                 "has_api_key": bool(api_key),
                 "api_key_length": len(api_key) if api_key else 0,
-                "encryption_enabled": self._secure_storage.is_encryption_available()
-                if self._secure_storage
-                else False,
                 "base_url": self.get_base_url(),
             },
         )
-
-    def _init_secure_storage(self) -> None:
-        """初始化安全存储"""
-        try:
-            from ..utils.secure_storage import get_secure_storage
-
-            self._secure_storage = get_secure_storage()
-        except ImportError as e:
-            app_logger.warning(
-                "Secure storage not available, using plain text",
-                context={"error": str(e)},
-            )
-            self._secure_storage = None
 
     def health_check(self) -> Dict[str, Any]:
         """服务健康检查"""
@@ -446,13 +423,7 @@ class BaseAIClient(IAIService):
         )
 
         if attempt < self.max_retries - 1:
-            # Use RequestErrorHandler for consistent retry delays
-            wait_time = RequestErrorHandler.calculate_retry_delay(
-                attempt,
-                self.retry_delay,
-                RequestErrorHandler.RETRY_DELAY_MAX,
-                is_timeout=False,
-            )
+            wait_time = min(self.retry_delay * (2**attempt), 60.0)
 
             # 如果等待时间过长，提前放弃
             if wait_time > 30.0:
@@ -489,13 +460,7 @@ class BaseAIClient(IAIService):
         app_logger.log_api_call(provider, self.timeout, False, error_msg)
 
         if attempt < self.max_retries - 1:
-            # Use RequestErrorHandler with timeout-specific settings
-            wait_time = RequestErrorHandler.calculate_retry_delay(
-                attempt,
-                self.retry_delay,
-                RequestErrorHandler.TIMEOUT_RETRY_MAX,
-                is_timeout=True,  # Use shorter delays for timeouts
-            )
+            wait_time = min(self.retry_delay * (1.5**attempt), 10.0)
 
             app_logger.log_audio_event(
                 f"{provider} timeout, retrying {attempt + 2}/{self.max_retries}",
@@ -529,10 +494,7 @@ class BaseAIClient(IAIService):
         )
 
         if attempt < self.max_retries - 1:
-            # Use RequestErrorHandler for consistent retry delays
-            wait_time = RequestErrorHandler.calculate_retry_delay(
-                attempt, self.retry_delay, is_timeout=False
-            )
+            wait_time = min(self.retry_delay * (2**attempt), 60.0)
             app_logger.log_audio_event(
                 f"{provider} network error, retrying {attempt + 2}/{self.max_retries}",
                 {"wait_time": wait_time, "error": error_msg},

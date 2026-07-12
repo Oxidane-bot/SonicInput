@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from sonicinput.resources.runtime_assets import get_assets_dir
+
 from ...utils import app_logger
 from ..interfaces import (
     IConfigService,
@@ -74,46 +76,9 @@ class UIMainService:
 
         self.events.emit(Events.RECORDING_STOPPED)
 
-    def get_current_status(self) -> str:
-        """获取当前状态文本"""
-        if self.is_recording():
-            return "Recording..."
-        return "Ready"
-
     def get_event_service(self) -> IEventService:
         """获取事件服务"""
         return self.events
-
-    def show_settings(self) -> None:
-        """显示设置窗口
-
-        这个方法在MainWindow中实现，这里不需要实现
-        """
-        pass
-
-    def reload_hotkeys(self) -> None:
-        """重新加载快捷键配置
-
-        通过配置重载服务实现
-        """
-        from .events import Events
-
-        self.events.emit(Events.CONFIG_CHANGED, {"section": "hotkeys"})
-
-    def get_whisper_engine(self) -> Optional[Any]:
-        """获取Whisper引擎
-
-        注意：这个方法在新架构中应该通过 IUIModelService 访问，
-        这里保留是为了向后兼容。
-        """
-        # 通过容器获取 speech service
-        # 但这里我们没有容器的引用...
-        # 这个方法应该被废弃，UI应该使用 IUIModelService
-        app_logger.log_audio_event(
-            "UIMainService.get_whisper_engine() called - deprecated",
-            {"message": "Use IUIModelService instead"},
-        )
-        return None
 
     def cleanup(self) -> None:
         """清理资源"""
@@ -636,12 +601,10 @@ class UILocalizationService:
 
     @staticmethod
     def _resolve_translation_dir() -> Path:
-        current = Path(__file__).resolve()
-        for parent in current.parents:
-            assets_dir = parent / "assets"
-            if assets_dir.is_dir():
-                return assets_dir / "i18n"
-        return current.parents[4] / "assets" / "i18n"
+        assets_dir = get_assets_dir()
+        if assets_dir is not None:
+            return assets_dir / "i18n"
+        return Path(__file__).resolve().parent / "assets" / "i18n"
 
 
 class UIModelService:

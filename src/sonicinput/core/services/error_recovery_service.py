@@ -90,10 +90,8 @@ class ErrorRecoveryService(LifecycleComponent):
     def _do_start(self) -> bool:
         """启动错误恢复服务
 
-        初始化错误跟踪和注册默认恢复动作
+        恢复动作必须由持有实际恢复依赖的调用方显式注册。
         """
-        # 注册默认恢复动作
-        self._register_default_recovery_actions()
         app_logger.log_audio_event("ErrorRecoveryService started", {})
         return True
 
@@ -107,63 +105,6 @@ class ErrorRecoveryService(LifecycleComponent):
         self._last_recovery_time.clear()
         app_logger.log_audio_event("ErrorRecoveryService stopped", {})
         return True
-
-    def _register_default_recovery_actions(self) -> None:
-        """注册默认的恢复动作"""
-
-        # 模型错误恢复
-        self.register_recovery_action(
-            RecoveryAction(
-                action_id="reload_model",
-                description="重新加载模型",
-                severity=ErrorSeverity.MEDIUM,
-                action_func=self._reload_model_action,
-                auto_recovery=True,
-                max_attempts=2,
-            )
-        )
-
-        self.register_recovery_action(
-            RecoveryAction(
-                action_id="switch_to_cpu",
-                description="切换到CPU模式",
-                severity=ErrorSeverity.HIGH,
-                action_func=self._switch_to_cpu_action,
-                auto_recovery=True,
-            )
-        )
-
-        # 音频设备错误恢复
-        self.register_recovery_action(
-            RecoveryAction(
-                action_id="reset_audio_device",
-                description="重置音频设备",
-                severity=ErrorSeverity.MEDIUM,
-                action_func=self._reset_audio_device_action,
-                auto_recovery=True,
-            )
-        )
-
-        self.register_recovery_action(
-            RecoveryAction(
-                action_id="fallback_audio_device",
-                description="使用备用音频设备",
-                severity=ErrorSeverity.LOW,
-                action_func=self._fallback_audio_device_action,
-                auto_recovery=True,
-            )
-        )
-
-        # 系统错误恢复
-        self.register_recovery_action(
-            RecoveryAction(
-                action_id="clear_cache",
-                description="清理缓存",
-                severity=ErrorSeverity.LOW,
-                action_func=self._clear_cache_action,
-                auto_recovery=True,
-            )
-        )
 
     def register_recovery_action(self, action: RecoveryAction) -> None:
         """注册恢复动作
@@ -239,10 +180,9 @@ class ErrorRecoveryService(LifecycleComponent):
         """
         error_id = f"error_{int(time.time() * 1000)}"
         error_str = str(exception).lower()
-        exception_type = type(exception).__name__
 
         # 分类错误
-        category = self._categorize_error(error_str, exception_type)
+        category = self._categorize_error(error_str)
         severity = self._assess_severity(error_str, category)
 
         return ErrorInfo(
@@ -254,12 +194,11 @@ class ErrorRecoveryService(LifecycleComponent):
             context=context or {},
         )
 
-    def _categorize_error(self, error_str: str, exception_type: str) -> ErrorCategory:
+    def _categorize_error(self, error_str: str) -> ErrorCategory:
         """错误分类
 
         Args:
             error_str: 错误消息
-            exception_type: 异常类型
 
         Returns:
             错误类别
@@ -465,7 +404,7 @@ class ErrorRecoveryService(LifecycleComponent):
                     "action_id": action.action_id,
                     "description": action.description,
                     "success": True,
-                    "attempt": error_info.recovery_attempts + 1,
+                    "attempt": error_info.recovery_attempts,
                 }
 
         return None
@@ -481,25 +420,28 @@ class ErrorRecoveryService(LifecycleComponent):
         Returns:
             恢复动作列表
         """
-        actions = []
+        action_ids = []
 
         if error_info.category == ErrorCategory.MODEL_ERROR:
             if (
                 "gpu" in str(error_info.exception).lower()
                 or "cuda" in str(error_info.exception).lower()
             ):
-                actions.append(self._recovery_actions["switch_to_cpu"])
-            actions.append(self._recovery_actions["reload_model"])
+                action_ids.append("switch_to_cpu")
+            action_ids.append("reload_model")
 
         elif error_info.category == ErrorCategory.AUDIO_ERROR:
-            actions.append(self._recovery_actions["reset_audio_device"])
-            actions.append(self._recovery_actions["fallback_audio_device"])
+            action_ids.extend(["reset_audio_device", "fallback_audio_device"])
 
         elif error_info.category == ErrorCategory.SYSTEM_ERROR:
             if "memory" in str(error_info.exception).lower():
-                actions.append(self._recovery_actions["clear_cache"])
+                action_ids.append("clear_cache")
 
-        return actions
+        return [
+            action
+            for action_id in action_ids
+            if (action := self._recovery_actions.get(action_id)) is not None
+        ]
 
     def _check_cooldown(self, action_id: str) -> bool:
         """检查冷却时间
@@ -542,11 +484,11 @@ class ErrorRecoveryService(LifecycleComponent):
             # 更新冷却时间
             self._last_recovery_time[action.action_id] = time.time()
 
-            # 执行恢复动作
-            success = action.action_func()
-
             # 更新尝试次数
             error_info.recovery_attempts += 1
+
+            # 执行恢复动作
+            success = action.action_func()
 
             if success:
                 app_logger.log_audio_event(
@@ -565,34 +507,6 @@ class ErrorRecoveryService(LifecycleComponent):
         except Exception as e:
             app_logger.log_error(e, "execute_recovery_action")
             return False
-
-    # 默认恢复动作实现
-    def _reload_model_action(self) -> bool:
-        """重新加载模型动作"""
-        # 这里需要与ModelManager协作
-        # 实际实现时会注入相应的依赖
-        app_logger.log_audio_event("Executing reload model recovery", {})
-        return True  # 占位实现
-
-    def _switch_to_cpu_action(self) -> bool:
-        """切换到CPU模式动作"""
-        app_logger.log_audio_event("Executing switch to CPU recovery", {})
-        return True  # 占位实现
-
-    def _reset_audio_device_action(self) -> bool:
-        """重置音频设备动作"""
-        app_logger.log_audio_event("Executing reset audio device recovery", {})
-        return True  # 占位实现
-
-    def _fallback_audio_device_action(self) -> bool:
-        """备用音频设备动作"""
-        app_logger.log_audio_event("Executing fallback audio device recovery", {})
-        return True  # 占位实现
-
-    def _clear_cache_action(self) -> bool:
-        """清理缓存动作"""
-        app_logger.log_audio_event("Executing clear cache recovery", {})
-        return True  # 占位实现
 
     def _emit_error_event(self, event_name: str, data: Dict[str, Any]) -> None:
         """发送错误事件

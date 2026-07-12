@@ -739,7 +739,7 @@ class StreamingCoordinator(LifecycleComponent):
         self.start_streaming()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
+    def __exit__(self, exc_type, _exc_val, exc_tb) -> Literal[False]:
         """退出上下文管理器 - 停止流式转录并清理资源
 
         保证sherpa-onnx会话被正确释放，即使发生异常。

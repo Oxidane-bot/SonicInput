@@ -18,10 +18,11 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 from sonicinput.ai import AIClientFactory
 from sonicinput.ai.prompt_profiles import get_prompt_profile, list_prompt_profile_names
+from sonicinput.core.interfaces import IConfigService
 from sonicinput.core.quality import TranscriptQualityValidator
 from sonicinput.core.services.config import ConfigKeys
 
@@ -35,7 +36,17 @@ class HistorySample:
     streaming_mode: str
 
 
-class ConfigShim:
+class PromptEvaluationClient(Protocol):
+    def refine_text(
+        self,
+        text: str,
+        prompt_template: str,
+        model: str,
+        max_tokens: int = 1000,
+    ) -> str: ...
+
+
+class ConfigShim(IConfigService):
     def __init__(self, data: dict[str, Any]):
         self._data = data
 
@@ -48,13 +59,32 @@ class ConfigShim:
                 return default
         return value
 
+    def set_setting(self, key: str, value: Any) -> None:
+        target = self._data
+        parts = key.split(".")
+        for part in parts[:-1]:
+            nested = target.get(part)
+            if not isinstance(nested, dict):
+                nested = {}
+                target[part] = nested
+            target = nested
+        target[parts[-1]] = value
+
+    def get_all_settings(self) -> dict[str, Any]:
+        return dict(self._data)
+
+    def save_config(self) -> bool:
+        return True
+
 
 def _default_config_path() -> Path:
     return Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "config.json"
 
 
 def _default_history_db() -> Path:
-    return Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "history" / "history.db"
+    return (
+        Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "history" / "history.db"
+    )
 
 
 def _default_output_path() -> Path:
@@ -114,9 +144,10 @@ def evaluate_profiles(
     model = str(config.get_setting(f"ai.{provider}.model_id", "") or "")
     max_tokens = int(config.get_setting(ConfigKeys.AI_MAX_OUTPUT_TOKENS, 4096) or 4096)
 
-    ai_client = AIClientFactory.create_from_config(config)
-    if not ai_client:
+    created_client = AIClientFactory.create_from_config(config)
+    if not created_client:
         raise RuntimeError("Failed to create AI client from config")
+    ai_client = cast(PromptEvaluationClient, created_client)
 
     samples = _load_samples(history_db, limit=limit, anomaly_only=anomaly_only)
     validator = TranscriptQualityValidator()
@@ -180,9 +211,13 @@ def evaluate_profiles(
                     "error": error,
                     "original_length": len(sample.transcription_text),
                     "refined_length": len(refined_text),
-                    "length_ratio": _length_ratio(refined_text, sample.transcription_text),
+                    "length_ratio": _length_ratio(
+                        refined_text, sample.transcription_text
+                    ),
                     "validation_ok": bool(validation.ok) if validation else False,
-                    "validation_reasons": list(validation.reasons) if validation else [],
+                    "validation_reasons": list(validation.reasons)
+                    if validation
+                    else [],
                 }
                 if include_text:
                     row["original_text"] = sample.transcription_text

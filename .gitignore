@@ -10,6 +10,14 @@ __pycache__/
 venv/
 ENV/
 env/
+/.release-venv/
+
+# Local runtime data and package caches
+/.appdata/
+/.models/
+/.uv_cache/
+/SonicInput/
+/config/
 
 # IDE
 .vscode/
@@ -35,6 +43,7 @@ Thumbs.db
 *.bak
 *.backup
 *_backup.py
+!src/sonicinput/core/services/config/config_backup.py
 *.old
 *.tmp
 NUL

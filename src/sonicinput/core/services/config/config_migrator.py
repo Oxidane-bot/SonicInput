@@ -88,9 +88,8 @@ class ConfigMigrator:
         migrated = False
 
         try:
-            # 1. 迁移旧 Whisper 模型名到 sherpa-onnx 模型名
-            # 0. ???? legacy whisper ? transcription.local
-            # ?? legacy ???:
+            # 1. Migrate legacy Whisper settings into transcription.local.
+            # Supported legacy shapes:
             # - {"whisper": {"model": "...", "language": "...", "auto_load": true}}
             # - {"whisper.model": "...", "whisper.language": "...", "whisper.auto_load": true}
             legacy_whisper: Dict[str, Any] = {}

@@ -17,23 +17,25 @@
 
 ```bash
 # 安装依赖（包含本地转录支持）
-uv sync --extra local --group dev
+uv sync --locked --extra local --extra dev --group dev
 
 # 构建
-uv run python build_nuitka.py
+uv run --locked --extra local --extra dev --group dev python build_nuitka.py
 ```
 
-**输出文件**：`dist/SonicInput-v{version}-win64.exe`
+**输出文件**：`dist/release/v{version}/SonicInput-v{version}-win64.exe`
 **可选离线包**:
 - 设置 `SONICINPUT_OFFLINE_MODELS_DIR` 指向模型根目录（包含两个已解压的模型文件夹）
-- 运行 `uv run python build_nuitka.py`
-- 输出 `dist/SonicInput-v{version}-win64-offline.zip`（包含 exe + `models/`）
+- 运行 `uv run --locked --extra local --extra dev --group dev python build_nuitka.py`
+- 输出 `dist/release/v{version}/SonicInput-v{version}-win64-offline.zip`（包含 exe + `models/`）
 
 **特性**：
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小：~71MB+（v0.8.1，包含 PySide6 / Qt Quick / sherpa-onnx 运行时）
+- 文件大小会随 PySide6、ONNX Runtime 与编译器版本变化；发布前以 `RELEASE_NOTES.md` 中的实测 SHA-256 和大小为准
+
+v0.8.2 实测结果：QML 暂存目录由 14.9 MiB 降至 6.64 MiB；Nuitka 报告中的 Python ONNX Runtime 闭包为 12 个模块且未引入 SymPy；最终 onefile EXE 为 68.32 MiB，比 v0.8.1 小约 3 MiB。
 
 ## 构建说明
 
@@ -49,8 +51,8 @@ uv run python build_nuitka.py
 "--enable-plugin=pyside6"           # 启用 PySide6 插件（Qt 支持）
 "--include-package=sonicinput"      # 包含主应用包
 "--include-package=sherpa_onnx"     # 包含 sherpa-onnx 包（本地版）
-"--include-data-dir=assets=assets"  # UI assets (i18n, fonts)
-"--include-data-dir=build/qml_staging=." # 精简 QML runtime staging
+"--include-data-dir=build/staging/assets=assets"  # 已暂存的 UI assets (i18n, subset fonts)
+"--include-data-dir=build/staging/qml=."           # 已验证的 QML runtime closure
 "--include-package-data=sherpa_onnx"# 包含 sherpa-onnx 数据文件和 C 扩展
 "--include-package-data=pypinyin"   # 包含词汇匹配所需的拼音词典 JSON
 
@@ -61,8 +63,8 @@ uv run python build_nuitka.py
 "--nofollow-import-to=PySide6.QtWebEngine*" # 排除未使用的 WebEngine
 ```
 
-Qt Quick / QML UI 使用 `build_nuitka.py` 中的 `stage_qml_runtime()` 精简复制必要 QML imports。不要重新启用 `--include-qt-plugins=qml` 作为默认构建参数；该参数会全量打包 `PySide6/qml`，容易把 `Qt6WebEngineCore.dll` 等未使用的大体积模块带入 exe。
-构建脚本会对 staging 内的 QML module plugin DLL 使用显式 `--include-data-file`，确保 `QtQuick.Controls`、`QtQuick.Layouts` 和 FluentWinUI3 style 在 onefile 解包后可加载，同时保持 QML runtime 范围可控。
+Qt Quick / QML UI 使用 `build_nuitka.py` 中的 `stage_qml_runtime()` 复制经过 `qmlimportscanner` 和离屏窗口验证的运行时闭包：QtQml Models/WorkerScript、QtQuick Controls（FluentWinUI3、Basic、Fusion 回退链）、Templates、Layouts、Effects 和 Window。不要重新启用 `--include-qt-plugins=qml` 作为默认构建参数；该参数会全量打包 `PySide6/qml`，容易把 `Qt6WebEngineCore.dll`、VirtualKeyboard、3D 等未使用模块带入 exe。
+构建脚本会对 staging 内的 QML module plugin DLL 使用显式 `--include-data-file`，确保 `QtQuick.Controls`、`QtQuick.Layouts` 和 FluentWinUI3 style 在 onefile 解包后可加载。资源和 QML 暂存按输入文件指纹缓存，重复构建无需重复字体子集化或复制同一批 QML 文件。
 
 ### sherpa-onnx C 扩展处理
 
@@ -80,7 +82,8 @@ Nuitka 会自动：
 
 **重要**：ONNX 模型文件**不需要**打包到 .exe 中！
 
-- 模型在首次使用时自动下载到：`%APPDATA%/SonicInput/models/`
+- 默认模型缓存：`%USERPROFILE%\.sonicinput\sherpa_models_v2\`
+- 若 EXE 同目录已有 `models\`，优先使用该目录；也可用 `SONICINPUT_MODELS_DIR` 指定缓存目录
 - Paraformer 模型：226MB
 - Zipformer 模型：112MB
 
@@ -94,11 +97,9 @@ Nuitka 会自动：
 ### 1. 准备阶段
 
 ```bash
-# 清理旧构建（可选）
-rm -rf dist/ build/
-
-# 验证环境
-uv run python test_sherpa_import.py
+# `build/nuitka/` 保存增量编译缓存；常规重复构建不要删除它。
+# 只在编译器/依赖升级或缓存异常时清理：
+Remove-Item -Recurse -Force build\nuitka
 ```
 
 ## 常见问题
@@ -109,7 +110,7 @@ uv run python test_sherpa_import.py
 
 **解决**：
 ```bash
-uv sync --extra local --group dev
+uv sync --locked --extra local --extra dev --group dev
 ```
 
 ### Q2: 构建成功但运行时无法导入 sherpa-onnx
@@ -127,7 +128,7 @@ uv sync --extra local --group dev
 
 **解决**：
 1. 检查是否意外包含了测试依赖
-2. 检查 `dist/app.dist` 是否包含 `Qt6WebEngineCore.dll`、`qt6webengine*.dll` 或 `PySide6/qml/QtWebEngine/`
+2. 检查 `build/nuitka/app.dist` 是否包含 `Qt6WebEngineCore.dll`、`qt6webengine*.dll` 或 `PySide6/qml/QtWebEngine/`
 3. 确认没有启用 `--include-qt-plugins=qml`，并使用 `stage_qml_runtime()` 生成的精简 QML runtime
 4. 添加更多 `--nofollow-import-to` / `--noinclude-dlls` 排除项
 5. 考虑构建云端版（不包含 sherpa-onnx）
@@ -145,28 +146,16 @@ uv sync --extra local --group dev
 
 ### 加速构建
 
-```bash
-# 使用缓存（第二次构建会快很多）
-uv run python build_nuitka.py
-
-# 使用 LTO（链接时优化，更小但更慢）
-# 在 nuitka_cmd 中添加：
-"--lto=yes"
-
-# 使用并行编译
-# 在 nuitka_cmd 中添加：
-"--jobs=4"  # 使用 4 个 CPU 核心
-```
+- 保留 `build/nuitka/`：Nuitka 会复用 C 编译和链接中间结果。
+- 保留 `build/staging/`：资源和 QML 暂存会在输入文件与 PySide6 版本不变时复用。
+- Nuitka 2.8 默认让 `--jobs` 使用可用 CPU，并将 LTO 设为 `auto`；不要为了“优化”硬编码较小并行度或强制 LTO。
+- 构建报告位于 `build/nuitka/nuitka-report.xml`，可用于比较后续依赖和数据文件变化。
 
 ### 减小文件大小
 
-```bash
-# 启用压缩（需要 Commercial 版本）
-"--onefile-compress=yes"
-
-# 移除调试符号
-"--remove-output"  # 构建后删除临时文件
-```
+- onefile 在当前 Nuitka 版本中默认压缩；`--onefile-compress=yes` 不是本项目的有效优化项。
+- 不要把 `--remove-output` 当作体积优化。它只会丢弃能加速下次构建的中间产物。
+- 默认构建已排除测试、WebEngine、PDF 和未使用 QML 模块。进一步删除 ONNX Runtime、Qt DLL 或 QML 模块前，必须用本地 ASR、设置窗口、录音悬浮窗、关于窗口做运行时回归。
 
 ## 分发建议
 
@@ -190,7 +179,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.8.1-win64.exe
+SonicInput-v0.8.2-win64.exe
 ```
 
 ## 技术细节
@@ -213,7 +202,7 @@ sherpa_onnx/
 3. **C 编译**：使用 MSVC 编译 C 代码为二进制
 4. **链接**：链接所有对象文件和依赖库
 5. **打包**：将所有文件打包到单个 .exe
-6. **压缩**：压缩最终的可执行文件（可选）
+6. **压缩**：Nuitka 默认压缩 onefile 可执行文件
 
 ### 与 PyInstaller 的区别
 
@@ -232,7 +221,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ```bash
 # Extract/update source strings
-.\.venv\Lib\site-packages\PySide6\lupdate.exe -extensions py -recursive src app.py `
+.\.venv\Lib\site-packages\PySide6\lupdate.exe -extensions py -recursive src `
   -ts assets\i18n\sonicinput_en_US.ts assets\i18n\sonicinput_zh_CN.ts
 
 # Compile .ts to .qm
@@ -243,7 +232,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 ---
 
 **最后更新**：2026-07-12
-**适用版本**：v0.8.1+
+**适用版本**：v0.8.2+
 
 
 ## Release Script
@@ -251,7 +240,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 Use the helper script to build the exe and (optionally) the offline bundle:
 
 ```powershell
-# Build exe only
+# Run locked checks, build the exe, and write a SHA-256 sidecar
 .\scripts\release.ps1
 
 # Build exe + offline zip (models dir must contain both model folders)
@@ -259,4 +248,15 @@ Use the helper script to build the exe and (optionally) the offline bundle:
 
 # Optional: build 7z (default off)
 .\scripts\release.ps1 -OfflineModelsDir "C:\path\to\models" -Build7z -SevenZipPath "C:\Program Files\7-Zip\7z.exe"
+
+# Also load a cached model and run a real packaged decode before release
+.\scripts\release.ps1 -NoOffline -ModelSmokeDir "C:\path\to\model-cache" -ModelSmokeName "zipformer-small"
+
+# Iterate on Nuitka only; skips locked sync and source checks
+.\scripts\release.ps1 -SkipChecks
+
+# Skip packaged CLI/offscreen-startup smoke only when diagnosing an iteration
+.\scripts\release.ps1 -SkipSmoke
 ```
+
+The script uses `uv sync --locked --extra local --extra dev --group dev`, runs the same Ruff/mypy scope as CI, both non-GUI and offscreen GUI/QML suites, then packaged `--help`, `--validate`, `--package-smoke`, and an isolated 12-second offscreen GUI-startup smoke by default. `--package-smoke` verifies packaged assets, pypinyin dictionaries, ONNX Runtime, the sherpa native runtime, and the Settings/Overlay/About QML roots. When `-ModelSmokeDir` is provided, it additionally loads the named cached model and decodes one second of silent audio without downloading or modifying the model cache. Packaged CLI checks have a 180-second timeout, and a formal build removes same-version stale artifacts before compiling. The script writes the executable, optional offline archive, and `.sha256` file under `dist/release/v{version}/`. Close any running SonicInput process before invoking it so `uv sync` can update the environment.

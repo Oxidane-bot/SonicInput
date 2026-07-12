@@ -109,7 +109,9 @@ def _row_to_payload(row: sqlite3.Row) -> dict[str, Any]:
         ),
         "transcription_path_observable": observable,
         "long_recording_cloud_candidate": _is_long_recording_cloud_candidate(row),
-        "audio_file_path_present": bool(str(_row_value(row, "audio_file_path", "") or "").strip()),
+        "audio_file_path_present": bool(
+            str(_row_value(row, "audio_file_path", "") or "").strip()
+        ),
     }
 
 
@@ -190,7 +192,10 @@ def inspect_recent_transcription_paths(
 
     for row in rows:
         payload = _row_to_payload(row)
-        if long_recording_cloud_candidates_only and not payload["long_recording_cloud_candidate"]:
+        if (
+            long_recording_cloud_candidates_only
+            and not payload["long_recording_cloud_candidate"]
+        ):
             continue
         selected_records.append(payload)
         counts_by_path[str(payload["transcription_path"])] += 1

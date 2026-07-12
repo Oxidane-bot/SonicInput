@@ -9,9 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
-from sonicinput.utils.logger import app_logger
+from sonicinput.resources.runtime_assets import get_assets_dir
 
 from .environment_validator import environment_validator
+from .unified_logger import app_logger_compat as app_logger
 
 
 class StartupDiagnostics:
@@ -59,7 +60,6 @@ class StartupDiagnostics:
             report["file_system_check"] = self._check_file_system()
             report["runtime_checks"] = {
                 "assets": self._check_assets(),
-                "samplerate": self._check_samplerate(),
                 "qt_plugins": self._check_qt_plugins(),
                 "local_asr": self._check_local_asr(),
             }
@@ -107,7 +107,7 @@ class StartupDiagnostics:
             app_imports.append("sonicinput.speech.gpu_manager")
 
         # External dependencies
-        external_imports = ["pynput", "loguru", "requests", "numpy", "samplerate"]
+        external_imports = ["pynput", "loguru", "requests", "numpy"]
 
         all_imports = qt_imports + app_imports + external_imports
 
@@ -150,7 +150,6 @@ class StartupDiagnostics:
             "loguru",
             "requests",
             "numpy",
-            "samplerate",
             "sherpa_onnx",
         ]
 
@@ -352,12 +351,7 @@ class StartupDiagnostics:
         return fs_check
 
     def _resolve_assets_dir(self) -> Path | None:
-        current = Path(__file__).resolve()
-        for parent in current.parents:
-            assets_dir = parent / "assets"
-            if assets_dir.is_dir():
-                return assets_dir
-        return None
+        return get_assets_dir()
 
     def _check_assets(self) -> Dict[str, Any]:
         """Verify packaged assets are present."""
@@ -402,33 +396,6 @@ class StartupDiagnostics:
         result["translation_files"] = [file.name for file in qm_files]
         if not result["translations_present"]:
             result["warnings"].append("No compiled translations found")
-
-        return result
-
-    def _check_samplerate(self) -> Dict[str, Any]:
-        """Verify samplerate dependency can resample data."""
-        result: Dict[str, Any] = {
-            "available": False,
-            "resample_ok": False,
-            "errors": [],
-            "warnings": [],
-        }
-
-        try:
-            import numpy as np
-            from samplerate import converters as sr_converters
-
-            result["available"] = True
-            samples = np.linspace(0.0, 1.0, 16000, endpoint=False).astype(np.float32)
-            resampled = sr_converters.resample(samples, 0.5, converter_type="sinc_best")
-            if 7900 <= len(resampled) <= 8100:
-                result["resample_ok"] = True
-            else:
-                result["warnings"].append(
-                    f"Unexpected resample length: {len(resampled)}"
-                )
-        except Exception as exc:
-            result["errors"].append(f"samplerate check failed: {exc}")
 
         return result
 
@@ -686,7 +653,7 @@ class StartupDiagnostics:
             )
 
         runtime_checks = report.get("runtime_checks", {})
-        for check_name in ("assets", "samplerate", "qt_plugins", "local_asr"):
+        for check_name in ("assets", "qt_plugins", "local_asr"):
             details = runtime_checks.get(check_name, {})
             if details.get("errors"):
                 summary["critical_issues"].extend(details["errors"])
@@ -773,13 +740,9 @@ class StartupDiagnostics:
         runtime_checks = report.get("runtime_checks", {})
         if runtime_checks:
             assets_check = runtime_checks.get("assets", {})
-            samplerate_check = runtime_checks.get("samplerate", {})
             qt_plugins_check = runtime_checks.get("qt_plugins", {})
             local_asr_check = runtime_checks.get("local_asr", {})
             assets_ok = not assets_check.get("errors")
-            samplerate_ok = samplerate_check.get("available") and samplerate_check.get(
-                "resample_ok"
-            )
             qt_plugins_ok = not qt_plugins_check.get("errors") and qt_plugins_check.get(
                 "qwindows_present"
             )
@@ -791,7 +754,6 @@ class StartupDiagnostics:
                 local_asr_status = "[WARN] "
             print("\n[INFO]  RUNTIME CHECKS:")
             print(f"   Assets: {'[PASS]' if assets_ok else '[FAIL]'}")
-            print(f"   Samplerate: {'[PASS]' if samplerate_ok else '[FAIL]'}")
             print(f"   Qt Plugins: {'[PASS]' if qt_plugins_ok else '[FAIL]'}")
             print(f"   Local ASR: {local_asr_status}")
 

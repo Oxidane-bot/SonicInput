@@ -134,7 +134,9 @@ def _row_to_audit(
         result = validator.validate(transcription_text, ai_text)
         labels.extend(result.reasons)
     transcription_path = _row_value(row, "transcription_path", "standard")
-    transcription_path_observable = _is_observable_transcription_path(transcription_path)
+    transcription_path_observable = _is_observable_transcription_path(
+        transcription_path
+    )
     long_recording_cloud_candidate = _is_long_recording_cloud_candidate(row)
 
     return {
@@ -183,7 +185,9 @@ def _is_long_recording_cloud_candidate(row: sqlite3.Row) -> bool:
     return bool(audio_file_path) or transcription_path == "cloud_file_long_recording"
 
 
-def _iter_history_rows(db_path: Path, timestamp_from: str | None = None) -> list[sqlite3.Row]:
+def _iter_history_rows(
+    db_path: Path, timestamp_from: str | None = None
+) -> list[sqlite3.Row]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
@@ -225,7 +229,10 @@ def run_audit(
     with output_path.open("w", encoding="utf-8") as fp:
         for row in rows:
             audit_row = _row_to_audit(row, validator)
-            if filters.observable_path_only and not audit_row["transcription_path_observable"]:
+            if (
+                filters.observable_path_only
+                and not audit_row["transcription_path_observable"]
+            ):
                 continue
             if (
                 filters.long_recording_cloud_candidates_only
@@ -262,12 +269,17 @@ def run_audit(
                 and audit_row["transcription_length"] > 0
             ):
                 counters["fallback_success_records"] += 1
-            if audit_row["transcription_status"] == "success" and audit_row["transcription_length"] == 0:
+            if (
+                audit_row["transcription_status"] == "success"
+                and audit_row["transcription_length"] == 0
+            ):
                 counters["empty_transcription_records"] += 1
             for label in audit_row["anomaly_labels"]:
                 anomaly_counters[label] += 1
             if audit_row["transcription_duration"] > 0:
-                transcription_durations.append(float(audit_row["transcription_duration"]))
+                transcription_durations.append(
+                    float(audit_row["transcription_duration"])
+                )
             if audit_row["transcription_rtf"] is not None:
                 transcription_rtfs.append(float(audit_row["transcription_rtf"]))
             fp.write(json.dumps(audit_row, ensure_ascii=False) + "\n")
@@ -285,12 +297,8 @@ def run_audit(
         "long_recording_cloud_candidate_observable_records"
     ]
     metrics = {
-        "transcription_duration_p50_seconds": _percentile(
-            transcription_durations, 50
-        ),
-        "transcription_duration_p95_seconds": _percentile(
-            transcription_durations, 95
-        ),
+        "transcription_duration_p50_seconds": _percentile(transcription_durations, 50),
+        "transcription_duration_p95_seconds": _percentile(transcription_durations, 95),
         "transcription_rtf_p50": _percentile(transcription_rtfs, 50),
         "transcription_rtf_p95": _percentile(transcription_rtfs, 95),
         "empty_result_rate": _safe_ratio(

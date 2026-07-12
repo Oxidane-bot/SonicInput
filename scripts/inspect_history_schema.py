@@ -17,14 +17,24 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from sonicinput.core.interfaces import IConfigService
 from sonicinput.core.services.storage.history_storage_service import (
     HistoryStorageService,
 )
 
 
-class _DummyConfigService:
-    def get_setting(self, _key, default=None):
+class _DummyConfigService(IConfigService):
+    def get_setting(self, _key: str, default: Any = None) -> Any:
         return default
+
+    def set_setting(self, _key: str, _value: Any) -> None:
+        return None
+
+    def get_all_settings(self) -> dict[str, Any]:
+        return {}
+
+    def save_config(self) -> bool:
+        return True
 
 
 _TARGET_RUNTIME_EVENTS = {
@@ -65,7 +75,9 @@ def _iter_log_files(logs_path: Path) -> list[Path]:
     if not logs_path.exists():
         return []
     files = [
-        path for path in logs_path.iterdir() if path.is_file() and path.name.startswith("app.log")
+        path
+        for path in logs_path.iterdir()
+        if path.is_file() and path.name.startswith("app.log")
     ]
     return sorted(files, key=lambda path: (path.stat().st_mtime, path.name))
 
@@ -159,7 +171,9 @@ def inspect_history_schema_runtime_logs(
                 continue
             if parsed["event"] not in _TARGET_RUNTIME_EVENTS:
                 continue
-            counts_by_event[parsed["event"]] = counts_by_event.get(parsed["event"], 0) + 1
+            counts_by_event[parsed["event"]] = (
+                counts_by_event.get(parsed["event"], 0) + 1
+            )
             context = dict(parsed.get("context") or {})
             added_column = context.get("added_column")
             if added_column:
@@ -228,7 +242,8 @@ def inspect_history_schema_runtime_logs(
         "required_columns_seen": sorted(required_columns_seen),
         "schema_signatures_seen": sorted(schema_signatures_seen),
         "expectation_versions_seen": sorted(expectation_versions_seen),
-        "has_transcription_path_upgrade_event": "transcription_path" in added_columns_seen,
+        "has_transcription_path_upgrade_event": "transcription_path"
+        in added_columns_seen,
         "has_transcription_decision_reason_upgrade_event": (
             "transcription_decision_reason" in added_columns_seen
         ),
@@ -241,9 +256,15 @@ def inspect_history_schema_runtime_logs(
         "latest_schema_expectations_event": _latest_event(
             "History schema expectations declared"
         ),
-        "latest_schema_upgrade_event": _latest_event("History database schema upgraded"),
-        "latest_database_initialized_event": _latest_event("History database initialized"),
-        "latest_history_service_start_event": _latest_event("HistoryStorageService started"),
+        "latest_schema_upgrade_event": _latest_event(
+            "History database schema upgraded"
+        ),
+        "latest_database_initialized_event": _latest_event(
+            "History database initialized"
+        ),
+        "latest_history_service_start_event": _latest_event(
+            "HistoryStorageService started"
+        ),
         "diagnosis": diagnosis,
         "events": events,
     }
@@ -274,7 +295,9 @@ def inspect_or_upgrade_history_schema(
         "before": before,
         "after": after,
         "runtime_logs": (
-            inspect_history_schema_runtime_logs(logs_path) if logs_path is not None else None
+            inspect_history_schema_runtime_logs(logs_path)
+            if logs_path is not None
+            else None
         ),
     }
 

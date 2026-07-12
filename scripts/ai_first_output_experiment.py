@@ -31,14 +31,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
 from statistics import mean
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
 from sonicinput.ai.factory import AIClientFactory
 from sonicinput.core.controllers.ai_processing_controller import AIProcessingController
+from sonicinput.core.interfaces import (
+    EventPriority,
+    HistoryRecord,
+    IConfigService,
+    IEventService,
+)
 from sonicinput.core.services.config import ConfigKeys
 from sonicinput.core.services.events import Events
+from sonicinput.core.services.state_manager import StateManager
+from sonicinput.core.services.storage.history_storage_service import (
+    HistoryStorageService,
+)
 from sonicinput.speech.speech_service_factory import SpeechServiceFactory
 
 SAMPLE_RATE = 16000
@@ -52,7 +62,7 @@ class Sample:
     duration: float
 
 
-class ConfigShim:
+class ConfigShim(IConfigService):
     def __init__(self, config: Dict[str, Any]):
         self._config = config
 
@@ -65,21 +75,31 @@ class ConfigShim:
                 return default
         return value
 
+    def set_setting(self, key: str, value: Any) -> None:
+        target = self._config
+        parts = key.split(".")
+        for part in parts[:-1]:
+            nested = target.get(part)
+            if not isinstance(nested, dict):
+                nested = {}
+                target[part] = nested
+            target = nested
+        target[parts[-1]] = value
 
-class DummyStateManager:
-    def set_app_state(self, state: Any) -> None:
-        return None
+    def get_all_settings(self) -> Dict[str, Any]:
+        return dict(self._config)
 
-
-class DummyHistoryService:
-    def get_record_by_id(self, record_id: str) -> None:
-        return None
-
-    def update_record(self, record: Any) -> bool:
+    def save_config(self) -> bool:
         return True
 
 
-class BenchmarkEventService:
+class DummyHistoryService(HistoryStorageService):
+    def get_record_by_id(self, record_id: str) -> Optional[HistoryRecord]:
+        del record_id
+        return None
+
+
+class BenchmarkEventService(IEventService):
     def __init__(self) -> None:
         self._phase_start: Optional[float] = None
         self.first_output_runtime_s: Optional[float] = None
@@ -93,20 +113,54 @@ class BenchmarkEventService:
             return 0.0
         return time.perf_counter() - self._phase_start
 
-    def emit(self, event_name: str, data: Any = None) -> None:
+    def emit(
+        self,
+        event_name: str,
+        data: Any = None,
+        priority: EventPriority = EventPriority.NORMAL,
+    ) -> None:
+        del priority
         if (
             self._phase_start is not None
             and self.first_output_runtime_s is None
-            and event_name in {Events.AI_INCREMENTAL_TEXT_UPDATED, Events.AI_PROCESSED_TEXT}
+            and event_name
+            in {Events.AI_INCREMENTAL_TEXT_UPDATED, Events.AI_PROCESSED_TEXT}
         ):
             self.first_output_runtime_s = time.perf_counter() - self._phase_start
             self.first_output_event = event_name
 
-    def on(self, event_name: str, handler: Any) -> str:
+    def on(
+        self,
+        event_name: str,
+        handler: Callable,
+        priority: EventPriority = EventPriority.NORMAL,
+    ) -> str:
+        del handler, priority
         return f"{event_name}-noop"
 
-    def off(self, event_name: str, listener_id: str) -> None:
-        return None
+    def once(
+        self,
+        event_name: str,
+        handler: Callable,
+        priority: EventPriority = EventPriority.NORMAL,
+    ) -> str:
+        return self.on(event_name, handler, priority)
+
+    def subscribe(
+        self,
+        event_name: str,
+        handler: Callable[[Any], None],
+        priority: EventPriority = EventPriority.NORMAL,
+        is_once: bool = False,
+        namespace: str = "default",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        del is_once, namespace, metadata
+        return self.on(event_name, handler, priority)
+
+    def off(self, event_name: str, listener_id: str) -> bool:
+        del event_name, listener_id
+        return True
 
 
 def _default_config_path() -> Path:
@@ -114,7 +168,9 @@ def _default_config_path() -> Path:
 
 
 def _default_history_db_path() -> Path:
-    return Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "history" / "history.db"
+    return (
+        Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "history" / "history.db"
+    )
 
 
 def load_json(path: Path) -> Dict[str, Any]:
@@ -266,8 +322,8 @@ def run_sample(
     controller = AIProcessingController(
         config_service=config,
         event_service=events,
-        state_manager=DummyStateManager(),
-        history_service=DummyHistoryService(),
+        state_manager=StateManager(events),
+        history_service=DummyHistoryService(config),
     )
     controller._get_current_ai_service = lambda: ai_client  # type: ignore[method-assign]
     controller._on_transcription_request(
@@ -313,7 +369,10 @@ def run_sample(
             if last_tps:
                 tps_values.append(float(last_tps))
 
-            if total_to_first_visible_s is None and events.first_output_runtime_s is not None:
+            if (
+                total_to_first_visible_s is None
+                and events.first_output_runtime_s is not None
+            ):
                 total_to_first_visible_s = asr_finish_s + events.first_output_runtime_s
 
         final_text = controller._merge_chunk_texts_with_boundary_dedup(chunk_texts)
@@ -336,7 +395,10 @@ def run_sample(
         if last_tps:
             tps_values.append(float(last_tps))
 
-        if total_to_first_visible_s is None and events.first_output_runtime_s is not None:
+        if (
+            total_to_first_visible_s is None
+            and events.first_output_runtime_s is not None
+        ):
             total_to_first_visible_s = final_trigger_s + events.first_output_runtime_s
     except Exception as exc:
         error = str(exc)
@@ -363,14 +425,19 @@ def run_single_sample_mode(args: argparse.Namespace) -> int:
     history_db = Path(args.history_db)
     config_dict = load_json(config_path)
     config_dict.setdefault("ai", {}).setdefault("sentence_split", {})["enabled"] = True
-    config_dict.setdefault("ai", {}).setdefault("first_chunk_output", {})["enabled"] = True
+    config_dict.setdefault("ai", {}).setdefault("first_chunk_output", {})["enabled"] = (
+        True
+    )
     config = ConfigShim(config_dict)
 
     sample = load_sample_by_id(history_db, args.record_id)
     speech_service = SpeechServiceFactory.create_from_config(config)
     if not speech_service:
         raise RuntimeError("Failed to create speech service from config")
-    if hasattr(speech_service, "is_model_loaded") and not speech_service.is_model_loaded:
+    if (
+        hasattr(speech_service, "is_model_loaded")
+        and not speech_service.is_model_loaded
+    ):
         if not speech_service.load_model():
             raise RuntimeError("Failed to load speech service model")
 
@@ -383,7 +450,9 @@ def run_single_sample_mode(args: argparse.Namespace) -> int:
         config=config,
         speech_service=speech_service,
         ai_client=ai_client,
-        chunk_duration=float(config.get_setting(ConfigKeys.AUDIO_STREAMING_CHUNK_DURATION, 15.0)),
+        chunk_duration=float(
+            config.get_setting(ConfigKeys.AUDIO_STREAMING_CHUNK_DURATION, 15.0)
+        ),
         language=get_language(config),
     )
     Path(args.sample_output).write_text(
@@ -398,13 +467,18 @@ def run_worker_mode(args: argparse.Namespace) -> int:
     history_db = Path(args.history_db)
     config_dict = load_json(config_path)
     config_dict.setdefault("ai", {}).setdefault("sentence_split", {})["enabled"] = True
-    config_dict.setdefault("ai", {}).setdefault("first_chunk_output", {})["enabled"] = True
+    config_dict.setdefault("ai", {}).setdefault("first_chunk_output", {})["enabled"] = (
+        True
+    )
     config = ConfigShim(config_dict)
 
     speech_service = SpeechServiceFactory.create_from_config(config)
     if not speech_service:
         raise RuntimeError("Failed to create speech service from config")
-    if hasattr(speech_service, "is_model_loaded") and not speech_service.is_model_loaded:
+    if (
+        hasattr(speech_service, "is_model_loaded")
+        and not speech_service.is_model_loaded
+    ):
         if not speech_service.load_model():
             raise RuntimeError("Failed to load speech service model")
 
@@ -412,7 +486,9 @@ def run_worker_mode(args: argparse.Namespace) -> int:
     if not ai_client:
         raise RuntimeError("Failed to create AI client from config")
 
-    chunk_duration = float(config.get_setting(ConfigKeys.AUDIO_STREAMING_CHUNK_DURATION, 15.0))
+    chunk_duration = float(
+        config.get_setting(ConfigKeys.AUDIO_STREAMING_CHUNK_DURATION, 15.0)
+    )
     language = get_language(config)
 
     for line in sys.stdin:
@@ -635,7 +711,9 @@ def main() -> None:
     parser.add_argument("--sleep-seconds", type=float, default=0.0)
     parser.add_argument("--min-tps", type=float, default=100.0)
     parser.add_argument("--config-path", type=str, default=str(_default_config_path()))
-    parser.add_argument("--history-db", type=str, default=str(_default_history_db_path()))
+    parser.add_argument(
+        "--history-db", type=str, default=str(_default_history_db_path())
+    )
     parser.add_argument("--output", type=str, default="")
     parser.add_argument("--resume", action="store_true", default=False)
     parser.add_argument("--record-id", type=str, default="")
@@ -676,7 +754,9 @@ def main() -> None:
     output_path = Path(args.output) if args.output else None
     if output_path is None:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        output_path = Path("artifacts") / f"ai_first_output_real_chain_{timestamp}.jsonl"
+        output_path = (
+            Path("artifacts") / f"ai_first_output_real_chain_{timestamp}.jsonl"
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists() and args.resume:

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from ..utils.logger import app_logger
+from .unified_logger import app_logger_compat as app_logger
 
 # Windows平台窗口隐藏标志
 if sys.platform == "win32":

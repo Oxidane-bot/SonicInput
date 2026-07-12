@@ -163,14 +163,19 @@ def _build_runbook(
                 follow_up_commands,
                 [timeline_command],
             )
-    elif diagnosis_state in {"post_cutoff_reason_mismatch", "post_cutoff_path_mismatch"}:
+    elif diagnosis_state in {
+        "post_cutoff_reason_mismatch",
+        "post_cutoff_path_mismatch",
+    }:
         steps = observability_steps or [
             "Identify the newest shared record_id from the observability output.",
             "Run the single-record timeline inspector for that record_id.",
             "Compare the persisted DB fields against the latest runtime path decision/fallback event.",
         ]
         if timeline_command is not None:
-            follow_up_commands = _merge_unique_commands([timeline_command], follow_up_commands)
+            follow_up_commands = _merge_unique_commands(
+                [timeline_command], follow_up_commands
+            )
     elif diagnosis_state == "stage6_ready_and_aligned":
         steps = observability_steps or [
             "Keep sampling newer real records to increase confidence.",
@@ -355,7 +360,9 @@ def _build_record_timeline_preview(
     return {
         "record_id": str(record_id),
         "diagnosis_state": dict(timeline_result.get("diagnosis") or {}).get("state"),
-        "diagnosis_message": dict(timeline_result.get("diagnosis") or {}).get("message"),
+        "diagnosis_message": dict(timeline_result.get("diagnosis") or {}).get(
+            "message"
+        ),
         "issue_summary": timeline_result.get("issue_summary"),
         "history_record_found": timeline_result.get("history_record_found"),
         "runtime_log_event_count": event_flow.get("event_count", 0),
@@ -389,10 +396,14 @@ def _summarize_readiness(
     )
     newest_record_id = focus_record.get("record_id") if focus_record else None
 
-    expectation_versions_seen = list(runtime_logs.get("expectation_versions_seen") or [])
+    expectation_versions_seen = list(
+        runtime_logs.get("expectation_versions_seen") or []
+    )
     schema_signatures_seen = list(runtime_logs.get("schema_signatures_seen") or [])
 
-    runtime_declares_current_expectation_version = expected_version in expectation_versions_seen
+    runtime_declares_current_expectation_version = (
+        expected_version in expectation_versions_seen
+    )
     runtime_declares_current_signature = expected_signature in schema_signatures_seen
     db_has_decision_reason_column = (
         after_schema.get("has_transcription_decision_reason_column") is True
@@ -408,7 +419,10 @@ def _summarize_readiness(
     )
     issue_summary = alignment.get("issue_summary")
 
-    if not runtime_declares_current_expectation_version and not runtime_declares_current_signature:
+    if (
+        not runtime_declares_current_expectation_version
+        and not runtime_declares_current_signature
+    ):
         diagnosis = {
             "state": "waiting_for_new_build_session",
             "message": (
@@ -504,7 +518,9 @@ def _summarize_readiness(
     record_timeline_preview = _build_record_timeline_preview(
         db_path=db_path,
         logs_path=logs_path,
-        record_id=(str(newest_record_id) if newest_record_id not in (None, "") else None),
+        record_id=(
+            str(newest_record_id) if newest_record_id not in (None, "") else None
+        ),
     )
 
     return {
@@ -592,7 +608,9 @@ def format_stage6_readiness_summary(result: dict[str, Any]) -> str:
     focus_record = dict(readiness.get("focus_record") or {})
     record_timeline_preview = dict(readiness.get("record_timeline_preview") or {})
     issue_summary = readiness.get("issue_summary")
-    latest_expectation_event = runtime_logs.get("latest_schema_expectations_event") or {}
+    latest_expectation_event = (
+        runtime_logs.get("latest_schema_expectations_event") or {}
+    )
     latest_upgrade_event = runtime_logs.get("latest_schema_upgrade_event") or {}
 
     lines = [
@@ -607,10 +625,7 @@ def format_stage6_readiness_summary(result: dict[str, Any]) -> str:
             "- Runtime build expectation seen: "
             f"{'yes' if readiness.get('runtime_declares_current_expectation_version') else 'no'}"
         ),
-        (
-            "- Post-cutoff DB rows: "
-            f"{db_window.get('selected_record_count', 0)}"
-        ),
+        (f"- Post-cutoff DB rows: {db_window.get('selected_record_count', 0)}"),
         (
             "- Post-cutoff runtime path logs: "
             f"{log_window.get('selected_record_count', 0)}"
@@ -624,10 +639,7 @@ def format_stage6_readiness_summary(result: dict[str, Any]) -> str:
             "- Latest schema upgrade event: "
             f"{latest_upgrade_event.get('timestamp') or 'none'}"
         ),
-        (
-            "- Newest record hint: "
-            f"{readiness.get('newest_record_id_hint') or 'none'}"
-        ),
+        (f"- Newest record hint: {readiness.get('newest_record_id_hint') or 'none'}"),
     ]
 
     if issue_summary:
@@ -694,13 +706,11 @@ def format_stage6_readiness_summary(result: dict[str, Any]) -> str:
         )
         if record_timeline_preview.get("issue_summary"):
             lines.append(
-                "- Timeline issue: "
-                f"{record_timeline_preview.get('issue_summary')}"
+                f"- Timeline issue: {record_timeline_preview.get('issue_summary')}"
             )
         if record_timeline_preview.get("oneline"):
             lines.append(
-                "- Timeline oneline: "
-                f"{record_timeline_preview.get('oneline')}"
+                f"- Timeline oneline: {record_timeline_preview.get('oneline')}"
             )
 
     expected_version = readiness.get("repo_expected_history_schema_expectation_version")
@@ -750,10 +760,7 @@ def format_stage6_readiness_oneline(result: dict[str, Any]) -> str:
     if issue_summary:
         parts.append(f"issue_summary={issue_summary}")
     else:
-        parts.append(
-            "message="
-            f"{diagnosis.get('message', 'No message available.')}"
-        )
+        parts.append(f"message={diagnosis.get('message', 'No message available.')}")
     return " | ".join(parts)
 
 
@@ -765,8 +772,9 @@ def build_stage6_readiness_snapshot(result: dict[str, Any]) -> dict[str, Any]:
     db_window = dict(observability.get("db") or {})
     log_window = dict(observability.get("logs") or {})
     focus_record = dict(readiness.get("focus_record") or {})
-    record_timeline_preview = dict(readiness.get("record_timeline_preview") or {})
-    latest_expectation_event = runtime_logs.get("latest_schema_expectations_event") or {}
+    latest_expectation_event = (
+        runtime_logs.get("latest_schema_expectations_event") or {}
+    )
     latest_upgrade_event = runtime_logs.get("latest_schema_upgrade_event") or {}
 
     return {
@@ -827,7 +835,9 @@ def format_stage6_readiness_markdown(result: dict[str, Any]) -> str:
     focus_record = dict(readiness.get("focus_record") or {})
     record_timeline_preview = dict(readiness.get("record_timeline_preview") or {})
     issue_summary = readiness.get("issue_summary")
-    latest_expectation_event = runtime_logs.get("latest_schema_expectations_event") or {}
+    latest_expectation_event = (
+        runtime_logs.get("latest_schema_expectations_event") or {}
+    )
     latest_upgrade_event = runtime_logs.get("latest_schema_upgrade_event") or {}
 
     lines = [
@@ -847,9 +857,7 @@ def format_stage6_readiness_markdown(result: dict[str, Any]) -> str:
             f"- **Runtime build expectation seen:** "
             f"{'yes' if readiness.get('runtime_declares_current_expectation_version') else 'no'}"
         ),
-        (
-            f"- **Post-cutoff DB rows:** {db_window.get('selected_record_count', 0)}"
-        ),
+        (f"- **Post-cutoff DB rows:** {db_window.get('selected_record_count', 0)}"),
         (
             f"- **Post-cutoff runtime path logs:** {log_window.get('selected_record_count', 0)}"
         ),
@@ -978,7 +986,9 @@ def format_stage6_readiness_card(result: dict[str, Any]) -> str:
     log_window = dict(observability.get("logs") or {})
     focus_record = dict(readiness.get("focus_record") or {})
     record_timeline_preview = dict(readiness.get("record_timeline_preview") or {})
-    latest_expectation_event = runtime_logs.get("latest_schema_expectations_event") or {}
+    latest_expectation_event = (
+        runtime_logs.get("latest_schema_expectations_event") or {}
+    )
     latest_upgrade_event = runtime_logs.get("latest_schema_upgrade_event") or {}
 
     lines = [
@@ -1031,10 +1041,7 @@ def format_stage6_readiness_card(result: dict[str, Any]) -> str:
                     "  - db_path: "
                     f"`{focus_record.get('db_transcription_path') or 'none'}`"
                 ),
-                (
-                    "  - log_path: "
-                    f"`{focus_record.get('log_selected_path') or 'none'}`"
-                ),
+                (f"  - log_path: `{focus_record.get('log_selected_path') or 'none'}`"),
                 (
                     "  - db_reason: "
                     f"`{focus_record.get('db_transcription_decision_reason') or 'none'}`"
@@ -1065,10 +1072,7 @@ def format_stage6_readiness_card(result: dict[str, Any]) -> str:
             ]
         )
         if record_timeline_preview.get("issue_summary"):
-            lines.append(
-                "  - issue: "
-                f"`{record_timeline_preview.get('issue_summary')}`"
-            )
+            lines.append(f"  - issue: `{record_timeline_preview.get('issue_summary')}`")
 
     actions = list(runbook.get("recommended_steps") or [])
     if actions:

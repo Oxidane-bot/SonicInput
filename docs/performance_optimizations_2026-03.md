@@ -51,17 +51,17 @@ What changed:
 User impact:
 - Better scrolling consistency and lower latency for large history volumes.
 
-### 4) History statistics query moved off UI thread
+### 4) History statistics query
 
 File:
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- `src/sonicinput/ui/viewmodels/history.py`
 
-What changed:
-- Added `HistoryStatsWorker` to fetch aggregate stats asynchronously.
-- Added request-id guard to ignore stale results.
+Current implementation:
+- The Fluent QML view model fetches aggregate statistics during history refresh.
+- The unused worker left behind by the legacy QWidget UI has been removed.
 
 User impact:
-- Reduced UI stalls during refresh and search.
+- No behavior change; the legacy background worker was not connected to the active UI.
 
 ### 5) Batch reprocessing now uses keyset read + batch insert
 

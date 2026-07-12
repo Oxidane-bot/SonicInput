@@ -91,10 +91,14 @@ def _build_focus_record(
         record = dict(decision_reason_mismatched_records[0])
         record["source"] = "shared_reason_mismatch"
         return record
-    if alignment_state in {
-        "db_log_paths_aligned_reason_schema_missing",
-        "db_log_paths_and_reasons_aligned",
-    } and matched_records:
+    if (
+        alignment_state
+        in {
+            "db_log_paths_aligned_reason_schema_missing",
+            "db_log_paths_and_reasons_aligned",
+        }
+        and matched_records
+    ):
         record = dict(matched_records[0])
         record["source"] = "shared_aligned"
         return record
@@ -382,17 +386,26 @@ def _summarize_alignment(
             "state": "schema_missing",
             "message": "DB schema still lacks transcription_path, so end-to-end observability is blocked.",
         }
-    elif log_result.get("selected_record_count", 0) == 0 and db_result.get("source_record_count", 0) == 0:
+    elif (
+        log_result.get("selected_record_count", 0) == 0
+        and db_result.get("source_record_count", 0) == 0
+    ):
         diagnosis = {
             "state": "no_post_cutoff_runtime_or_db_activity",
             "message": "No post-cutoff transcription path logs and no post-cutoff DB rows were found.",
         }
-    elif log_result.get("selected_record_count", 0) > 0 and db_result.get("selected_record_count", 0) == 0:
+    elif (
+        log_result.get("selected_record_count", 0) > 0
+        and db_result.get("selected_record_count", 0) == 0
+    ):
         diagnosis = {
             "state": "runtime_logs_without_db_rows",
             "message": "Runtime path decision logs exist, but no matching post-cutoff DB rows were found yet.",
         }
-    elif db_result.get("selected_record_count", 0) > 0 and log_result.get("selected_record_count", 0) == 0:
+    elif (
+        db_result.get("selected_record_count", 0) > 0
+        and log_result.get("selected_record_count", 0) == 0
+    ):
         diagnosis = {
             "state": "db_rows_without_runtime_logs",
             "message": "Post-cutoff DB rows exist, but no runtime path decision logs were found for the same window.",
@@ -402,10 +415,7 @@ def _summarize_alignment(
             "state": "db_log_path_mismatch",
             "message": "At least one shared record_id has different DB transcription_path and runtime selected_path.",
         }
-    elif (
-        not has_decision_reason_column
-        and matched_records
-    ):
+    elif not has_decision_reason_column and matched_records:
         diagnosis = {
             "state": "db_log_paths_aligned_reason_schema_missing",
             "message": (
@@ -641,10 +651,7 @@ def format_transcription_path_observability_card(result: dict[str, Any]) -> str:
             "- **Decision reason mismatches:** "
             f"`{alignment.get('decision_reason_mismatched_record_count', 0)}`"
         ),
-        (
-            "- **Guidance:** "
-            f"{diagnosis.get('message') or 'No guidance available.'}"
-        ),
+        (f"- **Guidance:** {diagnosis.get('message') or 'No guidance available.'}"),
     ]
     if alignment.get("issue_summary"):
         lines.append(f"- **Issue summary:** {alignment.get('issue_summary')}")
@@ -658,10 +665,7 @@ def format_transcription_path_observability_card(result: dict[str, Any]) -> str:
                     "  - db_path: "
                     f"`{focus_record.get('db_transcription_path') or 'none'}`"
                 ),
-                (
-                    "  - log_path: "
-                    f"`{focus_record.get('log_selected_path') or 'none'}`"
-                ),
+                (f"  - log_path: `{focus_record.get('log_selected_path') or 'none'}`"),
                 (
                     "  - db_reason: "
                     f"`{focus_record.get('db_transcription_decision_reason') or 'none'}`"

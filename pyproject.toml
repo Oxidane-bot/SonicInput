@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sonicinput"
-version = "0.8.1"
+version = "0.8.2"
 description = "Lightweight voice input tool powered by sherpa-onnx and cloud ASR"
 requires-python = ">=3.10"
 
@@ -16,16 +16,12 @@ dependencies = [
     "pywin32>=306; sys_platform == 'win32'",
     "pyperclip>=1.8.4; sys_platform == 'win32'",
     "pynput>=1.7.6; sys_platform == 'win32'",
-    "sounddevice>=0.4.6; sys_platform == 'win32'",
     "qt-material>=2.17; sys_platform == 'win32'",
     # 通用依赖（跨平台）
     "requests>=2.31.0",
     "numpy>=1.24.0",
-    "samplerate>=0.2.3",
-    "pydantic>=2.0.0",
     "loguru>=0.7.0",
     "psutil>=5.9.0",
-    "cryptography>=46.0.3",
     # 云转录支持
     "groq>=0.9.0",
     "wtpsplit-lite==0.2.0",
@@ -40,18 +36,16 @@ windows = []
 
 # 本地转录支持（轻量级 sherpa-onnx）
 local = [
-    "sherpa-onnx>=1.10.0",
+    # 1.13.0 的 wheel 需要同版本 core，但其 sdist 元数据未声明该依赖。
+    "sherpa-onnx==1.13.0",
+    "sherpa-onnx-core==1.13.0",
 ]
 
 # 开发工具
 dev = [
     "pytest>=7.4.0",
-    "pytest-mock>=3.12.0",
-    "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.4.0",
-    "pytest-html>=4.1.0",
     "pytest-qt>=4.4.0",
-    "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.7.0",
     "vulture>=2.14",
@@ -71,6 +65,33 @@ ci = [
 [project.scripts]
 sonicinput = "sonicinput.main:main"
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.appdata/",
+    "/.models/",
+    "/.mypy_cache/",
+    "/.nuitka_cache/",
+    "/.pytest*/",
+    "/.release-venv/",
+    "/.ruff_cache/",
+    "/.tmp*/",
+    "/.uv_cache/",
+    "/.venv/",
+    "/SonicInput/",
+    "/artifacts/",
+    "/build/",
+    "/config/",
+    "/dist/",
+    "/logs/",
+]
+skip-excluded-dirs = true
+
+[tool.hatch.build.targets.sdist.force-include]
+"assets" = "assets"
+
+[tool.hatch.build.targets.wheel.force-include]
+"assets" = "sonicinput/assets"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
@@ -82,8 +103,8 @@ markers = [
 ]
 addopts = "-v"
 
-# mypy config: strict on what we've already cleaned, baselined for the rest.
-# Adding a new error in any module NOT listed below will fail CI (no `|| true`).
+# mypy config: typed modules are checked, with a small baseline for legacy UI code.
+# Adding a new error outside the modules below fails CI.
 # To remove a module from the baseline, fix its errors and delete its override.
 [tool.mypy]
 ignore_missing_imports = true
@@ -98,7 +119,6 @@ disable_error_code = ["type-abstract"]
 
 [[tool.mypy.overrides]]
 module = [
-    "sonicinput.ui.apply_transaction",
     "sonicinput.ui.history_formatters",
     "sonicinput.ui.history_workers",
     "sonicinput.ui.components.system_tray.tray_controller",

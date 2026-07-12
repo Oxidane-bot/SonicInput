@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import numpy as np
 
-from ..utils.logger import app_logger
+from ..utils.unified_logger import app_logger_compat as app_logger
 
 if TYPE_CHECKING:
     from ..core.interfaces.speech import ISpeechService

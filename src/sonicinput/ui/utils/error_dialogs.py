@@ -72,7 +72,7 @@ def show_hotkey_conflict_error(
                 ),
             ]
         )
-        for i, suggestion in enumerate(suggestions, 1):
+        for suggestion in suggestions:
             message_lines.append(f"  - {suggestion.upper()}")
 
     msg_box.setText("\n".join(message_lines))

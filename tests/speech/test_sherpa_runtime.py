@@ -15,6 +15,11 @@ def test_onnxruntime_package_dll_precedes_system32() -> None:
     onnxruntime = pytest.importorskip("onnxruntime")
 
     ort_dll = Path(onnxruntime.__file__).resolve().parent / "capi" / "onnxruntime.dll"
+    sherpa_dll = (
+        Path(pytest.importorskip("sherpa_onnx").__file__).resolve().parent
+        / "lib"
+        / "onnxruntime.dll"
+    )
     system32_dll = (
         Path(os.environ.get("SystemRoot", r"C:\Windows"))
         / "System32"
@@ -25,6 +30,8 @@ def test_onnxruntime_package_dll_precedes_system32() -> None:
     paths = [Path(str(candidate["path"])) for candidate in candidates]
 
     assert ort_dll in paths
+    assert sherpa_dll in paths
+    assert paths.index(sherpa_dll) < paths.index(ort_dll)
     if system32_dll.exists():
         assert paths.index(ort_dll) < paths.index(system32_dll)
 

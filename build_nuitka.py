@@ -6,15 +6,36 @@ This script compiles SonicInput into a standalone Windows executable using Nuitk
 Includes support for sherpa-onnx C extension modules and all required dependencies.
 """
 
+import hashlib
+import json
 import os
 import shutil
 import string
 import subprocess
 import sys
-import tempfile
 import time
+import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
+
+
+_QML_ROOT_MODULES = (
+    "QtQml",
+    "QtQuick",
+    "QtQuick/Controls",
+)
+_QML_TREE_MODULES = (
+    "QtQml/Models",
+    "QtQml/WorkerScript",
+    "QtQuick/Controls/Basic",
+    "QtQuick/Controls/FluentWinUI3",
+    "QtQuick/Controls/Fusion",
+    "QtQuick/Controls/impl",
+    "QtQuick/Effects",
+    "QtQuick/Layouts",
+    "QtQuick/Templates",
+    "QtQuick/Window",
+)
 
 
 # Read version number
@@ -28,6 +49,50 @@ def get_version():
                     # Extract version: version = "0.1.2" -> 0.1.2
                     return line.split('"')[1]
     return "0.0.0"
+
+
+def _fingerprint_files(paths: list[Path], context: dict[str, object]) -> str:
+    """Return a cheap, deterministic cache key for staged build inputs."""
+    digest = hashlib.sha256()
+    digest.update(json.dumps(context, sort_keys=True).encode("utf-8"))
+    for path in sorted(paths, key=lambda item: item.as_posix().casefold()):
+        stat = path.stat()
+        digest.update(
+            f"{path.as_posix()}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode("utf-8")
+        )
+    return digest.hexdigest()
+
+
+def _stage_manifest_path(staging_dir: Path) -> Path:
+    return staging_dir.parent / f".{staging_dir.name}.manifest.json"
+
+
+def _stage_cache_is_current(staging_dir: Path, fingerprint: str) -> bool:
+    if not staging_dir.is_dir():
+        return False
+    manifest_path = _stage_manifest_path(staging_dir)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return manifest.get("fingerprint") == fingerprint
+
+
+def _write_stage_manifest(staging_dir: Path, fingerprint: str) -> None:
+    manifest_path = _stage_manifest_path(staging_dir)
+    temporary_path = manifest_path.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps({"fingerprint": fingerprint}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary_path.replace(manifest_path)
+
+
+def _reset_staging_dir(staging_dir: Path) -> None:
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    _stage_manifest_path(staging_dir).unlink(missing_ok=True)
+    staging_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _collect_translation_text(assets_dir: Path) -> str:
@@ -82,12 +147,30 @@ def _subset_font(source_font: Path, target_font: Path, text: str) -> None:
     font.save(str(target_font))
 
 
+def _asset_source_paths(assets_dir: Path) -> list[Path]:
+    font_source_dir = assets_dir / "fonts" / "resource-han-rounded"
+    return [
+        assets_dir / "icon.png",
+        *sorted((assets_dir / "i18n").glob("*.qm")),
+        *sorted((assets_dir / "i18n").glob("*.ts")),
+        font_source_dir / "ResourceHanRoundedCN-Regular.ttf",
+        font_source_dir / "ResourceHanRoundedCN-Bold.ttf",
+        font_source_dir / "OFL-License.txt",
+        font_source_dir / "FONT-NOTICE.txt",
+    ]
+
+
 def stage_assets() -> Path:
     assets_dir = Path("assets")
-    staging_dir = Path("build") / "assets_staging"
-    if staging_dir.exists():
-        shutil.rmtree(staging_dir)
-    staging_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path("build") / "staging" / "assets"
+    fingerprint = _fingerprint_files(
+        _asset_source_paths(assets_dir), {"stage": "assets-v2"}
+    )
+    if _stage_cache_is_current(staging_dir, fingerprint):
+        print(f"[CACHE] Reusing staged assets: {staging_dir}")
+        return staging_dir
+
+    _reset_staging_dir(staging_dir)
 
     # Copy icon
     shutil.copy2(assets_dir / "icon.png", staging_dir / "icon.png")
@@ -115,6 +198,7 @@ def stage_assets() -> Path:
     for doc_name in ["OFL-License.txt", "FONT-NOTICE.txt"]:
         shutil.copy2(font_source_dir / doc_name, font_target_dir / doc_name)
 
+    _write_stage_manifest(staging_dir, fingerprint)
     return staging_dir
 
 
@@ -130,28 +214,64 @@ def _resolve_pyside6_qml_dir() -> Path:
     return qml_dir
 
 
-def stage_qml_runtime() -> Path:
-    """Stage only the QML imports used by the Fluent UI surfaces."""
-    source_qml_dir = _resolve_pyside6_qml_dir()
-    staging_dir = Path("build") / "qml_staging"
-    target_root = staging_dir / "PySide6" / "qml"
+def _qml_stage_source_paths(source_qml_dir: Path) -> list[Path]:
+    paths: list[Path] = []
+    for import_name in _QML_ROOT_MODULES:
+        source_dir = source_qml_dir / import_name
+        if not source_dir.is_dir():
+            raise RuntimeError(f"Required QML import not found: {source_dir}")
+        paths.extend(path for path in source_dir.iterdir() if path.is_file())
 
-    if staging_dir.exists():
-        shutil.rmtree(staging_dir)
+    for import_name in _QML_TREE_MODULES:
+        source_dir = source_qml_dir / import_name
+        if not source_dir.is_dir():
+            raise RuntimeError(f"Required QML import not found: {source_dir}")
+        paths.extend(path for path in source_dir.rglob("*") if path.is_file())
+    return paths
+
+
+def _copy_qml_root_files(source_dir: Path, target_dir: Path) -> None:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for path in source_dir.iterdir():
+        if path.is_file():
+            shutil.copy2(path, target_dir / path.name)
+
+
+def stage_qml_runtime() -> Path:
+    """Stage the verified QML runtime closure used by the Fluent UI surfaces."""
+    source_qml_dir = _resolve_pyside6_qml_dir()
+    try:
+        import PySide6
+    except Exception as exc:
+        raise RuntimeError("PySide6 is required to stage QML runtime modules.") from exc
+
+    staging_dir = Path("build") / "staging" / "qml"
+    target_root = staging_dir / "PySide6" / "qml"
+    fingerprint = _fingerprint_files(
+        _qml_stage_source_paths(source_qml_dir),
+        {
+            "stage": "qml-v2",
+            "pyside6_version": getattr(PySide6, "__version__", "unknown"),
+            "root_modules": _QML_ROOT_MODULES,
+            "tree_modules": _QML_TREE_MODULES,
+        },
+    )
+    if _stage_cache_is_current(staging_dir, fingerprint):
+        print(f"[CACHE] Reusing staged QML runtime: {staging_dir}")
+        return staging_dir
+
+    _reset_staging_dir(staging_dir)
     target_root.mkdir(parents=True, exist_ok=True)
 
-    qml_imports = [
-        "Qt",
-        "QtCore",
-        "QtQml",
-        "QtQuick",
-    ]
-    for import_name in qml_imports:
+    for import_name in _QML_ROOT_MODULES:
         source_dir = source_qml_dir / import_name
-        if not source_dir.exists():
-            raise RuntimeError(f"Required QML import not found: {source_dir}")
-        shutil.copytree(source_dir, target_root / import_name)
+        _copy_qml_root_files(source_dir, target_root / import_name)
 
+    for import_name in _QML_TREE_MODULES:
+        source_dir = source_qml_dir / import_name
+        shutil.copytree(source_dir, target_root / import_name, dirs_exist_ok=True)
+
+    _write_stage_manifest(staging_dir, fingerprint)
     return staging_dir
 
 
@@ -163,23 +283,6 @@ def _qml_plugin_data_options(staging_dir: Path) -> list[str]:
         relative_path = plugin_path.relative_to(staging_dir).as_posix()
         options.append(f"--include-data-file={plugin_path}={relative_path}")
     return options
-
-
-def _remove_reserved_files(package_name: str) -> None:
-    """Remove Windows-reserved filenames (e.g., NUL) from package data."""
-    try:
-        module = __import__(package_name)
-    except Exception:
-        return
-
-    package_dir = Path(module.__file__).resolve().parent
-    for path in package_dir.rglob("*"):
-        if path.is_file() and path.name.lower() == "nul":
-            try:
-                path.unlink()
-                print(f"[CLEAN] Removed reserved file: {path}")
-            except Exception as exc:
-                print(f"[WARN] Could not remove reserved file {path}: {exc}")
 
 
 def _resolve_pyside6_dll(dll_name: str) -> Path | None:
@@ -202,59 +305,19 @@ def _resolve_shiboken6_dll(dll_name: str) -> Path | None:
     return dll_path if dll_path.exists() else None
 
 
-def _find_onnxruntime_dll() -> Path | None:
-    env_paths = [
-        os.environ.get("ONNXRUNTIME_DLL_PATH"),
-        os.environ.get("ONNXRUNTIME_DLL"),
-    ]
-    for env_path in env_paths:
-        if env_path:
-            candidate = Path(env_path)
-            if candidate.exists():
-                return candidate
-
-    def _probe_dir(base_dir: Path) -> Path | None:
-        for rel in [
-            Path("onnxruntime.dll"),
-            Path("lib") / "onnxruntime.dll",
-            Path("capi") / "onnxruntime.dll",
-        ]:
-            candidate = base_dir / rel
-            if candidate.exists():
-                return candidate
-        return None
-
+def _bundled_onnxruntime_dll() -> Path:
+    """Verify the ORT DLL provided by the package included in the release."""
     try:
         import onnxruntime
+    except Exception as exc:
+        raise RuntimeError(
+            "onnxruntime is required for the local ASR release build."
+        ) from exc
 
-        candidate = _probe_dir(Path(onnxruntime.__file__).resolve().parent)
-        if candidate:
-            return candidate
-    except Exception:
-        pass
-
-    try:
-        import sherpa_onnx
-
-        candidate = _probe_dir(Path(sherpa_onnx.__file__).resolve().parent)
-        if candidate:
-            return candidate
-    except Exception:
-        pass
-
-    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-    system_candidate = system_root / "System32" / "onnxruntime.dll"
-    if system_candidate.exists():
-        return system_candidate
-
-    for path_entry in os.environ.get("PATH", "").split(os.pathsep):
-        if not path_entry:
-            continue
-        candidate = Path(path_entry) / "onnxruntime.dll"
-        if candidate.exists():
-            return candidate
-
-    return None
+    dll_path = Path(onnxruntime.__file__).resolve().parent / "capi" / "onnxruntime.dll"
+    if not dll_path.is_file():
+        raise RuntimeError(f"Bundled onnxruntime.dll not found: {dll_path}")
+    return dll_path
 
 
 def _resolve_offline_models_dir() -> Path | None:
@@ -269,6 +332,83 @@ def _resolve_offline_models_dir() -> Path | None:
                 models_dir = (Path.cwd() / models_dir).resolve()
             return models_dir
     return None
+
+
+def _build_path(environment_name: str, default_path: str) -> Path:
+    configured_path = Path(os.environ.get(environment_name, default_path)).expanduser()
+    if configured_path.is_absolute():
+        return configured_path
+    return Path.cwd() / configured_path
+
+
+def _validate_nuitka_output(output_dir: Path) -> None:
+    standalone_dir = output_dir / "app.dist"
+    report_path = output_dir / "nuitka-report.xml"
+    if not standalone_dir.is_dir():
+        raise RuntimeError(f"Standalone output not found: {standalone_dir}")
+    if not report_path.is_file():
+        raise RuntimeError(f"Nuitka report not found: {report_path}")
+
+    required_paths = [
+        Path("assets/icon.png"),
+        Path("assets/i18n/sonicinput_en_US.qm"),
+        Path("assets/i18n/sonicinput_zh_CN.qm"),
+        Path("onnxruntime.dll"),
+        Path("onnxruntime/capi/onnxruntime.dll"),
+        Path("onnxruntime/capi/onnxruntime_pybind11_state.pyd"),
+        Path("pypinyin/phrases_dict.json"),
+        Path("pypinyin/pinyin_dict.json"),
+        Path("PySide6/qml/QtQuick/Controls/FluentWinUI3/qmldir"),
+        Path("sonicinput/ui/qml/FluentSettingsWindow.qml"),
+    ]
+    missing = [
+        path.as_posix()
+        for path in required_paths
+        if not (standalone_dir / path).is_file()
+    ]
+    if not list((standalone_dir / "sherpa_onnx" / "lib").glob("_sherpa_onnx*.pyd")):
+        missing.append("sherpa_onnx/lib/_sherpa_onnx*.pyd")
+    if missing:
+        raise RuntimeError("Missing packaged runtime files: " + ", ".join(missing))
+
+    forbidden_paths = [
+        Path("PySide6/qml/QtQuick/VirtualKeyboard"),
+        Path("PySide6/qml/QtWebEngine"),
+        Path("cryptography"),
+    ]
+    unexpected = [
+        path.as_posix() for path in forbidden_paths if (standalone_dir / path).exists()
+    ]
+    if (standalone_dir / "samplerate.pyd").exists():
+        unexpected.append("samplerate.pyd")
+    if unexpected:
+        raise RuntimeError("Unexpected packaged files: " + ", ".join(unexpected))
+
+    report = ElementTree.parse(report_path)
+    module_names = {
+        module.attrib["name"]
+        for module in report.iter("module")
+        if "name" in module.attrib
+    }
+    onnxruntime_module_count = sum(
+        name == "onnxruntime" or name.startswith("onnxruntime.")
+        for name in module_names
+    )
+    if onnxruntime_module_count > 40:
+        raise RuntimeError(
+            "ONNX Runtime module closure is unexpectedly large: "
+            f"{onnxruntime_module_count} modules"
+        )
+    if any(name == "sympy" or name.startswith("sympy.") for name in module_names):
+        raise RuntimeError("Unexpected SymPy dependency in release payload")
+
+    payload_size = sum(
+        path.stat().st_size for path in standalone_dir.rglob("*") if path.is_file()
+    )
+    print(
+        f"[AUDIT] Standalone payload: {payload_size / (1024 * 1024):.2f} MB; "
+        f"onnxruntime modules: {onnxruntime_module_count}"
+    )
 
 
 def _build_offline_bundle(
@@ -298,13 +438,16 @@ def _build_offline_bundle(
     if zip_path.exists():
         zip_path.unlink()
 
-    with tempfile.TemporaryDirectory(
-        prefix=f"{exe_path.stem}-offline-staging-", dir=dist_dir
-    ) as temp_dir:
-        staging_dir = Path(temp_dir)
-        shutil.copy2(exe_path, staging_dir / exe_path.name)
-        shutil.copytree(models_dir, staging_dir / "models")
-        zip_path = Path(shutil.make_archive(str(zip_base), "zip", root_dir=staging_dir))
+    with zipfile.ZipFile(
+        zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as archive:
+        archive.write(exe_path, exe_path.name)
+        for model_path in sorted(models_dir.rglob("*")):
+            if model_path.is_file():
+                archive_name = (
+                    Path("models") / model_path.relative_to(models_dir)
+                ).as_posix()
+                archive.write(model_path, archive_name)
 
     print(f"[OFFLINE] Bundle created: {zip_path}")
     return zip_path
@@ -313,6 +456,10 @@ def _build_offline_bundle(
 version = get_version()
 print(f"Building SonicInput v{version}")
 build_start = time.perf_counter()
+nuitka_output_dir = _build_path("SONICINPUT_NUITKA_WORK_DIR", "build/nuitka")
+release_dir = _build_path("SONICINPUT_RELEASE_DIR", f"dist/release/v{version}")
+nuitka_output_dir.mkdir(parents=True, exist_ok=True)
+release_dir.mkdir(parents=True, exist_ok=True)
 
 stage_start = time.perf_counter()
 staged_assets_dir = stage_assets()
@@ -321,13 +468,8 @@ stage_elapsed = time.perf_counter() - stage_start
 print(f"Using staged assets: {staged_assets_dir}")
 print(f"Using staged QML runtime: {staged_qml_dir}")
 print(f"[TIME] Asset staging: {stage_elapsed:.2f}s")
-_remove_reserved_files("sherpa_onnx")
-onnxruntime_dll = _find_onnxruntime_dll()
-if not onnxruntime_dll:
-    print("[ERROR] onnxruntime.dll not found; local ASR engine will not work.")
-    print("[HINT] Ensure onnxruntime.dll is available or set ONNXRUNTIME_DLL_PATH.")
-    sys.exit(1)
-print(f"[INFO] Using onnxruntime.dll: {onnxruntime_dll}")
+bundled_onnxruntime_dll = _bundled_onnxruntime_dll()
+print(f"[INFO] Verified bundled onnxruntime.dll: {bundled_onnxruntime_dll}")
 
 # Nuitka command with sherpa-onnx support
 nuitka_cmd = [
@@ -342,10 +484,9 @@ nuitka_cmd = [
     # Package inclusions
     "--include-package=sonicinput",  # Main application package
     "--include-package=sherpa_onnx",  # sherpa-onnx package (local ASR engine, includes C extension)
-    "--include-package-data=sherpa_onnx",  # Include model/config data (remove NUL file if present)
+    "--include-package-data=sherpa_onnx",  # Include model/config data and C extension
     "--include-package-data=pypinyin",  # Runtime dictionaries used by lexicon matching
-    f"--include-data-file={onnxruntime_dll}=sherpa_onnx/lib/onnxruntime.dll",
-    "--include-module=sonicinput.utils.constants",  # Ensure constants.py is included
+    "--noinclude-data-files=**/NUL",  # Do not mutate site-packages for a Windows-reserved filename
     "--include-module=PySide6.QtUiTools",  # qt_material needs QtUiTools at runtime
     "--include-package=PySide6.QtQml",  # Fluent QML settings/overlay host
     "--include-package=PySide6.QtQuick",  # Qt Quick scene graph/window support
@@ -378,14 +519,17 @@ nuitka_cmd = [
     "--noinclude-dlls=*webengine*.dll",
     # Application metadata
     "--windows-icon-from-ico=src/sonicinput/resources/icons/app_icon.ico",
-    "--output-dir=dist",
+    f"--output-dir={nuitka_output_dir}",
+    f"--report={nuitka_output_dir / 'nuitka-report.xml'}",
+    "--report-diffable",
     "app.py",
 ]
 nuitka_cmd.extend(_qml_plugin_data_options(staged_qml_dir))
 
 qml_runtime_dll_names = [
-    "Qt6LabsQmlModels.dll",
-    "Qt6QmlCore.dll",
+    "Qt6QmlMeta.dll",
+    "Qt6QmlModels.dll",
+    "Qt6QmlWorkerScript.dll",
     "Qt6QuickControls2Basic.dll",
     "Qt6QuickControls2BasicStyleImpl.dll",
     "Qt6QuickControls2FluentWinUI3StyleImpl.dll",
@@ -394,7 +538,7 @@ qml_runtime_dll_names = [
     "Qt6QuickControls2Impl.dll",
     "Qt6QuickEffects.dll",
     "Qt6QuickLayouts.dll",
-    "Qt6QuickShapes.dll",
+    "Qt6QuickTemplates2.dll",
 ]
 for dll_name in qml_runtime_dll_names:
     dll_path = _resolve_pyside6_dll(dll_name)
@@ -427,16 +571,28 @@ print("\nRunning Nuitka compilation...\n")
 print(f"Command: {' '.join(nuitka_cmd)}\n")
 
 # Execute compilation
+compiled_exe_path = nuitka_output_dir / "app.exe"
+compiled_report_path = nuitka_output_dir / "nuitka-report.xml"
+# A successful compiler invocation must produce a fresh executable. Removing a
+# previous executable or report prevents stale build data from being promoted
+# or used to audit a new release.
+compiled_exe_path.unlink(missing_ok=True)
+compiled_report_path.unlink(missing_ok=True)
 compile_start = time.perf_counter()
 result = subprocess.run(nuitka_cmd)
 compile_elapsed = time.perf_counter() - compile_start
 total_elapsed = time.perf_counter() - build_start
 
 if result.returncode == 0:
+    try:
+        _validate_nuitka_output(nuitka_output_dir)
+    except Exception as exc:
+        print(f"\n[ERROR] Packaged output audit failed: {exc}")
+        sys.exit(1)
+
     # Compilation successful, rename output file
-    dist_dir = Path("dist")
-    old_name = dist_dir / "app.exe"
-    new_name = dist_dir / f"SonicInput-v{version}-win64.exe"
+    old_name = compiled_exe_path
+    new_name = release_dir / f"SonicInput-v{version}-win64.exe"
 
     if old_name.exists():
         # Delete target file if exists
@@ -452,16 +608,17 @@ if result.returncode == 0:
         print(f"[TIME] Total: {total_elapsed:.2f}s")
         offline_models_dir = _resolve_offline_models_dir()
         if offline_models_dir:
-            _build_offline_bundle(new_name, offline_models_dir, dist_dir)
+            _build_offline_bundle(new_name, offline_models_dir, release_dir)
     else:
-        print(f"\n[WARNING] Expected output file not found: {old_name}")
-        # List dist directory contents
-        if dist_dir.exists():
-            print("\nFiles in dist directory:")
-            for file in dist_dir.iterdir():
+        print(f"\n[ERROR] Expected output file not found: {old_name}")
+        # List the isolated Nuitka output directory for diagnostics.
+        if nuitka_output_dir.exists():
+            print("\nFiles in Nuitka output directory:")
+            for file in nuitka_output_dir.iterdir():
                 print(f"  - {file.name}")
         print(f"[TIME] Compile: {compile_elapsed:.2f}s")
         print(f"[TIME] Total: {total_elapsed:.2f}s")
+        sys.exit(1)
 else:
     print(f"\n[ERROR] Build failed with exit code {result.returncode}")
     print(f"[TIME] Compile: {compile_elapsed:.2f}s")

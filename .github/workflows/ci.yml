@@ -47,18 +47,18 @@ jobs:
 
     - name: Run ruff (linting)
       run: |
-        uv run ruff check src/ tests/ --output-format=github
+        uv run ruff check src/ tests/ app.py build_nuitka.py scripts/ --output-format=github
 
     - name: Run ruff (formatting check)
       run: |
-        uv run ruff format --check src/ tests/
+        uv run ruff format --check src/ tests/ app.py build_nuitka.py scripts/
 
     - name: Run mypy (type checking)
-      # 0 errors across src/ — this gate is REAL (no `|| true`).
+      # This gate is REAL (no `|| true`).
       # Baselined UI modules live in pyproject.toml [tool.mypy.overrides];
       # remove modules from the baseline as their errors get fixed.
       run: |
-        uv run mypy src/
+        uv run mypy src/ app.py build_nuitka.py scripts/
 
   # 核心回归测试（跳过 GUI/GPU/E2E）
   tests:

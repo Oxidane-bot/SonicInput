@@ -75,14 +75,18 @@ def _load_history_record(db_path: Path, record_id: str) -> dict[str, Any] | None
             "audio_file_path_present": bool(str(row["audio_file_path"] or "").strip())
             if "audio_file_path" in row_keys
             else False,
-            "duration": float(row["duration"] or 0.0) if "duration" in row_keys else 0.0,
+            "duration": float(row["duration"] or 0.0)
+            if "duration" in row_keys
+            else 0.0,
             "transcription_provider": row["transcription_provider"]
             if "transcription_provider" in row_keys
             else None,
             "transcription_status": row["transcription_status"]
             if "transcription_status" in row_keys
             else None,
-            "streaming_mode": row["streaming_mode"] if "streaming_mode" in row_keys else None,
+            "streaming_mode": row["streaming_mode"]
+            if "streaming_mode" in row_keys
+            else None,
             "transcription_path": row["transcription_path"]
             if "transcription_path" in row_keys
             else "standard",
@@ -92,9 +96,15 @@ def _load_history_record(db_path: Path, record_id: str) -> dict[str, Any] | None
             "transcription_duration": row["transcription_duration"]
             if "transcription_duration" in row_keys
             else None,
-            "used_fallback": bool(row["used_fallback"]) if "used_fallback" in row_keys else False,
-            "fallback_type": row["fallback_type"] if "fallback_type" in row_keys else "none",
-            "fallback_reason": row["fallback_reason"] if "fallback_reason" in row_keys else None,
+            "used_fallback": bool(row["used_fallback"])
+            if "used_fallback" in row_keys
+            else False,
+            "fallback_type": row["fallback_type"]
+            if "fallback_type" in row_keys
+            else "none",
+            "fallback_reason": row["fallback_reason"]
+            if "fallback_reason" in row_keys
+            else None,
             "diagnostics_collected": bool(row["diagnostics_collected"])
             if "diagnostics_collected" in row_keys
             else False,
@@ -233,14 +243,22 @@ def _build_event_flow(log_entries: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "first_log_timestamp": log_entries[0].get("timestamp") if log_entries else None,
-        "latest_log_timestamp": log_entries[-1].get("timestamp") if log_entries else None,
+        "latest_log_timestamp": log_entries[-1].get("timestamp")
+        if log_entries
+        else None,
         "event_count": len(log_entries),
-        "path_event_count": sum(1 for entry in log_entries if entry["event"] in _PATH_EVENTS),
+        "path_event_count": sum(
+            1 for entry in log_entries if entry["event"] in _PATH_EVENTS
+        ),
         "fallback_event_count": sum(
-            1 for entry in log_entries if entry["event"] == "Transcription fallback engaged"
+            1
+            for entry in log_entries
+            if entry["event"] == "Transcription fallback engaged"
         ),
         "latest_terminal_event": latest_terminal_event,
-        "events_in_order": [str(entry.get("event") or "unknown") for entry in log_entries],
+        "events_in_order": [
+            str(entry.get("event") or "unknown") for entry in log_entries
+        ],
         "observed_selected_paths": _dedupe_non_empty_in_order(
             [entry.get("selected_path") for entry in log_entries]
         ),
@@ -266,7 +284,9 @@ def _build_issue_summary(
     if state == "record_not_found_in_db_or_logs":
         return f"record_id={record_id} was not found in the inspected DB or logs"
     if state == "runtime_logs_without_db_record":
-        latest_event = latest_path_event or (log_entries[-1] if log_entries else None) or {}
+        latest_event = (
+            latest_path_event or (log_entries[-1] if log_entries else None) or {}
+        )
         return (
             f"record_id={record_id} runtime log exists without DB row: "
             f"log_path={latest_event.get('selected_path') or 'none'}, "
@@ -466,10 +486,7 @@ def format_transcription_record_timeline_summary(result: dict[str, Any]) -> str:
                 "DB vs Runtime Comparison:",
                 f"- DB path: {comparison.get('db_transcription_path') or 'none'}",
                 f"- Runtime path: {comparison.get('log_selected_path') or 'none'}",
-                (
-                    "- Paths match: "
-                    f"{'yes' if comparison.get('paths_match') else 'no'}"
-                ),
+                (f"- Paths match: {'yes' if comparison.get('paths_match') else 'no'}"),
                 (
                     "- DB decision reason: "
                     f"{comparison.get('db_transcription_decision_reason') or 'none'}"
@@ -567,9 +584,7 @@ def format_transcription_record_timeline_card(result: dict[str, Any]) -> str:
 
     observed_selected_paths = list(event_flow.get("observed_selected_paths") or [])
     if observed_selected_paths:
-        lines.append(
-            f"- **Observed paths:** `{' -> '.join(observed_selected_paths)}`"
-        )
+        lines.append(f"- **Observed paths:** `{' -> '.join(observed_selected_paths)}`")
 
     observed_decision_reasons = list(event_flow.get("observed_decision_reasons") or [])
     if observed_decision_reasons:

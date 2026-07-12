@@ -4,48 +4,6 @@
 """
 
 
-def find_longest_common_substring(s1: str, s2: str) -> tuple[int, int, int]:
-    """查找两个字符串的最长公共子串
-
-    Args:
-        s1: 第一个字符串
-        s2: 第二个字符串
-
-    Returns:
-        tuple[int, int, int]: (start_in_s1, start_in_s2, length)
-            - start_in_s1: 公共子串在s1中的起始位置
-            - start_in_s2: 公共子串在s2中的起始位置
-            - length: 公共子串的长度
-    """
-    if not s1 or not s2:
-        return 0, 0, 0
-
-    m, n = len(s1), len(s2)
-    # dp[i][j] 表示以s1[i-1]和s2[j-1]结尾的最长公共子串长度
-    max_len = 0
-    end_pos_s1 = 0
-    end_pos_s2 = 0
-
-    # 使用滚动数组优化空间复杂度
-    prev_row = [0] * (n + 1)
-
-    for i in range(1, m + 1):
-        curr_row = [0] * (n + 1)
-        for j in range(1, n + 1):
-            if s1[i - 1] == s2[j - 1]:
-                curr_row[j] = prev_row[j - 1] + 1
-                if curr_row[j] > max_len:
-                    max_len = curr_row[j]
-                    end_pos_s1 = i
-                    end_pos_s2 = j
-        prev_row = curr_row
-
-    if max_len == 0:
-        return 0, 0, 0
-
-    return end_pos_s1 - max_len, end_pos_s2 - max_len, max_len
-
-
 def calculate_text_diff(old_text: str, new_text: str) -> tuple[int, str]:
     """计算文本差异。
 

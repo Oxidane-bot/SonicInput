@@ -22,11 +22,9 @@ from .controller import (
 from .event import EventPriority, IEventService
 from .hotkey import IHotkeyService
 from .input import IInputService
-from .lifecycle import ComponentState, ILifecycleManaged, ILifecycleManager
 from .speech import ISpeechService, ISyncTranscriptionService
 from .state import AppState, IStateManager, RecordingState
 from .storage import ICacheService, IStorageService
-from .ui import IOverlayComponent, ITrayComponent, IUIComponent
 
 
 @dataclass
@@ -76,21 +74,13 @@ __all__ = [
     "IHotkeyService",
     "IEventService",
     "EventPriority",
-    # UI组件接口
-    "IUIComponent",
-    "IOverlayComponent",
-    "ITrayComponent",
     # 数据存储接口
     "IStorageService",
     "ICacheService",
-    # 生命周期管理接口
-    "ILifecycleManaged",
-    "ILifecycleManager",
     # 状态管理接口
     "IStateManager",
     "AppState",
     "RecordingState",
-    "ComponentState",
     # 控制器接口
     "IRecordingController",
     "ITranscriptionController",

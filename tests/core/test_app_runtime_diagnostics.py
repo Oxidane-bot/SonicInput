@@ -1,22 +1,11 @@
 """Runtime diagnostics tests for app entrypoint crash markers."""
 
-import importlib.util
+import importlib
 import json
 import os
-from pathlib import Path
 
 
-def _load_app_module():
-    module_path = Path(__file__).resolve().parents[2] / "app.py"
-    spec = importlib.util.spec_from_file_location("sonicinput_app_entry", module_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-app = _load_app_module()
+app = importlib.import_module("sonicinput.main")
 
 
 def _prepare_isolated_runtime(monkeypatch, tmp_path):

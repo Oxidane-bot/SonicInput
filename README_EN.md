@@ -13,13 +13,12 @@
 - Local lexicon memory: user-confirmed entries are injected before later AI cleanup only when phonetically relevant
 - Lexicon review: the settings page can ask the configured AI provider to mine raw ASR context for candidate terms
 
-## What's New (v0.8.1)
-- **Local lexicon memory is now a top-level settings page** with separate tabs and independently scrolling lists for candidates and saved vocabulary. The nested AI-page management entry has been removed.
-- **History loads immediately** when entered, re-entered, or selected again. It also prefetches additional pages until the viewport is filled instead of waiting for a manual refresh.
-- **Candidate extraction is more precise** and stores the smallest complete reusable term. For example, `小梗盖 -> 小梗概` in context is stored as `梗盖 -> 梗概`.
-- **Homophone and controlled near-homophone correction** accepts exact phonetic matches or one conservative sound confusion while rejecting semantic jumps, cross-script pairs, and candidates without verifiable source records.
-- **Lexicon storage and recall are corrected**: one canonical term can retain multiple mistaken forms, mutations invalidate the runtime cache immediately, and active entries are no longer truncated by a fixed limit.
-- **The old review implementation is hard-cut**. Incompatible review/lexicon schemas are rebuilt, so old pending candidates and saved entries are not guaranteed to survive. Export the lexicon before upgrading.
+## What's New (v0.8.2)
+- **Runtime cleanup** removes unused legacy plugins, compatibility layers, services, and dependencies while retaining supported entry points. `app.py` remains the source/Nuitka launcher, and `sonicinput` is now the official command.
+- **More trustworthy error records**: recovery no longer reports an action as successful when it was not run, and normal CLI paths such as `--help` do not create misleading crash records.
+- **Repeatable distribution builds**: wheel/sdist resource handling is explicit, local caches and historic build directories are excluded, and Nuitka intermediates are separate from release artifacts.
+- **Faster, smaller packaging**: the QML runtime is staged from the verified Fluent UI dependency closure, excluding unused WebEngine, VirtualKeyboard, 3D, and PDF modules. QML staging dropped from 14.9 MiB to 6.64 MiB, and the final 68.32 MiB executable is about 3 MiB smaller than v0.8.1. Repeated builds reuse asset, QML staging, and Nuitka compiler caches.
+- **The local-lexicon and history improvements remain**: top-level lexicon navigation, independently scrolling candidate/saved lists, immediate history refresh, and stricter evidence-backed phonetic correction.
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -30,7 +29,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.8.1-win64.exe` from [v0.8.1 Release](https://github.com/Oxidane-bot/SonicInput/releases/tag/v0.8.1)
+1. Download `SonicInput-v0.8.2-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
 2. Run the exe; default hotkey is Ctrl+Alt+Space (customize it in settings if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 
@@ -42,7 +41,7 @@
 - The review model extracts the smallest complete term from full raw-sentence context. Every candidate must reference verifiable source records and enters local memory only after user acceptance.
 - Before later AI cleanup, `LexiconMatcher` phonetic/near-phonetic filtering selects only entries relevant to the current raw text.
 - Automatic lexicon review is disabled by default; it can be run manually from settings or enabled for idle scheduling.
-- v0.8.1 does not retain a compatibility migration for obsolete review schemas. An incompatible review/lexicon schema is rebuilt; export from the old settings page before upgrading. Configuration and transcription history are unaffected.
+- Since v0.8.1, obsolete review schemas do not retain a compatibility migration. An incompatible review/lexicon schema is rebuilt; export from the old settings page before upgrading. Configuration and transcription history are unaffected.
 - Local audit scripts omit transcript text by default and store metadata such as lengths, status, path, and anomaly labels for safe prompt/model comparisons.
 
 ## Dev Setup
@@ -50,7 +49,7 @@
 git clone https://github.com/Oxidane-bot/SonicInput.git
 cd SonicInput
 uv sync          # install runtime deps
-uv run python app.py --gui
+uv run sonicinput --gui
 ```
 
 ## Ruff Automation

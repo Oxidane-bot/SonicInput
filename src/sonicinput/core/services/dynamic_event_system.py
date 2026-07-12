@@ -45,7 +45,6 @@ class EventMetadata:
     description: str = ""
     version: str = "1.0.0"
     namespace: str = "default"
-    deprecated: bool = False
     deprecation_message: str = ""
     tags: List[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)

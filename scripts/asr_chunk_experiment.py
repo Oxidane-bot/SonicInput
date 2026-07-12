@@ -44,14 +44,18 @@ def _default_config_path() -> Path:
 
 
 def _default_history_db_path() -> Path:
-    return Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "history" / "history.db"
+    return (
+        Path(os.environ.get("APPDATA", ".")) / "SonicInput" / "history" / "history.db"
+    )
 
 
 def load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_recent_samples(history_db: Path, min_duration: float, limit: int) -> List[Sample]:
+def load_recent_samples(
+    history_db: Path, min_duration: float, limit: int
+) -> List[Sample]:
     sql = """
     SELECT id, timestamp, audio_file_path, duration, transcription_provider, transcription_status
     FROM history_records
@@ -179,7 +183,9 @@ def merge_texts_with_dedup(parts: List[str], max_overlap_chars: int = 60) -> str
             merged = part
             continue
 
-        overlap = longest_suffix_prefix_overlap(merged, part, max_chars=max_overlap_chars)
+        overlap = longest_suffix_prefix_overlap(
+            merged, part, max_chars=max_overlap_chars
+        )
         if overlap > 0:
             merged = merged + part[overlap:]
         else:
@@ -187,7 +193,9 @@ def merge_texts_with_dedup(parts: List[str], max_overlap_chars: int = 60) -> str
     return merged.strip()
 
 
-def transcribe_chunks(service: Any, chunks: List[np.ndarray], language: Optional[str]) -> List[str]:
+def transcribe_chunks(
+    service: Any, chunks: List[np.ndarray], language: Optional[str]
+) -> List[str]:
     texts: List[str] = []
     for chunk in chunks:
         result = service.transcribe(chunk, language=language)
@@ -261,11 +269,15 @@ def run_experiment(
         config.get("audio", {}).get("streaming", {}).get("chunk_duration", 30.0)
     )
 
-    samples = load_recent_samples(history_db, min_duration=min_duration, limit=sample_count)
+    samples = load_recent_samples(
+        history_db, min_duration=min_duration, limit=sample_count
+    )
     if not samples:
         raise RuntimeError("No eligible audio samples found in history.db")
 
-    local_service = SpeechServiceFactory.create_service(provider="local", model=local_model)
+    local_service = SpeechServiceFactory.create_service(
+        provider="local", model=local_model
+    )
     local_service.load_model()
 
     clouds = {}
@@ -296,13 +308,17 @@ def run_experiment(
         local_full_text = str(local_full_result.get("text", "") or "")
 
         chunks_current = split_chunks_current(audio, chunk_duration=chunk_duration)
-        chunk_texts_current = transcribe_chunks(local_service, chunks_current, language=language)
+        chunk_texts_current = transcribe_chunks(
+            local_service, chunks_current, language=language
+        )
         local_chunked_current_text = current_strategy_text(chunk_texts_current)
 
         chunks_improved = split_chunks_with_overlap(
             audio, chunk_duration=chunk_duration, overlap_seconds=overlap_seconds
         )
-        chunk_texts_improved = transcribe_chunks(local_service, chunks_improved, language=language)
+        chunk_texts_improved = transcribe_chunks(
+            local_service, chunks_improved, language=language
+        )
         local_chunked_improved_text = merge_texts_with_dedup(chunk_texts_improved)
 
         cloud_results: Dict[str, Dict[str, Any]] = {}
@@ -366,7 +382,9 @@ def run_experiment(
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = output_dir / f"asr_chunk_experiment_{stamp}.json"
     md_path = output_dir / f"asr_chunk_experiment_{stamp}.md"
-    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     md_path.write_text(build_markdown_summary(report), encoding="utf-8")
     print(f"JSON report: {json_path}")
     print(f"Markdown report: {md_path}")
@@ -382,7 +400,9 @@ def build_markdown_summary(report: Dict[str, Any]) -> str:
     lines.append(f"- Chunk duration: {meta['chunk_duration_seconds']}s")
     lines.append(f"- Overlap (improved): {meta['overlap_seconds']}s")
     lines.append(f"- Sample count: {meta['sample_count']}")
-    lines.append(f"- Cloud providers: {', '.join(meta['cloud_providers']) if meta['cloud_providers'] else 'none'}")
+    lines.append(
+        f"- Cloud providers: {', '.join(meta['cloud_providers']) if meta['cloud_providers'] else 'none'}"
+    )
     lines.append(f"- Elapsed: {meta['elapsed_seconds']}s")
     lines.append("")
 

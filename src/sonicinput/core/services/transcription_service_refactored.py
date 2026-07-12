@@ -270,6 +270,7 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                 # 启动各个组件
                 self.model_manager.start()
                 self.task_queue_manager.start()
+                self.error_recovery_service.start()
 
                 # 不再自动加载模型，由ApplicationOrchestrator根据配置决定是否加载
                 # 这避免了冗余的模型加载
@@ -463,18 +464,30 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
         Raises:
             WhisperLoadError: 如果转录核心不可用
         """
-        # 检查核心资源（而非服务状态）
-        if not self.ensure_transcription_core():
-            raise WhisperLoadError(
-                "Transcription core not available. "
-                "Please ensure the model is loaded or the service is started."
-            )
-
         try:
+            # 检查核心资源（而非服务状态）
+            if not self.ensure_transcription_core():
+                raise WhisperLoadError(
+                    "Transcription core not available. "
+                    "Please ensure the model is loaded or the service is started."
+                )
+
             # 使用转录核心进行同步转录
             result = self.transcription_core.transcribe_audio(
                 audio_data, language, temperature
             )
+
+            if not result.get("success", True):
+                error = RuntimeError(result.get("error", "Transcription failed"))
+                result["error_result"] = self.error_recovery_service.handle_error(
+                    error,
+                    {
+                        "operation": "transcribe_sync",
+                        "audio_length": len(audio_data),
+                        "language": language,
+                        "temperature": temperature,
+                    },
+                )
 
             # 仅在明确要求时发送转录完成事件
             # 注意：retry等手动转录不应触发事件，避免与正常录音流程冲突
@@ -1058,9 +1071,12 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             在独立调用场景（如 retry、测试）中使用此方法验证资源可用性，
             而不是检查服务生命周期状态（is_running）。
         """
-        # 1. 核心已存在
+        # 1. 核心已存在且底层引擎仍就绪
         if self.transcription_core:
-            return True
+            core_is_ready = getattr(self.transcription_core, "is_ready", None)
+            if not callable(core_is_ready) or core_is_ready():
+                return True
+            self.transcription_core = None
 
         try:
             # 2. 尝试从已加载的引擎恢复

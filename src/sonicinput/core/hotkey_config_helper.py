@@ -43,18 +43,3 @@ def get_hotkeys_from_config(config_service) -> Tuple[List[str], str]:
 
     # Fallback
     return (["ctrl+alt+space"], "auto")
-
-
-def set_hotkeys_to_config(
-    config_service, hotkeys: List[str], backend: str = "auto"
-) -> None:
-    """Save hotkeys and backend to configuration
-
-    Always saves in new format: {"keys": [...], "backend": "..."}
-
-    Args:
-        config_service: Configuration service instance
-        hotkeys: List of hotkey strings
-        backend: Backend name
-    """
-    config_service.set_setting("hotkeys", {"keys": hotkeys, "backend": backend})

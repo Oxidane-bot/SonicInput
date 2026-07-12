@@ -117,7 +117,9 @@ def _assess_progress(
             else None,
             "previous_rank": None,
             "current_rank": (
-                _STATE_PROGRESS_RANKS.get(str(latest_snapshot.get("diagnosis_state") or ""))
+                _STATE_PROGRESS_RANKS.get(
+                    str(latest_snapshot.get("diagnosis_state") or "")
+                )
                 if latest_snapshot
                 else None
             ),
@@ -291,9 +293,7 @@ def _build_operator_guidance(
             "Rerun readiness and append another snapshot to check whether end-to-end alignment becomes visible.",
         ]
     elif latest_state == "partial_stage6_readiness":
-        summary = (
-            "Some post-cutoff evidence exists, but DB/log correlation is still incomplete."
-        )
+        summary = "Some post-cutoff evidence exists, but DB/log correlation is still incomplete."
         actions = [
             "Compare schema and observability outputs side by side.",
             (
@@ -388,9 +388,12 @@ def _build_recent_snapshot_digest(
             transition_summary = None
             elapsed_since_previous_seconds = None
         elif previous_state == current_state:
+            assert previous_snapshot is not None
             delta_kind = "unchanged"
             transition_summary = None
-            previous_dt = _parse_observed_at_utc(previous_snapshot.get("observed_at_utc"))
+            previous_dt = _parse_observed_at_utc(
+                previous_snapshot.get("observed_at_utc")
+            )
             current_dt = _parse_observed_at_utc(snapshot.get("observed_at_utc"))
             elapsed_since_previous_seconds = (
                 int((current_dt - previous_dt).total_seconds())
@@ -398,9 +401,12 @@ def _build_recent_snapshot_digest(
                 else None
             )
         else:
+            assert previous_snapshot is not None
             delta_kind = "changed"
             transition_summary = f"{previous_state} -> {current_state}"
-            previous_dt = _parse_observed_at_utc(previous_snapshot.get("observed_at_utc"))
+            previous_dt = _parse_observed_at_utc(
+                previous_snapshot.get("observed_at_utc")
+            )
             current_dt = _parse_observed_at_utc(snapshot.get("observed_at_utc"))
             elapsed_since_previous_seconds = (
                 int((current_dt - previous_dt).total_seconds())
@@ -436,8 +442,12 @@ def _build_state_dwell_summary(
 ) -> dict[str, Any]:
     seconds_by_state: dict[str, int] = {}
     for index in range(len(snapshots) - 1):
-        current_dt = _parse_observed_at_utc(str(snapshots[index].get("observed_at_utc") or ""))
-        next_dt = _parse_observed_at_utc(str(snapshots[index + 1].get("observed_at_utc") or ""))
+        current_dt = _parse_observed_at_utc(
+            str(snapshots[index].get("observed_at_utc") or "")
+        )
+        next_dt = _parse_observed_at_utc(
+            str(snapshots[index + 1].get("observed_at_utc") or "")
+        )
         if current_dt is None or next_dt is None:
             continue
         delta_seconds = int((next_dt - current_dt).total_seconds())
@@ -453,8 +463,14 @@ def _build_state_dwell_summary(
 
     latest_state_elapsed_seconds_since_first_seen = None
     latest_state_elapsed_human_since_first_seen = None
-    if latest_diagnosis_state is not None and latest_state_first_seen_at_utc is not None and snapshots:
-        latest_dt = _parse_observed_at_utc(str(snapshots[-1].get("observed_at_utc") or ""))
+    if (
+        latest_diagnosis_state is not None
+        and latest_state_first_seen_at_utc is not None
+        and snapshots
+    ):
+        latest_dt = _parse_observed_at_utc(
+            str(snapshots[-1].get("observed_at_utc") or "")
+        )
         first_seen_dt = _parse_observed_at_utc(latest_state_first_seen_at_utc)
         if latest_dt is not None and first_seen_dt is not None:
             latest_state_elapsed_seconds_since_first_seen = int(
@@ -491,7 +507,10 @@ def inspect_stage6_snapshot_timeline(
 
     unique_diagnosis_states_in_order: list[str] = []
     for state in diagnosis_states:
-        if not unique_diagnosis_states_in_order or unique_diagnosis_states_in_order[-1] != state:
+        if (
+            not unique_diagnosis_states_in_order
+            or unique_diagnosis_states_in_order[-1] != state
+        ):
             unique_diagnosis_states_in_order.append(state)
 
     first_seen_by_diagnosis_state: dict[str, str] = {}
@@ -623,13 +642,19 @@ def inspect_stage6_snapshot_timeline(
         "state_transitions": state_transitions,
         "latest_transition": latest_transition,
         "latest_transition_summary": latest_transition_summary,
-        "first_observed_at_utc": snapshots[0].get("observed_at_utc") if snapshots else None,
-        "latest_observed_at_utc": latest_snapshot.get("observed_at_utc") if latest_snapshot else None,
+        "first_observed_at_utc": snapshots[0].get("observed_at_utc")
+        if snapshots
+        else None,
+        "latest_observed_at_utc": latest_snapshot.get("observed_at_utc")
+        if latest_snapshot
+        else None,
         "latest_diagnosis_state": latest_diagnosis_state,
         "latest_alignment_state": latest_snapshot.get("alignment_state")
         if latest_snapshot
         else None,
-        "latest_issue_summary": latest_snapshot.get("issue_summary") if latest_snapshot else None,
+        "latest_issue_summary": latest_snapshot.get("issue_summary")
+        if latest_snapshot
+        else None,
         "latest_state_first_seen_at_utc": latest_state_first_seen_at_utc,
         "latest_state_snapshot_count": latest_state_snapshot_count,
         "current_state_consecutive_count": current_state_consecutive_count,
@@ -695,8 +720,7 @@ def format_stage6_snapshot_timeline_summary(result: dict[str, Any]) -> str:
     latest_state_first_seen_at_utc = result.get("latest_state_first_seen_at_utc")
     if latest_state_first_seen_at_utc:
         lines.append(
-            "- Current state first seen at UTC: "
-            f"{latest_state_first_seen_at_utc}"
+            f"- Current state first seen at UTC: {latest_state_first_seen_at_utc}"
         )
         lines.append(
             "- Current state snapshot count: "
@@ -712,8 +736,7 @@ def format_stage6_snapshot_timeline_summary(result: dict[str, Any]) -> str:
     )
     if latest_state_elapsed_human:
         lines.append(
-            "- Current state elapsed since first seen: "
-            f"{latest_state_elapsed_human}"
+            f"- Current state elapsed since first seen: {latest_state_elapsed_human}"
         )
     progress_assessment = dict(result.get("progress_assessment") or {})
     if progress_assessment:
@@ -812,14 +835,8 @@ def format_stage6_snapshot_timeline_card(result: dict[str, Any]) -> str:
 
     lines = [
         "## Stage 6 Status Card",
-        (
-            "- **Latest diagnosis:** "
-            f"`{result.get('latest_diagnosis_state') or 'none'}`"
-        ),
-        (
-            "- **Latest alignment:** "
-            f"`{result.get('latest_alignment_state') or 'none'}`"
-        ),
+        (f"- **Latest diagnosis:** `{result.get('latest_diagnosis_state') or 'none'}`"),
+        (f"- **Latest alignment:** `{result.get('latest_alignment_state') or 'none'}`"),
         f"- **Observed at UTC:** `{result.get('latest_observed_at_utc') or 'none'}`",
         (
             "- **Progress:** "
@@ -846,10 +863,7 @@ def format_stage6_snapshot_timeline_card(result: dict[str, Any]) -> str:
         "latest_state_elapsed_human_since_first_seen"
     )
     if latest_state_elapsed_human:
-        lines.append(
-            "- **Current state elapsed:** "
-            f"`{latest_state_elapsed_human}`"
-        )
+        lines.append(f"- **Current state elapsed:** `{latest_state_elapsed_human}`")
 
     latest_issue_summary = result.get("latest_issue_summary")
     if latest_issue_summary:
@@ -951,7 +965,9 @@ def format_stage6_snapshot_timeline_compare(result: dict[str, Any]) -> str:
     stagnation_assessment = dict(result.get("stagnation_assessment") or {})
     recent_snapshot_digest = list(result.get("recent_snapshot_digest") or [])
     latest_item = recent_snapshot_digest[0] if recent_snapshot_digest else None
-    previous_item = recent_snapshot_digest[1] if len(recent_snapshot_digest) >= 2 else None
+    previous_item = (
+        recent_snapshot_digest[1] if len(recent_snapshot_digest) >= 2 else None
+    )
 
     lines = [
         "Stage 6 Timeline Compare",
@@ -1121,10 +1137,7 @@ def format_stage6_snapshot_timeline_markdown(result: dict[str, Any]) -> str:
         [
             "",
             "## Operator Guidance",
-            (
-                f"- **Urgency:** "
-                f"`{operator_guidance.get('urgency') or 'unknown'}`"
-            ),
+            (f"- **Urgency:** `{operator_guidance.get('urgency') or 'unknown'}`"),
             (
                 f"- **Summary:** "
                 f"{operator_guidance.get('summary') or 'No guidance available.'}"
@@ -1218,9 +1231,7 @@ def format_stage6_snapshot_timeline_table(result: dict[str, Any]) -> str:
                 max_width,
             )
 
-    header_line = " | ".join(
-        header.ljust(widths[key]) for key, header, _ in columns
-    )
+    header_line = " | ".join(header.ljust(widths[key]) for key, header, _ in columns)
     separator_line = "-+-".join("-" * widths[key] for key, _, _ in columns)
     row_lines = []
     for row in rows:
@@ -1254,7 +1265,9 @@ def format_stage6_snapshot_timeline_tsv(result: dict[str, Any]) -> str:
     ]
     rows = ["\t".join(headers)]
     for item in recent_snapshot_digest:
-        delta = str(item.get("transition_summary") or item.get("delta_kind") or "unknown")
+        delta = str(
+            item.get("transition_summary") or item.get("delta_kind") or "unknown"
+        )
         row = [
             str(item.get("observed_at_utc") or ""),
             str(item.get("diagnosis_state") or ""),

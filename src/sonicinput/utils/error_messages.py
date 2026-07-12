@@ -121,7 +121,6 @@ class ErrorMessageTranslator:
     def _get_generic_message(cls, error: Exception, context: Optional[str]) -> dict:
         error_type = type(error).__name__
         error_str = str(error)
-
         context_messages = {
             "recording": "An error occurred during recording.",
             "transcription": "An error occurred during transcription.",
@@ -129,11 +128,9 @@ class ErrorMessageTranslator:
             "input": "An error occurred during input.",
             "hotkey": "An error occurred during hotkey handling.",
         }
-
         user_message = context_messages.get(
             context or "", "An unknown error occurred during the operation."
         )
-
         return {
             "user_message": f"{_tr(user_message)} {_tr('Please try again later.')}",
             "technical_message": f"{error_type}: {error_str}",
@@ -220,7 +217,6 @@ class ErrorMessageTranslator:
                 "Contact support.",
             ],
         }
-
         suggestions = suggestions_map.get(
             category,
             ["Please try again later.", "Contact support if the issue persists."],
@@ -229,6 +225,5 @@ class ErrorMessageTranslator:
 
 
 def get_user_friendly_error(error: Exception, context: Optional[str] = None) -> str:
-    """Convenience: return user-friendly message only."""
-    result = ErrorMessageTranslator.translate(error, context)
-    return result["user_message"]
+    """Return the user-facing message for an exception."""
+    return ErrorMessageTranslator.translate(error, context)["user_message"]

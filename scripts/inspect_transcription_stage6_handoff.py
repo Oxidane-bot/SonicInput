@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,10 @@ _OPERATOR_HANDOFF_ENVELOPE_VERSION = 1
 
 def _action_key(action: str) -> str:
     normalized = " ".join(action.lower().split())
-    if "start a newer sonicinput build" in normalized or "start a newer app build" in normalized:
+    if (
+        "start a newer sonicinput build" in normalized
+        or "start a newer app build" in normalized
+    ):
         return "start_new_build"
     if (
         "rerun" in normalized
@@ -48,7 +52,10 @@ def _action_key(action: str) -> str:
         and ("expectation event" in normalized or "--snapshot-out" in normalized)
     ):
         return "rerun_readiness_after_startup"
-    if "fresh app session timestamp" in normalized or "fresh startup timestamp" in normalized:
+    if (
+        "fresh app session timestamp" in normalized
+        or "fresh startup timestamp" in normalized
+    ):
         return "confirm_fresh_session_timestamp"
     return normalized
 
@@ -71,15 +78,29 @@ def _action_group_key(action: str) -> str:
         return "stuck_prioritize"
     if normalized.startswith("progress improved relative to the previous snapshot"):
         return "progress_advanced"
-    if normalized.startswith("the latest snapshot regressed relative to the previous one"):
+    if normalized.startswith(
+        "the latest snapshot regressed relative to the previous one"
+    ):
         return "progress_regressed"
-    if "start a newer sonicinput build" in normalized or "start a newer app build" in normalized:
+    if (
+        "start a newer sonicinput build" in normalized
+        or "start a newer app build" in normalized
+    ):
         return "start_new_build"
-    if "rerun the readiness inspector" in normalized or "rerun stage 6 readiness" in normalized:
+    if (
+        "rerun the readiness inspector" in normalized
+        or "rerun stage 6 readiness" in normalized
+    ):
         return "rerun_after_startup"
-    if "fresh app session timestamp" in normalized or "fresh startup timestamp" in normalized:
+    if (
+        "fresh app session timestamp" in normalized
+        or "fresh startup timestamp" in normalized
+    ):
         return "confirm_fresh_session"
-    if "refer to the same real file" in normalized or "refer to the same real storage path" in normalized:
+    if (
+        "refer to the same real file" in normalized
+        or "refer to the same real storage path" in normalized
+    ):
         return "confirm_storage_path"
     if "migration failures" in normalized or "alternate db paths" in normalized:
         return "inspect_migration_logs"
@@ -96,19 +117,28 @@ def _action_group_key(action: str) -> str:
         return "record_timeline_drilldown"
     if "compare the persisted db fields against the latest runtime" in normalized:
         return "compare_db_runtime_mismatch"
-    if "keep sampling a few more real records" in normalized or "keep sampling newer real records" in normalized:
+    if (
+        "keep sampling a few more real records" in normalized
+        or "keep sampling newer real records" in normalized
+    ):
         return "keep_sampling"
     if "only drill into the timeline inspector again" in normalized:
         return "drilldown_on_regress"
     if normalized.startswith("focus on this latest issue summary:"):
         return "focus_issue_summary"
-    if "review the latest readiness summary and snapshot timeline output together" in normalized:
+    if (
+        "review the latest readiness summary and snapshot timeline output together"
+        in normalized
+    ):
         return "review_outputs"
     return "other"
 
 
 def _priority_order_for_action_state(readiness_state: str) -> list[str]:
-    if readiness_state in {"waiting_for_new_build_session", "new_build_seen_db_not_migrated"}:
+    if readiness_state in {
+        "waiting_for_new_build_session",
+        "new_build_seen_db_not_migrated",
+    }:
         return [
             "stuck_prioritize",
             "progress_regressed",
@@ -222,7 +252,10 @@ def _command_group_key(command: str) -> str:
 
 
 def _priority_order_for_state(readiness_state: str) -> list[str]:
-    if readiness_state in {"waiting_for_new_build_session", "new_build_seen_db_not_migrated"}:
+    if readiness_state in {
+        "waiting_for_new_build_session",
+        "new_build_seen_db_not_migrated",
+    }:
         return [
             "schema_startup",
             "path_observability",
@@ -280,7 +313,11 @@ def _split_corrective_commands(
         ordered_commands.extend(grouped.get(key, []))
 
     primary_keys = set(ordered_groups[:2])
-    primary = [command for command in ordered_commands if _command_group_key(command) in primary_keys]
+    primary = [
+        command
+        for command in ordered_commands
+        if _command_group_key(command) in primary_keys
+    ]
     supporting = [
         command
         for command in ordered_commands
@@ -308,7 +345,10 @@ def _command_reason(readiness_state: str, category: str) -> str:
     if category == "snapshot_timeline":
         return "Use after appending or refreshing snapshots to confirm whether the timeline is advancing or still stuck."
 
-    if readiness_state in {"waiting_for_new_build_session", "new_build_seen_db_not_migrated"}:
+    if readiness_state in {
+        "waiting_for_new_build_session",
+        "new_build_seen_db_not_migrated",
+    }:
         return {
             "schema_startup": (
                 "Current state still lacks enough runtime declaration evidence for the latest schema expectation, so confirm startup/schema signals first."
@@ -326,7 +366,10 @@ def _command_reason(readiness_state: str, category: str) -> str:
                 "Keep this as a lower-priority drill-down until a concrete post-cutoff record_id is available from the newer session."
             ),
             "other": "Use as supporting follow-up once startup/schema and path evidence have been checked.",
-        }.get(category, "Use as supporting follow-up once startup/schema and path evidence have been checked.")
+        }.get(
+            category,
+            "Use as supporting follow-up once startup/schema and path evidence have been checked.",
+        )
 
     if readiness_state in {
         "schema_ready_waiting_for_post_cutoff_sample",
@@ -351,7 +394,10 @@ def _command_reason(readiness_state: str, category: str) -> str:
                 "Keep this as a fallback check in case path mismatches suggest the running build/schema expectation is not the one you think it is."
             ),
             "other": "Use as supporting follow-up after the path mismatch evidence has been reviewed.",
-        }.get(category, "Use as supporting follow-up after the path mismatch evidence has been reviewed.")
+        }.get(
+            category,
+            "Use as supporting follow-up after the path mismatch evidence has been reviewed.",
+        )
 
     if readiness_state == "stage6_ready_and_aligned":
         return {
@@ -371,7 +417,10 @@ def _command_reason(readiness_state: str, category: str) -> str:
                 "Keep as a fallback only if later samples suggest the running build/schema expectation may have drifted."
             ),
             "other": "Use as supporting follow-up while alignment is being spot-checked.",
-        }.get(category, "Use as supporting follow-up while alignment is being spot-checked.")
+        }.get(
+            category,
+            "Use as supporting follow-up while alignment is being spot-checked.",
+        )
 
     return {
         "path_observability": "Inspect runtime-vs-DB path evidence first for the current readiness state.",
@@ -443,7 +492,10 @@ def _action_reason(readiness_state: str, category: str) -> str:
     if category == "progress_regressed":
         return "The latest snapshot got worse than the previous one, so treat the environment as unstable until the regression is explained."
 
-    if readiness_state in {"waiting_for_new_build_session", "new_build_seen_db_not_migrated"}:
+    if readiness_state in {
+        "waiting_for_new_build_session",
+        "new_build_seen_db_not_migrated",
+    }:
         return {
             "start_new_build": "Stage 6 cannot progress until a newer app session declares the expected schema evidence in runtime logs.",
             "rerun_after_startup": "A fresh readiness rerun is needed right after startup so the operator can confirm whether the expected schema declaration finally appears.",
@@ -452,7 +504,10 @@ def _action_reason(readiness_state: str, category: str) -> str:
             "inspect_migration_logs": "If a newer build exists but persistence still looks old, startup/runtime logs are the fastest place to catch migration or alternate-path issues.",
             "focus_issue_summary": "The latest issue summary usually names the missing schema/startup evidence that is blocking this state.",
             "review_outputs": "Reviewing readiness and timeline together helps confirm whether the blocker is still startup/schema related or has shifted elsewhere.",
-        }.get(category, "This action supports unblocking the missing startup/schema evidence for the current readiness state.")
+        }.get(
+            category,
+            "This action supports unblocking the missing startup/schema evidence for the current readiness state.",
+        )
 
     if readiness_state in {
         "schema_ready_waiting_for_post_cutoff_sample",
@@ -470,7 +525,10 @@ def _action_reason(readiness_state: str, category: str) -> str:
             "inspect_migration_logs": "If the DB still does not reflect post-cutoff runtime evidence, inspect startup/runtime logs for storage-path or migration clues.",
             "focus_issue_summary": "The latest issue summary usually points to the exact record, path, or missing correlation that needs attention first.",
             "review_outputs": "Reviewing readiness and timeline together clarifies whether the issue is incomplete evidence, a mismatch, or simple lack of sampling.",
-        }.get(category, "This action helps correlate post-cutoff runtime and DB evidence for the current readiness state.")
+        }.get(
+            category,
+            "This action helps correlate post-cutoff runtime and DB evidence for the current readiness state.",
+        )
 
     if readiness_state == "stage6_ready_and_aligned":
         return {
@@ -478,7 +536,10 @@ def _action_reason(readiness_state: str, category: str) -> str:
             "drilldown_on_regress": "Timeline drill-down should stay on standby until a later sample regresses or shows a mismatch again.",
             "append_snapshot_check": "Appending another snapshot after a fresh sample shows whether alignment keeps holding across consecutive observations.",
             "focus_issue_summary": "If an issue reappears after alignment, focus the operator on the newest concrete regression signal instead of reopening everything.",
-        }.get(category, "This action helps confirm that aligned behavior remains stable across more real samples.")
+        }.get(
+            category,
+            "This action helps confirm that aligned behavior remains stable across more real samples.",
+        )
 
     return {
         "review_outputs": "Review the latest operator evidence before choosing the next corrective step.",
@@ -503,9 +564,19 @@ def _action_when_to_run(
         return "Now, as the next real environment action."
     if category in {"rerun_after_startup", "append_snapshot_check"}:
         return "Right after the startup/sample/corrective step completes."
-    if category in {"confirm_fresh_session", "confirm_storage_path", "inspect_migration_logs"}:
-        return "During the first corrective pass, before deeper record-level drill-down."
-    if category in {"compare_schema_observability", "record_timeline_drilldown", "compare_db_runtime_mismatch"}:
+    if category in {
+        "confirm_fresh_session",
+        "confirm_storage_path",
+        "inspect_migration_logs",
+    }:
+        return (
+            "During the first corrective pass, before deeper record-level drill-down."
+        )
+    if category in {
+        "compare_schema_observability",
+        "record_timeline_drilldown",
+        "compare_db_runtime_mismatch",
+    }:
         if timeline_stagnation == "stuck":
             return "During the corrective pass that should break the stuck state."
         return "After the latest sample is available and before declaring the state resolved."
@@ -529,7 +600,9 @@ def _related_commands_for_action(
     supporting_corrective_commands: list[str],
     monitoring_commands: list[str],
 ) -> list[str]:
-    all_corrective = list(primary_corrective_commands) + list(supporting_corrective_commands)
+    all_corrective = list(primary_corrective_commands) + list(
+        supporting_corrective_commands
+    )
 
     if category == "stuck_prioritize":
         return list(primary_corrective_commands[:2])
@@ -550,7 +623,12 @@ def _related_commands_for_action(
     elif category == "record_timeline_drilldown":
         desired = {"record_timeline"}
     elif category == "compare_db_runtime_mismatch":
-        desired = {"path_observability", "recent_runtime_logs", "recent_db_rows", "record_timeline"}
+        desired = {
+            "path_observability",
+            "recent_runtime_logs",
+            "recent_db_rows",
+            "record_timeline",
+        }
     elif category in {"focus_issue_summary", "review_outputs"}:
         return list(primary_corrective_commands[:2] + monitoring_commands[:1])
     else:
@@ -623,7 +701,10 @@ def _recent_delta_details_by_observed_at(
 
 def _related_command_hint(command: str) -> str:
     normalized = str(command or "").replace("\\", "/")
-    if "inspect_transcription_stage6_handoff.py" in normalized and "--append-snapshot" in normalized:
+    if (
+        "inspect_transcription_stage6_handoff.py" in normalized
+        and "--append-snapshot" in normalized
+    ):
         return "inspect_transcription_stage6_handoff.py --append-snapshot --brief"
     if "inspect_transcription_stage6_snapshot_timeline.py" in normalized:
         return "inspect_transcription_stage6_snapshot_timeline.py --summary"
@@ -691,7 +772,15 @@ def _build_action_envelope_entries(
         category = str(detail.get("category") or _action_group_key(action))
         phase = _action_phase(category)
         related_commands = [
-            _command_reference(command, phase=_command_phase(command, primary_corrective_commands, supporting_corrective_commands, monitoring_commands))
+            _command_reference(
+                command,
+                phase=_command_phase(
+                    command,
+                    primary_corrective_commands,
+                    supporting_corrective_commands,
+                    monitoring_commands,
+                ),
+            )
             for command in list(detail.get("related_commands") or [])
         ]
         action_entries.append(
@@ -740,7 +829,9 @@ def _build_command_envelope_entries(
         command_entries.append(
             {
                 "kind": "command",
-                "id": category if category != "other" else f"command:{phase}:{priority}",
+                "id": category
+                if category != "other"
+                else f"command:{phase}:{priority}",
                 "label": detail.get("label") or _command_category_label(category),
                 "operator_implication": detail.get("reason") or None,
                 "escalation_trigger": None,
@@ -828,9 +919,12 @@ def _build_timeline_signal_entry(
     return {
         "kind": "timeline_signal",
         "id": signal_id,
-        "label": detail.get("label") or _no_data_timeline_signal(signal_id).get("label"),
-        "operator_implication": detail.get("operator_implication") or _no_data_timeline_signal(signal_id).get("operator_implication"),
-        "escalation_trigger": detail.get("escalation_trigger") or _no_data_timeline_signal(signal_id).get("escalation_trigger"),
+        "label": detail.get("label")
+        or _no_data_timeline_signal(signal_id).get("label"),
+        "operator_implication": detail.get("operator_implication")
+        or _no_data_timeline_signal(signal_id).get("operator_implication"),
+        "escalation_trigger": detail.get("escalation_trigger")
+        or _no_data_timeline_signal(signal_id).get("escalation_trigger"),
         "priority": priority,
         "phase": phase,
         "verdict": verdict,
@@ -852,7 +946,9 @@ def _build_recent_delta_envelope_entries(
         entries.append(
             {
                 "kind": "timeline_delta",
-                "id": f"recent_delta:{observed_at_utc}" if observed_at_utc else f"recent_delta:{priority}",
+                "id": f"recent_delta:{observed_at_utc}"
+                if observed_at_utc
+                else f"recent_delta:{priority}",
                 "label": detail.get("label") or "Unknown delta",
                 "operator_implication": detail.get("operator_implication") or None,
                 "escalation_trigger": detail.get("escalation_trigger") or None,
@@ -864,7 +960,9 @@ def _build_recent_delta_envelope_entries(
                 "previous_state": item.get("previous_diagnosis_state"),
                 "transition_summary": item.get("transition_summary"),
                 "alignment_state": item.get("alignment_state"),
-                "elapsed_since_previous_human": item.get("elapsed_since_previous_human"),
+                "elapsed_since_previous_human": item.get(
+                    "elapsed_since_previous_human"
+                ),
                 "issue_summary": item.get("issue_summary"),
             }
         )
@@ -879,8 +977,12 @@ def _build_operator_handoff_envelope(
     recent_snapshot_delta_details: list[dict[str, Any]],
     snapshot_workflow_commands: list[str],
 ) -> dict[str, Any]:
-    primary_corrective_commands = list(combined_assessment.get("primary_corrective_commands") or [])
-    supporting_corrective_commands = list(combined_assessment.get("supporting_corrective_commands") or [])
+    primary_corrective_commands = list(
+        combined_assessment.get("primary_corrective_commands") or []
+    )
+    supporting_corrective_commands = list(
+        combined_assessment.get("supporting_corrective_commands") or []
+    )
     monitoring_commands = list(combined_assessment.get("monitoring_commands") or [])
     follow_up_commands = list(combined_assessment.get("follow_up_commands") or [])
     action_details = list(combined_assessment.get("next_action_details") or [])
@@ -934,8 +1036,12 @@ def _build_operator_handoff_envelope(
             "summary": combined_assessment.get("summary"),
             "primary_blocker": combined_assessment.get("primary_blocker"),
             "timeline_urgency": combined_assessment.get("timeline_urgency"),
-            "timeline_progress_verdict": combined_assessment.get("timeline_progress_verdict"),
-            "timeline_stagnation_verdict": combined_assessment.get("timeline_stagnation_verdict"),
+            "timeline_progress_verdict": combined_assessment.get(
+                "timeline_progress_verdict"
+            ),
+            "timeline_stagnation_verdict": combined_assessment.get(
+                "timeline_stagnation_verdict"
+            ),
         },
         "actions": actions,
         "commands": {
@@ -999,29 +1105,17 @@ def _timeline_progress_detail(
     }.get(verdict, "Timeline progress needs manual interpretation.")
 
     if verdict == "unchanged" and stagnation_verdict == "stuck":
-        escalation_trigger = (
-            "Escalate immediately to the top corrective path because the unchanged state has already crossed the stuck threshold."
-        )
+        escalation_trigger = "Escalate immediately to the top corrective path because the unchanged state has already crossed the stuck threshold."
     elif verdict == "regressed":
-        escalation_trigger = (
-            "Escalate immediately if the next snapshot does not recover or if runtime/DB evidence contradicts the regression story."
-        )
+        escalation_trigger = "Escalate immediately if the next snapshot does not recover or if runtime/DB evidence contradicts the regression story."
     elif verdict == "advanced" and readiness_state == "stage6_ready_and_aligned":
-        escalation_trigger = (
-            "Escalate if the next snapshot drops out of alignment or if a newly sampled record contradicts the aligned baseline."
-        )
+        escalation_trigger = "Escalate if the next snapshot drops out of alignment or if a newly sampled record contradicts the aligned baseline."
     elif verdict == "advanced":
-        escalation_trigger = (
-            "Escalate if the next validation step fails to continue the forward movement."
-        )
+        escalation_trigger = "Escalate if the next validation step fails to continue the forward movement."
     elif verdict == "no_previous_snapshot":
-        escalation_trigger = (
-            "Escalate only after another snapshot is collected and the state still fails to advance."
-        )
+        escalation_trigger = "Escalate only after another snapshot is collected and the state still fails to advance."
     else:
-        escalation_trigger = (
-            "Escalate if another corrective pass still leaves the timeline without a meaningful state change."
-        )
+        escalation_trigger = "Escalate if another corrective pass still leaves the timeline without a meaningful state change."
 
     return {
         "verdict": verdict,
@@ -1058,19 +1152,15 @@ def _timeline_stagnation_detail(
     }.get(verdict, "Stagnation needs manual interpretation.")
 
     if verdict == "stuck":
-        escalation_trigger = (
-            "Escalate now if the next corrective pass does not produce a different state or stronger runtime/DB evidence."
-        )
+        escalation_trigger = "Escalate now if the next corrective pass does not produce a different state or stronger runtime/DB evidence."
     elif verdict == "not_stuck" and readiness_state != "stage6_ready_and_aligned":
-        escalation_trigger = (
-            "Escalate if the same state reaches the configured stuck threshold without a clear corrective explanation."
-        )
+        escalation_trigger = "Escalate if the same state reaches the configured stuck threshold without a clear corrective explanation."
     elif verdict == "not_stuck":
-        escalation_trigger = (
-            "Escalate only if later aligned samples stop holding or the state begins to regress."
-        )
+        escalation_trigger = "Escalate only if later aligned samples stop holding or the state begins to regress."
     else:
-        escalation_trigger = "Escalate after more history if stagnation can still not be judged clearly."
+        escalation_trigger = (
+            "Escalate after more history if stagnation can still not be judged clearly."
+        )
 
     return {
         "verdict": verdict,
@@ -1101,34 +1191,20 @@ def _timeline_guidance_detail(
     }.get(urgency, "Unknown operator urgency")
 
     if urgency == "high":
-        implication = (
-            "The timeline is signaling a regression-risk situation, so the operator should stabilize the environment before trusting more samples."
-        )
+        implication = "The timeline is signaling a regression-risk situation, so the operator should stabilize the environment before trusting more samples."
     elif urgency == "attention":
-        implication = (
-            "The timeline is no longer just observational; it is asking for a corrective pass that should break the repeated state."
-        )
+        implication = "The timeline is no longer just observational; it is asking for a corrective pass that should break the repeated state."
     elif readiness_state == "stage6_ready_and_aligned":
-        implication = (
-            "The timeline supports continued sampling and spot checks rather than immediate corrective work."
-        )
+        implication = "The timeline supports continued sampling and spot checks rather than immediate corrective work."
     else:
-        implication = (
-            "The timeline supports the current follow-up path but does not yet require a full escalation."
-        )
+        implication = "The timeline supports the current follow-up path but does not yet require a full escalation."
 
     if progress_verdict == "regressed":
-        escalation_trigger = (
-            "Escalate immediately if the regression remains after one focused corrective pass."
-        )
+        escalation_trigger = "Escalate immediately if the regression remains after one focused corrective pass."
     elif stagnation_verdict == "stuck":
-        escalation_trigger = (
-            "Escalate if the prioritized corrective commands still do not produce a new state or stronger evidence."
-        )
+        escalation_trigger = "Escalate if the prioritized corrective commands still do not produce a new state or stronger evidence."
     elif urgency == "normal" and readiness_state == "stage6_ready_and_aligned":
-        escalation_trigger = (
-            "Escalate only if later samples regress, mismatch, or stop reproducing the aligned state."
-        )
+        escalation_trigger = "Escalate only if later samples regress, mismatch, or stop reproducing the aligned state."
     else:
         escalation_trigger = (
             "Escalate if the next snapshot contradicts the current guidance summary."
@@ -1148,8 +1224,12 @@ def _recent_snapshot_delta_details(
     timeline_progress_detail: dict[str, Any] | None,
     timeline_stagnation_detail: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    progress_verdict = str(dict(timeline_progress_detail or {}).get("verdict") or "unknown")
-    stagnation_verdict = str(dict(timeline_stagnation_detail or {}).get("verdict") or "unknown")
+    progress_verdict = str(
+        dict(timeline_progress_detail or {}).get("verdict") or "unknown"
+    )
+    stagnation_verdict = str(
+        dict(timeline_stagnation_detail or {}).get("verdict") or "unknown"
+    )
     details: list[dict[str, Any]] = []
     for item in recent_snapshot_digest:
         delta_kind = str(item.get("delta_kind") or "unknown")
@@ -1162,41 +1242,23 @@ def _recent_snapshot_delta_details(
         }.get(delta_kind, "Unknown delta")
 
         if delta_kind == "changed":
-            implication = (
-                f"This snapshot changed state ({transition_summary or diagnosis_state}), so compare the new state against the planned next validation step."
-            )
+            implication = f"This snapshot changed state ({transition_summary or diagnosis_state}), so compare the new state against the planned next validation step."
             if diagnosis_state == "stage6_ready_and_aligned":
-                escalation_trigger = (
-                    "Escalate only if the next sample drops out of alignment or if runtime/DB evidence now disagrees."
-                )
+                escalation_trigger = "Escalate only if the next sample drops out of alignment or if runtime/DB evidence now disagrees."
             else:
-                escalation_trigger = (
-                    "Escalate if the next snapshot regresses further or the new state immediately repeats into another stuck window."
-                )
+                escalation_trigger = "Escalate if the next snapshot regresses further or the new state immediately repeats into another stuck window."
         elif delta_kind == "unchanged":
-            implication = (
-                f"This snapshot stayed at `{diagnosis_state}`, so it adds confidence about the current state but not about forward progress."
-            )
+            implication = f"This snapshot stayed at `{diagnosis_state}`, so it adds confidence about the current state but not about forward progress."
             if stagnation_verdict == "stuck":
-                escalation_trigger = (
-                    "Escalate now unless the next corrective pass produces a different state."
-                )
+                escalation_trigger = "Escalate now unless the next corrective pass produces a different state."
             else:
-                escalation_trigger = (
-                    "Escalate if another snapshot remains unchanged after the current corrective pass."
-                )
+                escalation_trigger = "Escalate if another snapshot remains unchanged after the current corrective pass."
         else:
-            implication = (
-                "This is the first snapshot in the visible history, so use it as a baseline rather than as proof of trend."
-            )
-            escalation_trigger = (
-                "Escalate only after another snapshot is collected and the state still does not advance."
-            )
+            implication = "This is the first snapshot in the visible history, so use it as a baseline rather than as proof of trend."
+            escalation_trigger = "Escalate only after another snapshot is collected and the state still does not advance."
 
         if progress_verdict == "regressed" and delta_kind != "initial":
-            escalation_trigger = (
-                "Escalate immediately if the regression is not explained by the latest corrective evidence."
-            )
+            escalation_trigger = "Escalate immediately if the regression is not explained by the latest corrective evidence."
 
         details.append(
             {
@@ -1262,7 +1324,9 @@ def _build_combined_assessment(
     readiness_state = str(diagnosis.get("state") or "unknown")
     readiness_message = str(diagnosis.get("message") or "No message available.")
     readiness_next_action = str(
-        diagnosis.get("next_action") or diagnosis.get("message") or "No guidance available."
+        diagnosis.get("next_action")
+        or diagnosis.get("message")
+        or "No guidance available."
     )
     readiness_actions = list(runbook.get("recommended_steps") or [])
     readiness_commands = list(runbook.get("follow_up_commands") or [])
@@ -1312,9 +1376,14 @@ def _build_combined_assessment(
         f"Readiness is `{readiness_state}` while the latest timeline state is "
         f"`{timeline_state}`; continue Stage 6 follow-up actions."
     )
-    primary_blocker = readiness.get("issue_summary") or timeline_issue or readiness_message
+    primary_blocker = (
+        readiness.get("issue_summary") or timeline_issue or readiness_message
+    )
 
-    if readiness_state == "stage6_ready_and_aligned" and timeline_state == "stage6_ready_and_aligned":
+    if (
+        readiness_state == "stage6_ready_and_aligned"
+        and timeline_state == "stage6_ready_and_aligned"
+    ):
         overall_state = "aligned_with_timeline"
         summary = (
             "Both readiness and the latest snapshot timeline indicate Stage 6 alignment "
@@ -1335,13 +1404,17 @@ def _build_combined_assessment(
             "unmigrated for Stage 6 persistence."
         )
         primary_blocker = readiness_message
-    elif timeline_stagnation == "stuck" and readiness_state != "stage6_ready_and_aligned":
+    elif (
+        timeline_stagnation == "stuck" and readiness_state != "stage6_ready_and_aligned"
+    ):
         overall_state = "stuck_follow_up_required"
         summary = (
             f"Readiness remains `{readiness_state}`, and the snapshot timeline is stuck "
             f"at `{timeline_state}`."
         )
-        primary_blocker = timeline_issue or readiness.get("issue_summary") or readiness_message
+        primary_blocker = (
+            timeline_issue or readiness.get("issue_summary") or readiness_message
+        )
     elif timeline_progress == "advanced":
         overall_state = "advancing_follow_up"
         summary = (
@@ -1431,7 +1504,9 @@ def inspect_transcription_stage6_handoff(
     )
     appended_snapshot = None
     if append_snapshot and snapshot_path is not None:
-        appended_snapshot = append_stage6_readiness_snapshot(snapshot_path, readiness_result)
+        appended_snapshot = append_stage6_readiness_snapshot(
+            snapshot_path, readiness_result
+        )
     timeline_result = (
         inspect_stage6_snapshot_timeline(snapshot_path, recent_limit=recent_limit)
         if snapshot_path is not None
@@ -1441,22 +1516,28 @@ def inspect_transcription_stage6_handoff(
     corrective_commands = _merge_commands(
         list(combined_assessment.get("corrective_commands") or [])
     )
-    primary_corrective_commands, supporting_corrective_commands = _split_corrective_commands(
-        str(combined_assessment.get("readiness_state") or "unknown"),
-        corrective_commands,
+    primary_corrective_commands, supporting_corrective_commands = (
+        _split_corrective_commands(
+            str(combined_assessment.get("readiness_state") or "unknown"),
+            corrective_commands,
+        )
     )
     monitoring_commands = _merge_commands(snapshot_workflow_commands)
     combined_assessment["primary_corrective_commands"] = primary_corrective_commands
-    combined_assessment["supporting_corrective_commands"] = supporting_corrective_commands
+    combined_assessment["supporting_corrective_commands"] = (
+        supporting_corrective_commands
+    )
     combined_assessment["corrective_commands"] = corrective_commands
     combined_assessment["monitoring_commands"] = monitoring_commands
     combined_assessment["primary_corrective_command_details"] = _build_command_details(
         str(combined_assessment.get("readiness_state") or "unknown"),
         primary_corrective_commands,
     )
-    combined_assessment["supporting_corrective_command_details"] = _build_command_details(
-        str(combined_assessment.get("readiness_state") or "unknown"),
-        supporting_corrective_commands,
+    combined_assessment["supporting_corrective_command_details"] = (
+        _build_command_details(
+            str(combined_assessment.get("readiness_state") or "unknown"),
+            supporting_corrective_commands,
+        )
     )
     combined_assessment["monitoring_command_details"] = _build_command_details(
         str(combined_assessment.get("readiness_state") or "unknown"),
@@ -1531,13 +1612,88 @@ def inspect_transcription_stage6_handoff(
     }
 
 
-def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
+@dataclass(frozen=True)
+class _HandoffCommandGroups:
+    primary: list[str]
+    supporting: list[str]
+    monitoring: list[str]
+    follow_up: list[str]
+    primary_details: dict[str, dict[str, Any]]
+    supporting_details: dict[str, dict[str, Any]]
+    monitoring_details: dict[str, dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _HandoffDisplayData:
+    combined: dict[str, Any]
+    readiness: dict[str, Any]
+    record_timeline_preview: dict[str, Any]
+    timeline: dict[str, Any]
+    state_dwell_summary: dict[str, Any]
+    timeline_progress_detail: dict[str, Any]
+    timeline_stagnation_detail: dict[str, Any]
+    timeline_guidance_detail: dict[str, Any]
+    escalation_trigger: Any
+    actions: list[str]
+    action_details: dict[str, dict[str, Any]]
+    commands: _HandoffCommandGroups
+    appended_snapshot: dict[str, Any]
+
+
+def _prepare_handoff_display_data(result: dict[str, Any]) -> _HandoffDisplayData:
     combined = dict(result.get("combined_assessment") or {})
     readiness = dict(result.get("readiness") or {})
     readiness_core = dict(readiness.get("readiness") or {})
-    record_timeline_preview = dict(readiness_core.get("record_timeline_preview") or {})
-    timeline_result = dict(result.get("timeline") or {})
-    state_dwell_summary = dict(timeline_result.get("state_dwell_summary") or {})
+    timeline = dict(result.get("timeline") or {})
+    timeline_progress_detail = dict(combined.get("timeline_progress_detail") or {})
+    timeline_stagnation_detail = dict(combined.get("timeline_stagnation_detail") or {})
+    timeline_guidance_detail = dict(combined.get("timeline_guidance_detail") or {})
+
+    return _HandoffDisplayData(
+        combined=combined,
+        readiness=readiness,
+        record_timeline_preview=dict(
+            readiness_core.get("record_timeline_preview") or {}
+        ),
+        timeline=timeline,
+        state_dwell_summary=dict(timeline.get("state_dwell_summary") or {}),
+        timeline_progress_detail=timeline_progress_detail,
+        timeline_stagnation_detail=timeline_stagnation_detail,
+        timeline_guidance_detail=timeline_guidance_detail,
+        escalation_trigger=(
+            timeline_guidance_detail.get("escalation_trigger")
+            or timeline_stagnation_detail.get("escalation_trigger")
+            or timeline_progress_detail.get("escalation_trigger")
+        ),
+        actions=list(combined.get("next_actions") or []),
+        action_details=_action_details_by_action(
+            list(combined.get("next_action_details") or [])
+        ),
+        commands=_HandoffCommandGroups(
+            primary=list(combined.get("primary_corrective_commands") or []),
+            supporting=list(combined.get("supporting_corrective_commands") or []),
+            monitoring=list(combined.get("monitoring_commands") or []),
+            follow_up=list(combined.get("follow_up_commands") or []),
+            primary_details=_command_details_by_command(
+                list(combined.get("primary_corrective_command_details") or [])
+            ),
+            supporting_details=_command_details_by_command(
+                list(combined.get("supporting_corrective_command_details") or [])
+            ),
+            monitoring_details=_command_details_by_command(
+                list(combined.get("monitoring_command_details") or [])
+            ),
+        ),
+        appended_snapshot=dict(result.get("appended_snapshot") or {}),
+    )
+
+
+def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
+    display = _prepare_handoff_display_data(result)
+    combined = display.combined
+    record_timeline_preview = display.record_timeline_preview
+    timeline_result = display.timeline
+    state_dwell_summary = display.state_dwell_summary
     lines = [
         "Stage 6 Operator Handoff Summary",
         f"- Overall state: {combined.get('overall_state') or 'unknown'}",
@@ -1558,7 +1714,10 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
         lines.append(f"- Timeline urgency: {timeline_urgency}")
     timeline_consecutive_count = combined.get("timeline_consecutive_count")
     timeline_stagnation_threshold = combined.get("timeline_stagnation_threshold")
-    if timeline_consecutive_count is not None and timeline_stagnation_threshold is not None:
+    if (
+        timeline_consecutive_count is not None
+        and timeline_stagnation_threshold is not None
+    ):
         lines.append(
             "- Timeline stagnation window: "
             f"{timeline_consecutive_count}/{timeline_stagnation_threshold}"
@@ -1568,7 +1727,7 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
     )
     if latest_state_elapsed_human:
         lines.append(f"- Timeline current state elapsed: {latest_state_elapsed_human}")
-    timeline_progress_detail = dict(combined.get("timeline_progress_detail") or {})
+    timeline_progress_detail = display.timeline_progress_detail
     if timeline_progress_detail.get("label"):
         lines.append(
             f"- Timeline progress label: {timeline_progress_detail.get('label')}"
@@ -1578,7 +1737,7 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
             "- Timeline progress implication: "
             f"{timeline_progress_detail.get('operator_implication')}"
         )
-    timeline_stagnation_detail = dict(combined.get("timeline_stagnation_detail") or {})
+    timeline_stagnation_detail = display.timeline_stagnation_detail
     if timeline_stagnation_detail.get("label"):
         lines.append(
             f"- Timeline stagnation label: {timeline_stagnation_detail.get('label')}"
@@ -1588,7 +1747,7 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
             "- Timeline stagnation implication: "
             f"{timeline_stagnation_detail.get('operator_implication')}"
         )
-    timeline_guidance_detail = dict(combined.get("timeline_guidance_detail") or {})
+    timeline_guidance_detail = display.timeline_guidance_detail
     if timeline_guidance_detail.get("label"):
         lines.append(
             f"- Timeline guidance label: {timeline_guidance_detail.get('label')}"
@@ -1598,11 +1757,7 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
             "- Timeline guidance implication: "
             f"{timeline_guidance_detail.get('operator_implication')}"
         )
-    escalation_trigger = (
-        timeline_guidance_detail.get("escalation_trigger")
-        or timeline_stagnation_detail.get("escalation_trigger")
-        or timeline_progress_detail.get("escalation_trigger")
-    )
+    escalation_trigger = display.escalation_trigger
     if escalation_trigger:
         lines.append(f"- Timeline escalate-if: {escalation_trigger}")
 
@@ -1615,10 +1770,8 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
             f"{record_timeline_preview.get('diagnosis_state') or 'unknown'}"
         )
 
-    actions = list(combined.get("next_actions") or [])
-    action_detail_map = _action_details_by_action(
-        list(combined.get("next_action_details") or [])
-    )
+    actions = display.actions
+    action_detail_map = display.action_details
     if actions:
         lines.extend(["", "Combined Next Actions:"])
         for action in actions:
@@ -1635,53 +1788,40 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
             )
             if related_summary:
                 lines.append(f"  related={related_summary}")
-    primary_corrective_commands = list(combined.get("primary_corrective_commands") or [])
-    supporting_corrective_commands = list(combined.get("supporting_corrective_commands") or [])
-    corrective_commands = list(combined.get("corrective_commands") or [])
-    monitoring_commands = list(combined.get("monitoring_commands") or [])
-    follow_up_commands = list(combined.get("follow_up_commands") or [])
-    primary_detail_map = _command_details_by_command(
-        list(combined.get("primary_corrective_command_details") or [])
-    )
-    supporting_detail_map = _command_details_by_command(
-        list(combined.get("supporting_corrective_command_details") or [])
-    )
-    monitoring_detail_map = _command_details_by_command(
-        list(combined.get("monitoring_command_details") or [])
-    )
-    if primary_corrective_commands:
+    commands = display.commands
+    if commands.primary:
         lines.extend(["", "Primary Corrective Commands:"])
-        for command in primary_corrective_commands:
+        for command in commands.primary:
             lines.append(f"- {command}")
-            detail = primary_detail_map.get(command) or {}
+            detail = commands.primary_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"  label={detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"  why_now={detail.get('reason')}")
-    if supporting_corrective_commands:
+    if commands.supporting:
         lines.extend(["", "Supporting Corrective Commands:"])
-        for command in supporting_corrective_commands:
+        for command in commands.supporting:
             lines.append(f"- {command}")
-            detail = supporting_detail_map.get(command) or {}
+            detail = commands.supporting_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"  label={detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"  why_now={detail.get('reason')}")
-    if monitoring_commands:
+    if commands.monitoring:
         lines.extend(["", "Monitoring Commands:"])
-        for command in monitoring_commands:
+        for command in commands.monitoring:
             lines.append(f"- {command}")
-            detail = monitoring_detail_map.get(command) or {}
+            detail = commands.monitoring_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"  label={detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"  why_now={detail.get('reason')}")
-    elif follow_up_commands and not corrective_commands:
+    elif commands.follow_up and not combined.get("corrective_commands"):
         lines.extend(["", "Combined Follow-up Commands:"])
-        for command in follow_up_commands:
+        for command in commands.follow_up:
             lines.append(f"- {command}")
 
-    appended_snapshot = dict(result.get("appended_snapshot") or {})
+    appended_snapshot = display.appended_snapshot
     if appended_snapshot:
         lines.extend(
             [
@@ -1713,7 +1853,10 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
                 )
             if item.get("issue_summary"):
                 lines.append(f"  issue={item.get('issue_summary')}")
-            detail = recent_delta_detail_map.get(str(item.get("observed_at_utc") or "")) or {}
+            detail = (
+                recent_delta_detail_map.get(str(item.get("observed_at_utc") or ""))
+                or {}
+            )
             if detail.get("label"):
                 lines.append(f"  delta_label={detail.get('label')}")
             if detail.get("operator_implication"):
@@ -1725,7 +1868,7 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
         [
             "",
             "Readiness Summary:",
-            format_stage6_readiness_summary(dict(result.get("readiness") or {})),
+            format_stage6_readiness_summary(display.readiness),
         ]
     )
 
@@ -1744,12 +1887,11 @@ def format_stage6_handoff_summary(result: dict[str, Any]) -> str:
 
 
 def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
-    combined = dict(result.get("combined_assessment") or {})
-    readiness = dict(result.get("readiness") or {})
-    readiness_core = dict(readiness.get("readiness") or {})
-    record_timeline_preview = dict(readiness_core.get("record_timeline_preview") or {})
-    timeline_result = dict(result.get("timeline") or {})
-    state_dwell_summary = dict(timeline_result.get("state_dwell_summary") or {})
+    display = _prepare_handoff_display_data(result)
+    combined = display.combined
+    record_timeline_preview = display.record_timeline_preview
+    timeline_result = display.timeline
+    state_dwell_summary = display.state_dwell_summary
     progress_assessment = dict(timeline_result.get("progress_assessment") or {})
     stagnation_assessment = dict(timeline_result.get("stagnation_assessment") or {})
 
@@ -1772,18 +1914,12 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
                     "- Previous timeline state: "
                     f"{progress_assessment.get('previous_state') or 'none'}"
                 ),
-                (
-                    "- Progress: "
-                    f"{progress_assessment.get('verdict') or 'none'}"
-                ),
+                (f"- Progress: {progress_assessment.get('verdict') or 'none'}"),
                 (
                     "- Progress detail: "
                     f"{progress_assessment.get('message') or 'No progress detail available.'}"
                 ),
-                (
-                    "- Stagnation: "
-                    f"{stagnation_assessment.get('verdict') or 'none'}"
-                ),
+                (f"- Stagnation: {stagnation_assessment.get('verdict') or 'none'}"),
             ]
         )
         timeline_urgency = combined.get("timeline_urgency")
@@ -1791,7 +1927,10 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
             lines.append(f"- Timeline urgency: {timeline_urgency}")
         timeline_consecutive_count = combined.get("timeline_consecutive_count")
         timeline_stagnation_threshold = combined.get("timeline_stagnation_threshold")
-        if timeline_consecutive_count is not None and timeline_stagnation_threshold is not None:
+        if (
+            timeline_consecutive_count is not None
+            and timeline_stagnation_threshold is not None
+        ):
             lines.append(
                 "- Stagnation window: "
                 f"{timeline_consecutive_count}/{timeline_stagnation_threshold}"
@@ -1800,21 +1939,23 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
             "latest_state_elapsed_human_since_first_seen"
         )
         if latest_state_elapsed_human:
-            lines.append(f"- Timeline current state elapsed: {latest_state_elapsed_human}")
+            lines.append(
+                f"- Timeline current state elapsed: {latest_state_elapsed_human}"
+            )
         latest_transition_summary = timeline_result.get("latest_transition_summary")
         if latest_transition_summary:
             lines.append(f"- Latest transition: {latest_transition_summary}")
-        timeline_progress_detail = dict(combined.get("timeline_progress_detail") or {})
+        timeline_progress_detail = display.timeline_progress_detail
         if timeline_progress_detail.get("label"):
-            lines.append(f"- Timeline progress label: {timeline_progress_detail.get('label')}")
-        timeline_guidance_detail = dict(combined.get("timeline_guidance_detail") or {})
+            lines.append(
+                f"- Timeline progress label: {timeline_progress_detail.get('label')}"
+            )
+        timeline_guidance_detail = display.timeline_guidance_detail
         if timeline_guidance_detail.get("label"):
-            lines.append(f"- Timeline guidance label: {timeline_guidance_detail.get('label')}")
-        escalation_trigger = (
-            timeline_guidance_detail.get("escalation_trigger")
-            or dict(combined.get("timeline_stagnation_detail") or {}).get("escalation_trigger")
-            or timeline_progress_detail.get("escalation_trigger")
-        )
+            lines.append(
+                f"- Timeline guidance label: {timeline_guidance_detail.get('label')}"
+            )
+        escalation_trigger = display.escalation_trigger
         if escalation_trigger:
             lines.append(f"- Timeline escalate-if: {escalation_trigger}")
     else:
@@ -1829,7 +1970,7 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
             f"{record_timeline_preview.get('diagnosis_state') or 'unknown'}"
         )
 
-    appended_snapshot = dict(result.get("appended_snapshot") or {})
+    appended_snapshot = display.appended_snapshot
     if appended_snapshot:
         lines.append(
             "- Appended snapshot: "
@@ -1857,19 +1998,22 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
                     "    elapsed_since_previous="
                     f"{item.get('elapsed_since_previous_human')}"
                 )
-            detail = recent_delta_detail_map.get(str(item.get("observed_at_utc") or "")) or {}
+            detail = (
+                recent_delta_detail_map.get(str(item.get("observed_at_utc") or ""))
+                or {}
+            )
             if detail.get("label"):
                 lines.append(f"    delta_label={detail.get('label')}")
             if detail.get("operator_implication"):
                 lines.append(f"    implication={detail.get('operator_implication')}")
         remaining_count = len(recent_snapshot_digest) - 3
         if remaining_count > 0:
-            lines.append(f"  - (+{remaining_count} more recent deltas in summary/markdown output)")
+            lines.append(
+                f"  - (+{remaining_count} more recent deltas in summary/markdown output)"
+            )
 
-    actions = list(combined.get("next_actions") or [])
-    action_detail_map = _action_details_by_action(
-        list(combined.get("next_action_details") or [])
-    )
+    actions = display.actions
+    action_detail_map = display.action_details
     if actions:
         lines.append("- Next actions:")
         for action in actions[:3]:
@@ -1888,27 +2032,16 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
                 lines.append(f"    related={related_summary}")
         remaining_count = len(actions) - 3
         if remaining_count > 0:
-            lines.append(f"  - (+{remaining_count} more actions in summary/card output)")
-    primary_corrective_commands = list(combined.get("primary_corrective_commands") or [])
-    supporting_corrective_commands = list(combined.get("supporting_corrective_commands") or [])
-    corrective_commands = list(combined.get("corrective_commands") or [])
-    monitoring_commands = list(combined.get("monitoring_commands") or [])
-    follow_up_commands = list(combined.get("follow_up_commands") or [])
-    primary_detail_map = _command_details_by_command(
-        list(combined.get("primary_corrective_command_details") or [])
-    )
-    supporting_detail_map = _command_details_by_command(
-        list(combined.get("supporting_corrective_command_details") or [])
-    )
-    monitoring_detail_map = _command_details_by_command(
-        list(combined.get("monitoring_command_details") or [])
-    )
-    if primary_corrective_commands:
-        visible, remaining_count = _limit_with_remaining(primary_corrective_commands, 2)
+            lines.append(
+                f"  - (+{remaining_count} more actions in summary/card output)"
+            )
+    commands = display.commands
+    if commands.primary:
+        visible, remaining_count = _limit_with_remaining(commands.primary, 2)
         lines.append("- Primary corrective commands:")
         for command in visible:
             lines.append(f"  - {command}")
-            detail = primary_detail_map.get(command) or {}
+            detail = commands.primary_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"    label={detail.get('label')}")
             if detail.get("reason"):
@@ -1917,19 +2050,21 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
             lines.append(
                 f"  - (+{remaining_count} more primary corrective commands in summary/markdown output)"
             )
-    elif follow_up_commands:
-        visible, remaining_count = _limit_with_remaining(follow_up_commands, 2)
+    elif commands.follow_up:
+        visible, remaining_count = _limit_with_remaining(commands.follow_up, 2)
         lines.append("- Follow-up commands:")
         for command in visible:
             lines.append(f"  - {command}")
         if remaining_count > 0:
-            lines.append(f"  - (+{remaining_count} more commands in summary/markdown output)")
-    if supporting_corrective_commands:
-        visible, remaining_count = _limit_with_remaining(supporting_corrective_commands, 2)
+            lines.append(
+                f"  - (+{remaining_count} more commands in summary/markdown output)"
+            )
+    if commands.supporting:
+        visible, remaining_count = _limit_with_remaining(commands.supporting, 2)
         lines.append("- Supporting corrective commands:")
         for command in visible:
             lines.append(f"  - {command}")
-            detail = supporting_detail_map.get(command) or {}
+            detail = commands.supporting_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"    label={detail.get('label')}")
             if detail.get("reason"):
@@ -1938,12 +2073,12 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
             lines.append(
                 f"  - (+{remaining_count} more supporting corrective commands in summary/markdown output)"
             )
-    if monitoring_commands:
-        visible, remaining_count = _limit_with_remaining(monitoring_commands, 1)
+    if commands.monitoring:
+        visible, remaining_count = _limit_with_remaining(commands.monitoring, 1)
         lines.append("- Monitoring commands:")
         for command in visible:
             lines.append(f"  - {command}")
-            detail = monitoring_detail_map.get(command) or {}
+            detail = commands.monitoring_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"    label={detail.get('label')}")
             if detail.get("reason"):
@@ -1957,46 +2092,41 @@ def format_stage6_handoff_brief(result: dict[str, Any]) -> str:
 
 
 def format_stage6_handoff_compare(result: dict[str, Any]) -> str:
-    combined = dict(result.get("combined_assessment") or {})
-    readiness = dict(result.get("readiness") or {})
-    readiness_core = dict(readiness.get("readiness") or {})
-    record_timeline_preview = dict(readiness_core.get("record_timeline_preview") or {})
-    timeline_result = dict(result.get("timeline") or {})
-    state_dwell_summary = dict(timeline_result.get("state_dwell_summary") or {})
+    display = _prepare_handoff_display_data(result)
+    combined = display.combined
+    record_timeline_preview = display.record_timeline_preview
+    timeline_result = display.timeline
+    state_dwell_summary = display.state_dwell_summary
     progress_assessment = dict(timeline_result.get("progress_assessment") or {})
     stagnation_assessment = dict(timeline_result.get("stagnation_assessment") or {})
     recent_snapshot_digest = list(result.get("recent_snapshot_digest") or [])
     latest_item = recent_snapshot_digest[0] if recent_snapshot_digest else None
-    previous_item = recent_snapshot_digest[1] if len(recent_snapshot_digest) >= 2 else None
+    previous_item = (
+        recent_snapshot_digest[1] if len(recent_snapshot_digest) >= 2 else None
+    )
 
     lines = [
         "Stage 6 Compare View",
         f"- Overall state: {combined.get('overall_state') or 'unknown'}",
         f"- Readiness state: {combined.get('readiness_state') or 'unknown'}",
-        (
-            "- Timeline latest: "
-            f"{combined.get('timeline_state') or 'none'}"
-        ),
-        (
-            "- Timeline previous: "
-            f"{progress_assessment.get('previous_state') or 'none'}"
-        ),
+        (f"- Timeline latest: {combined.get('timeline_state') or 'none'}"),
+        (f"- Timeline previous: {progress_assessment.get('previous_state') or 'none'}"),
         f"- Delta verdict: {progress_assessment.get('verdict') or 'none'}",
         (
             "- Delta detail: "
             f"{progress_assessment.get('message') or 'No delta detail available.'}"
         ),
-        (
-            "- Stagnation: "
-            f"{stagnation_assessment.get('verdict') or 'none'}"
-        ),
+        (f"- Stagnation: {stagnation_assessment.get('verdict') or 'none'}"),
     ]
     timeline_urgency = combined.get("timeline_urgency")
     if timeline_urgency:
         lines.append(f"- Timeline urgency: {timeline_urgency}")
     timeline_consecutive_count = combined.get("timeline_consecutive_count")
     timeline_stagnation_threshold = combined.get("timeline_stagnation_threshold")
-    if timeline_consecutive_count is not None and timeline_stagnation_threshold is not None:
+    if (
+        timeline_consecutive_count is not None
+        and timeline_stagnation_threshold is not None
+    ):
         lines.append(
             "- Stagnation window: "
             f"{timeline_consecutive_count}/{timeline_stagnation_threshold}"
@@ -2006,17 +2136,17 @@ def format_stage6_handoff_compare(result: dict[str, Any]) -> str:
     )
     if latest_state_elapsed_human:
         lines.append(f"- Timeline current state elapsed: {latest_state_elapsed_human}")
-    timeline_progress_detail = dict(combined.get("timeline_progress_detail") or {})
+    timeline_progress_detail = display.timeline_progress_detail
     if timeline_progress_detail.get("label"):
-        lines.append(f"- Timeline progress label: {timeline_progress_detail.get('label')}")
-    timeline_guidance_detail = dict(combined.get("timeline_guidance_detail") or {})
+        lines.append(
+            f"- Timeline progress label: {timeline_progress_detail.get('label')}"
+        )
+    timeline_guidance_detail = display.timeline_guidance_detail
     if timeline_guidance_detail.get("label"):
-        lines.append(f"- Timeline guidance label: {timeline_guidance_detail.get('label')}")
-    escalation_trigger = (
-        timeline_guidance_detail.get("escalation_trigger")
-        or dict(combined.get("timeline_stagnation_detail") or {}).get("escalation_trigger")
-        or timeline_progress_detail.get("escalation_trigger")
-    )
+        lines.append(
+            f"- Timeline guidance label: {timeline_guidance_detail.get('label')}"
+        )
+    escalation_trigger = display.escalation_trigger
     if escalation_trigger:
         lines.append(f"- Timeline escalate-if: {escalation_trigger}")
     if record_timeline_preview:
@@ -2074,7 +2204,7 @@ def format_stage6_handoff_compare(result: dict[str, Any]) -> str:
     if primary_blocker:
         lines.extend(["", f"Primary blocker: {primary_blocker}"])
 
-    appended_snapshot = dict(result.get("appended_snapshot") or {})
+    appended_snapshot = display.appended_snapshot
     if appended_snapshot:
         lines.append(
             "Appended snapshot: "
@@ -2086,18 +2216,23 @@ def format_stage6_handoff_compare(result: dict[str, Any]) -> str:
         list(result.get("recent_snapshot_delta_details") or [])
     )
     if latest_item is not None:
-        detail = recent_delta_detail_map.get(str(latest_item.get("observed_at_utc") or "")) or {}
+        detail = (
+            recent_delta_detail_map.get(str(latest_item.get("observed_at_utc") or ""))
+            or {}
+        )
         if detail.get("label"):
             lines.append(f"- Latest delta label: {detail.get('label')}")
         if detail.get("operator_implication"):
-            lines.append(f"- Latest delta implication: {detail.get('operator_implication')}")
+            lines.append(
+                f"- Latest delta implication: {detail.get('operator_implication')}"
+            )
         if detail.get("escalation_trigger"):
-            lines.append(f"- Latest delta escalate-if: {detail.get('escalation_trigger')}")
+            lines.append(
+                f"- Latest delta escalate-if: {detail.get('escalation_trigger')}"
+            )
 
-    actions = list(combined.get("next_actions") or [])
-    action_detail_map = _action_details_by_action(
-        list(combined.get("next_action_details") or [])
-    )
+    actions = display.actions
+    action_detail_map = display.action_details
     if actions:
         lines.extend(["", "Top actions:"])
         for action in actions[:3]:
@@ -2114,47 +2249,34 @@ def format_stage6_handoff_compare(result: dict[str, Any]) -> str:
             )
             if related_summary:
                 lines.append(f"  related={related_summary}")
-    primary_corrective_commands = list(combined.get("primary_corrective_commands") or [])
-    supporting_corrective_commands = list(combined.get("supporting_corrective_commands") or [])
-    corrective_commands = list(combined.get("corrective_commands") or [])
-    monitoring_commands = list(combined.get("monitoring_commands") or [])
-    follow_up_commands = list(combined.get("follow_up_commands") or [])
-    primary_detail_map = _command_details_by_command(
-        list(combined.get("primary_corrective_command_details") or [])
-    )
-    supporting_detail_map = _command_details_by_command(
-        list(combined.get("supporting_corrective_command_details") or [])
-    )
-    monitoring_detail_map = _command_details_by_command(
-        list(combined.get("monitoring_command_details") or [])
-    )
-    if primary_corrective_commands:
+    commands = display.commands
+    if commands.primary:
         lines.extend(["", "Top primary corrective commands:"])
-        for command in primary_corrective_commands[:2]:
+        for command in commands.primary[:2]:
             lines.append(f"- {command}")
-            detail = primary_detail_map.get(command) or {}
+            detail = commands.primary_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"  label={detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"  why_now={detail.get('reason')}")
-    elif follow_up_commands:
+    elif commands.follow_up:
         lines.extend(["", "Top follow-up commands:"])
-        for command in follow_up_commands[:2]:
+        for command in commands.follow_up[:2]:
             lines.append(f"- {command}")
-    if supporting_corrective_commands:
+    if commands.supporting:
         lines.extend(["", "Top supporting corrective commands:"])
-        for command in supporting_corrective_commands[:2]:
+        for command in commands.supporting[:2]:
             lines.append(f"- {command}")
-            detail = supporting_detail_map.get(command) or {}
+            detail = commands.supporting_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"  label={detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"  why_now={detail.get('reason')}")
-    if monitoring_commands:
+    if commands.monitoring:
         lines.extend(["", "Top monitoring commands:"])
-        for command in monitoring_commands[:1]:
+        for command in commands.monitoring[:1]:
             lines.append(f"- {command}")
-            detail = monitoring_detail_map.get(command) or {}
+            detail = commands.monitoring_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"  label={detail.get('label')}")
             if detail.get("reason"):
@@ -2164,12 +2286,11 @@ def format_stage6_handoff_compare(result: dict[str, Any]) -> str:
 
 
 def format_stage6_handoff_card(result: dict[str, Any]) -> str:
-    combined = dict(result.get("combined_assessment") or {})
-    readiness = dict(result.get("readiness") or {})
-    readiness_core = dict(readiness.get("readiness") or {})
-    record_timeline_preview = dict(readiness_core.get("record_timeline_preview") or {})
-    timeline_result = dict(result.get("timeline") or {})
-    state_dwell_summary = dict(timeline_result.get("state_dwell_summary") or {})
+    display = _prepare_handoff_display_data(result)
+    combined = display.combined
+    record_timeline_preview = display.record_timeline_preview
+    timeline_result = display.timeline
+    state_dwell_summary = display.state_dwell_summary
     lines = [
         "# Stage 6 Operator Handoff",
         f"- **Overall state:** `{combined.get('overall_state') or 'unknown'}`",
@@ -2190,7 +2311,10 @@ def format_stage6_handoff_card(result: dict[str, Any]) -> str:
         lines.append(f"- **Timeline urgency:** `{timeline_urgency}`")
     timeline_consecutive_count = combined.get("timeline_consecutive_count")
     timeline_stagnation_threshold = combined.get("timeline_stagnation_threshold")
-    if timeline_consecutive_count is not None and timeline_stagnation_threshold is not None:
+    if (
+        timeline_consecutive_count is not None
+        and timeline_stagnation_threshold is not None
+    ):
         lines.append(
             "- **Timeline stagnation window:** "
             f"`{timeline_consecutive_count}/{timeline_stagnation_threshold}`"
@@ -2199,22 +2323,20 @@ def format_stage6_handoff_card(result: dict[str, Any]) -> str:
         "latest_state_elapsed_human_since_first_seen"
     )
     if latest_state_elapsed_human:
-        lines.append(f"- **Timeline current state elapsed:** `{latest_state_elapsed_human}`")
-    timeline_progress_detail = dict(combined.get("timeline_progress_detail") or {})
+        lines.append(
+            f"- **Timeline current state elapsed:** `{latest_state_elapsed_human}`"
+        )
+    timeline_progress_detail = display.timeline_progress_detail
     if timeline_progress_detail.get("label"):
         lines.append(
             f"- **Timeline progress label:** {timeline_progress_detail.get('label')}"
         )
-    timeline_guidance_detail = dict(combined.get("timeline_guidance_detail") or {})
+    timeline_guidance_detail = display.timeline_guidance_detail
     if timeline_guidance_detail.get("label"):
         lines.append(
             f"- **Timeline guidance label:** {timeline_guidance_detail.get('label')}"
         )
-    escalation_trigger = (
-        timeline_guidance_detail.get("escalation_trigger")
-        or dict(combined.get("timeline_stagnation_detail") or {}).get("escalation_trigger")
-        or timeline_progress_detail.get("escalation_trigger")
-    )
+    escalation_trigger = display.escalation_trigger
     if escalation_trigger:
         lines.append(f"- **Timeline escalate-if:** {escalation_trigger}")
     if record_timeline_preview:
@@ -2227,10 +2349,8 @@ def format_stage6_handoff_card(result: dict[str, Any]) -> str:
     if primary_blocker:
         lines.append(f"- **Primary blocker:** {primary_blocker}")
 
-    actions = list(combined.get("next_actions") or [])
-    action_detail_map = _action_details_by_action(
-        list(combined.get("next_action_details") or [])
-    )
+    actions = display.actions
+    action_detail_map = display.action_details
     if actions:
         lines.append("- **Combined next actions:**")
         for action in actions:
@@ -2247,53 +2367,40 @@ def format_stage6_handoff_card(result: dict[str, Any]) -> str:
             )
             if related_summary:
                 lines.append(f"    - Related: {related_summary}")
-    primary_corrective_commands = list(combined.get("primary_corrective_commands") or [])
-    supporting_corrective_commands = list(combined.get("supporting_corrective_commands") or [])
-    corrective_commands = list(combined.get("corrective_commands") or [])
-    monitoring_commands = list(combined.get("monitoring_commands") or [])
-    follow_up_commands = list(combined.get("follow_up_commands") or [])
-    primary_detail_map = _command_details_by_command(
-        list(combined.get("primary_corrective_command_details") or [])
-    )
-    supporting_detail_map = _command_details_by_command(
-        list(combined.get("supporting_corrective_command_details") or [])
-    )
-    monitoring_detail_map = _command_details_by_command(
-        list(combined.get("monitoring_command_details") or [])
-    )
-    if primary_corrective_commands:
+    commands = display.commands
+    if commands.primary:
         lines.append("- **Primary corrective commands:**")
-        for command in primary_corrective_commands:
+        for command in commands.primary:
             lines.append(f"  - `{command}`")
-            detail = primary_detail_map.get(command) or {}
+            detail = commands.primary_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"    - Label: {detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"    - Why now: {detail.get('reason')}")
-    elif follow_up_commands:
+    elif commands.follow_up:
         lines.append("- **Combined follow-up commands:**")
-        for command in follow_up_commands:
+        for command in commands.follow_up:
             lines.append(f"  - `{command}`")
-    if supporting_corrective_commands:
+    if commands.supporting:
         lines.append("- **Supporting corrective commands:**")
-        for command in supporting_corrective_commands:
+        for command in commands.supporting:
             lines.append(f"  - `{command}`")
-            detail = supporting_detail_map.get(command) or {}
+            detail = commands.supporting_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"    - Label: {detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"    - Why now: {detail.get('reason')}")
-    if monitoring_commands:
+    if commands.monitoring:
         lines.append("- **Monitoring commands:**")
-        for command in monitoring_commands:
+        for command in commands.monitoring:
             lines.append(f"  - `{command}`")
-            detail = monitoring_detail_map.get(command) or {}
+            detail = commands.monitoring_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"    - Label: {detail.get('label')}")
             if detail.get("reason"):
                 lines.append(f"    - Why now: {detail.get('reason')}")
 
-    appended_snapshot = dict(result.get("appended_snapshot") or {})
+    appended_snapshot = display.appended_snapshot
     if appended_snapshot:
         lines.extend(
             [
@@ -2305,7 +2412,7 @@ def format_stage6_handoff_card(result: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            format_stage6_readiness_card(dict(result.get("readiness") or {})),
+            format_stage6_readiness_card(display.readiness),
             "",
         ]
     )
@@ -2326,12 +2433,11 @@ def format_stage6_handoff_card(result: dict[str, Any]) -> str:
 
 
 def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
-    combined = dict(result.get("combined_assessment") or {})
-    readiness = dict(result.get("readiness") or {})
-    readiness_core = dict(readiness.get("readiness") or {})
-    record_timeline_preview = dict(readiness_core.get("record_timeline_preview") or {})
-    timeline_result = dict(result.get("timeline") or {})
-    state_dwell_summary = dict(timeline_result.get("state_dwell_summary") or {})
+    display = _prepare_handoff_display_data(result)
+    combined = display.combined
+    record_timeline_preview = display.record_timeline_preview
+    timeline_result = display.timeline
+    state_dwell_summary = display.state_dwell_summary
     lines = [
         "# Stage 6 Operator Handoff Report",
         "",
@@ -2354,7 +2460,10 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
         lines.append(f"- **Timeline urgency:** `{timeline_urgency}`")
     timeline_consecutive_count = combined.get("timeline_consecutive_count")
     timeline_stagnation_threshold = combined.get("timeline_stagnation_threshold")
-    if timeline_consecutive_count is not None and timeline_stagnation_threshold is not None:
+    if (
+        timeline_consecutive_count is not None
+        and timeline_stagnation_threshold is not None
+    ):
         lines.append(
             "- **Timeline stagnation window:** "
             f"`{timeline_consecutive_count}/{timeline_stagnation_threshold}`"
@@ -2363,8 +2472,10 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
         "latest_state_elapsed_human_since_first_seen"
     )
     if latest_state_elapsed_human:
-        lines.append(f"- **Timeline current state elapsed:** {latest_state_elapsed_human}")
-    timeline_progress_detail = dict(combined.get("timeline_progress_detail") or {})
+        lines.append(
+            f"- **Timeline current state elapsed:** {latest_state_elapsed_human}"
+        )
+    timeline_progress_detail = display.timeline_progress_detail
     if timeline_progress_detail.get("label"):
         lines.append(
             f"- **Timeline progress label:** {timeline_progress_detail.get('label')}"
@@ -2374,7 +2485,7 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
             "- **Timeline progress implication:** "
             f"{timeline_progress_detail.get('operator_implication')}"
         )
-    timeline_stagnation_detail = dict(combined.get("timeline_stagnation_detail") or {})
+    timeline_stagnation_detail = display.timeline_stagnation_detail
     if timeline_stagnation_detail.get("label"):
         lines.append(
             f"- **Timeline stagnation label:** {timeline_stagnation_detail.get('label')}"
@@ -2384,7 +2495,7 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
             "- **Timeline stagnation implication:** "
             f"{timeline_stagnation_detail.get('operator_implication')}"
         )
-    timeline_guidance_detail = dict(combined.get("timeline_guidance_detail") or {})
+    timeline_guidance_detail = display.timeline_guidance_detail
     if timeline_guidance_detail.get("label"):
         lines.append(
             f"- **Timeline guidance label:** {timeline_guidance_detail.get('label')}"
@@ -2394,11 +2505,7 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
             "- **Timeline guidance implication:** "
             f"{timeline_guidance_detail.get('operator_implication')}"
         )
-    escalation_trigger = (
-        timeline_guidance_detail.get("escalation_trigger")
-        or timeline_stagnation_detail.get("escalation_trigger")
-        or timeline_progress_detail.get("escalation_trigger")
-    )
+    escalation_trigger = display.escalation_trigger
     if escalation_trigger:
         lines.append(f"- **Timeline escalate-if:** {escalation_trigger}")
     if record_timeline_preview:
@@ -2411,10 +2518,8 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
     if primary_blocker:
         lines.append(f"- **Primary blocker:** {primary_blocker}")
 
-    actions = list(combined.get("next_actions") or [])
-    action_detail_map = _action_details_by_action(
-        list(combined.get("next_action_details") or [])
-    )
+    actions = display.actions
+    action_detail_map = display.action_details
     if actions:
         lines.extend(["", "## Combined Next Actions"])
         for action in actions:
@@ -2431,53 +2536,40 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
             )
             if related_summary:
                 lines.append(f"   - **Related:** {related_summary}")
-    primary_corrective_commands = list(combined.get("primary_corrective_commands") or [])
-    supporting_corrective_commands = list(combined.get("supporting_corrective_commands") or [])
-    corrective_commands = list(combined.get("corrective_commands") or [])
-    monitoring_commands = list(combined.get("monitoring_commands") or [])
-    follow_up_commands = list(combined.get("follow_up_commands") or [])
-    primary_detail_map = _command_details_by_command(
-        list(combined.get("primary_corrective_command_details") or [])
-    )
-    supporting_detail_map = _command_details_by_command(
-        list(combined.get("supporting_corrective_command_details") or [])
-    )
-    monitoring_detail_map = _command_details_by_command(
-        list(combined.get("monitoring_command_details") or [])
-    )
-    if primary_corrective_commands:
+    commands = display.commands
+    if commands.primary:
         lines.extend(["", "## Primary Corrective Commands"])
-        for command in primary_corrective_commands:
-            detail = primary_detail_map.get(command) or {}
+        for command in commands.primary:
+            detail = commands.primary_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"- **Label:** {detail.get('label')}")
             lines.extend(["```powershell", command, "```"])
             if detail.get("reason"):
                 lines.append(f"  - Why now: {detail.get('reason')}")
-    elif follow_up_commands:
+    elif commands.follow_up:
         lines.extend(["", "## Combined Follow-up Commands"])
-        for command in follow_up_commands:
+        for command in commands.follow_up:
             lines.extend(["```powershell", command, "```"])
-    if supporting_corrective_commands:
+    if commands.supporting:
         lines.extend(["", "## Supporting Corrective Commands"])
-        for command in supporting_corrective_commands:
-            detail = supporting_detail_map.get(command) or {}
+        for command in commands.supporting:
+            detail = commands.supporting_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"- **Label:** {detail.get('label')}")
             lines.extend(["```powershell", command, "```"])
             if detail.get("reason"):
                 lines.append(f"  - Why now: {detail.get('reason')}")
-    if monitoring_commands:
+    if commands.monitoring:
         lines.extend(["", "## Monitoring Commands"])
-        for command in monitoring_commands:
-            detail = monitoring_detail_map.get(command) or {}
+        for command in commands.monitoring:
+            detail = commands.monitoring_details.get(command) or {}
             if detail.get("label"):
                 lines.append(f"- **Label:** {detail.get('label')}")
             lines.extend(["```powershell", command, "```"])
             if detail.get("reason"):
                 lines.append(f"  - Why now: {detail.get('reason')}")
 
-    appended_snapshot = dict(result.get("appended_snapshot") or {})
+    appended_snapshot = display.appended_snapshot
     if appended_snapshot:
         lines.extend(
             [
@@ -2515,7 +2607,10 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
                 )
             if item.get("issue_summary"):
                 lines.append(f"  - Issue: {item.get('issue_summary')}")
-            detail = recent_delta_detail_map.get(str(item.get("observed_at_utc") or "")) or {}
+            detail = (
+                recent_delta_detail_map.get(str(item.get("observed_at_utc") or ""))
+                or {}
+            )
             if detail.get("label"):
                 lines.append(f"  - Delta label: {detail.get('label')}")
             if detail.get("operator_implication"):
@@ -2523,7 +2618,7 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
             if detail.get("escalation_trigger"):
                 lines.append(f"  - Escalate if: {detail.get('escalation_trigger')}")
 
-    lines.extend(["", format_stage6_readiness_markdown(dict(result.get("readiness") or {}))])
+    lines.extend(["", format_stage6_readiness_markdown(display.readiness)])
 
     timeline_value = result.get("timeline")
     if timeline_value is not None:
@@ -2541,7 +2636,9 @@ def format_stage6_handoff_markdown(result: dict[str, Any]) -> str:
             ]
         )
     else:
-        lines.extend(["", "## Timeline Report", "", "No snapshot timeline was supplied."])
+        lines.extend(
+            ["", "## Timeline Report", "", "No snapshot timeline was supplied."]
+        )
 
     return "\n".join(lines)
 

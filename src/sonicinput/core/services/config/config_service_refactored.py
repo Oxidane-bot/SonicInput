@@ -656,11 +656,6 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
 
             # 分割修饰键和主键
             parts = normalized.split("+")
-            if len(parts) < 1:
-                return (
-                    False,
-                    f"Invalid hotkey format: '{hotkey_str}'. Expected format: 'ctrl+shift+key' or similar",
-                )
 
             # 检查是否有主键（最后一个部分）
             if len(parts[-1]) == 0:
@@ -671,7 +666,7 @@ class RefactoredConfigService(LifecycleComponent, IConfigService):
 
             # 验证修饰键（可选）
             valid_modifiers = {"ctrl", "control", "shift", "alt", "win", "cmd", "meta"}
-            for i, part in enumerate(parts[:-1]):  # 除了最后一个主键外的所有部分
+            for part in parts[:-1]:  # 除了最后一个主键外的所有部分
                 if part not in valid_modifiers:
                     return (
                         False,
