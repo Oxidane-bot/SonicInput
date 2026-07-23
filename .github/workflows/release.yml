@@ -20,7 +20,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.10"
   UV_VERSION: "0.11.31"
-  SONICINPUT_NUITKA_COMPILER: mingw64
+  SONICINPUT_NUITKA_COMPILER: msvc
 
 jobs:
   publish:
@@ -58,9 +58,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\nuitka-cache
-          key: nuitka-${{ runner.os }}-mingw64-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
+          key: nuitka-${{ runner.os }}-msvc-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            nuitka-${{ runner.os }}-mingw64-py${{ env.PYTHON_VERSION }}-
+            nuitka-${{ runner.os }}-msvc-py${{ env.PYTHON_VERSION }}-
 
       - name: Verify tag and project version
         shell: pwsh

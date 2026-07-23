@@ -46,6 +46,10 @@ def test_release_script_rejects_stale_artifacts_and_times_out_smoke_commands() -
 
     assert "$process.WaitForExit($TimeoutSeconds * 1000)" in release_script
     assert "[System.Diagnostics.ProcessStartInfo]::new()" in release_script
+    assert "$startInfo.RedirectStandardOutput = $true" in release_script
+    assert "$startInfo.RedirectStandardError = $true" in release_script
+    assert "$process.StandardOutput.ReadToEndAsync()" in release_script
+    assert "$process.StandardError.ReadToEndAsync()" in release_script
     assert "Remove-Item -LiteralPath $staleArtifact -Force" in release_script
     assert "SONICINPUT_PACKAGE_SMOKE_MODEL_DIR" in release_script
     assert "$offlineZipPath" in release_script
@@ -73,4 +77,5 @@ def test_release_workflow_builds_and_publishes_the_tagged_version() -> None:
     assert "timeout-minutes: 90" in workflow
     assert "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" in workflow
     assert "NUITKA_CACHE_DIR" in workflow
-    assert "SONICINPUT_NUITKA_COMPILER: mingw64" in workflow
+    assert "SONICINPUT_NUITKA_COMPILER: msvc" in workflow
+    assert "nuitka-${{ runner.os }}-msvc-py" in workflow

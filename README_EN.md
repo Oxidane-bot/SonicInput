@@ -13,12 +13,13 @@
 - Local lexicon memory: user-confirmed entries are injected before later AI cleanup only when phonetically relevant
 - Lexicon review: the settings page can ask the configured AI provider to mine raw ASR context for candidate terms
 
-## What's New (v0.8.4)
+## What's New (v0.8.5)
 - **AI output loss protection** now validates normal provider completions. Suspicious over-compression falls back to the original transcript, replacing any live streaming/grouped text in place instead of leaving or duplicating a partial result.
 - **Responsive settings UI**: local model loading plus manual and scheduled lexicon review run in background threads. Busy states prevent duplicate review runs without freezing Qt.
 - **Prompt cancellation**: cancelling one history reprocess no longer waits for the worker on the GUI thread; the worker finishes safely in the background.
 - **Reliable optional-runtime testing**: absent or orphaned Sherpa namespace packages are no longer mistaken for an installed runtime, while release builds retain real local-ASR smoke coverage.
 - **Lean runtime and packaging**: unused plugins, compatibility layers, and services are gone; the supported paths share the `sonicinput` entry point, and Nuitka carries only the verified QML/local-ASR closure plus Sherpa's required ONNX Runtime DLL.
+- **Reproducible Windows releases**: official Nuitka builds now use the MSVC path that completed the full package smoke suite, retain the Sherpa DLL SHA-256 audit, and emit child stdout/stderr when a packaged smoke command fails.
 - **Hardened CI and release automation**: pinned action/uv versions, locked dependency installs, type/format/dead-code/security/package gates, and a Windows tag workflow that builds, verifies, and publishes the executable.
 
 ## Performance Notes
@@ -30,7 +31,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.8.4-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
+1. Download `SonicInput-v0.8.5-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
 2. Run the exe; default hotkey is Ctrl+Alt+Space (customize it in settings if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

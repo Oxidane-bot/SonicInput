@@ -40,18 +40,44 @@ function Invoke-PackagedCommand {
     $startInfo.Arguments = $Argument
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     if (-not $process.Start()) {
         throw "Could not start $Description"
     }
-    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+
+    # Start draining both redirected streams before waiting so a noisy child cannot block.
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $completed = $process.WaitForExit($TimeoutSeconds * 1000)
+    if (-not $completed) {
         & taskkill /PID $process.Id /T /F *> $null
-        throw "$Description timed out after $TimeoutSeconds seconds"
+        $process.WaitForExit()
+    }
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+
+    $diagnostics = @()
+    if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+        $diagnostics += "stdout:`n$($stdout.TrimEnd())"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+        $diagnostics += "stderr:`n$($stderr.TrimEnd())"
+    }
+    $diagnosticText = if ($diagnostics.Count -gt 0) {
+        "`n$($diagnostics -join "`n")"
+    } else {
+        ""
+    }
+
+    if (-not $completed) {
+        throw "$Description timed out after $TimeoutSeconds seconds$diagnosticText"
     }
     $exitCode = $process.ExitCode
     if ($exitCode -ne 0) {
-        throw "$Description failed (exit code: $exitCode)"
+        throw "$Description failed (exit code: $exitCode)$diagnosticText"
     }
 }
 
