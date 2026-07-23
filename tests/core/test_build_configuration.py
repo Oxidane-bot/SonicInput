@@ -29,6 +29,12 @@ def test_nuitka_build_uses_cached_trimmed_qml_staging() -> None:
     assert "def _remove_reserved_files" not in build_script
     assert '"--noinclude-data-files=**/NUL"' in build_script
     assert '"--include-package=onnxruntime"' not in build_script
+    assert "SONICINPUT_NUITKA_COMPILER" in build_script
+    assert 'compiler_option = "--msvc=latest"' in build_script
+    assert 'compiler_option = "--mingw64"' in build_script
+    assert "_validate_nuitka_output(nuitka_output_dir, sherpa_onnxruntime_dll)" in (
+        build_script
+    )
     assert "def _validate_nuitka_output" in build_script
     assert "compiled_exe_path.unlink(missing_ok=True)" in build_script
     assert "compiled_report_path.unlink(missing_ok=True)" in build_script
@@ -64,3 +70,7 @@ def test_release_workflow_builds_and_publishes_the_tagged_version() -> None:
     assert ".\\scripts\\release.ps1 -NoOffline" in workflow
     assert "gh release create" in workflow
     assert "RELEASE_NOTES.md" in workflow
+    assert "timeout-minutes: 90" in workflow
+    assert "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" in workflow
+    assert "NUITKA_CACHE_DIR" in workflow
+    assert "SONICINPUT_NUITKA_COMPILER: mingw64" in workflow

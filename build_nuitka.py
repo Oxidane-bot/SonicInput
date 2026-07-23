@@ -64,6 +64,14 @@ def _fingerprint_files(paths: list[Path], context: dict[str, object]) -> str:
     return digest.hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _stage_manifest_path(staging_dir: Path) -> Path:
     return staging_dir.parent / f".{staging_dir.name}.manifest.json"
 
@@ -340,7 +348,7 @@ def _build_path(environment_name: str, default_path: str) -> Path:
     return Path.cwd() / configured_path
 
 
-def _validate_nuitka_output(output_dir: Path) -> None:
+def _validate_nuitka_output(output_dir: Path, sherpa_ort_dll: Path) -> None:
     standalone_dir = output_dir / "app.dist"
     report_path = output_dir / "nuitka-report.xml"
     if not standalone_dir.is_dir():
@@ -369,6 +377,12 @@ def _validate_nuitka_output(output_dir: Path) -> None:
         missing.append("sherpa_onnx/lib/_sherpa_onnx*.pyd")
     if missing:
         raise RuntimeError("Missing packaged runtime files: " + ", ".join(missing))
+
+    packaged_ort_dll = standalone_dir / "onnxruntime.dll"
+    if _sha256_file(packaged_ort_dll) != _sha256_file(sherpa_ort_dll):
+        raise RuntimeError(
+            "Packaged root onnxruntime.dll does not match the Sherpa runtime"
+        )
 
     forbidden_paths = [
         Path("PySide6/qml/QtQuick/VirtualKeyboard"),
@@ -470,6 +484,15 @@ print(f"[TIME] Asset staging: {stage_elapsed:.2f}s")
 sherpa_onnxruntime_dll = _sherpa_onnxruntime_dll()
 print(f"[INFO] Sherpa-compatible onnxruntime.dll: {sherpa_onnxruntime_dll}")
 
+nuitka_compiler = os.environ.get("SONICINPUT_NUITKA_COMPILER", "msvc").strip().lower()
+if nuitka_compiler == "msvc":
+    compiler_option = "--msvc=latest"
+elif nuitka_compiler == "mingw64":
+    compiler_option = "--mingw64"
+else:
+    raise RuntimeError("SONICINPUT_NUITKA_COMPILER must be either 'msvc' or 'mingw64'")
+print(f"[INFO] Nuitka compiler: {nuitka_compiler}")
+
 # Nuitka command with sherpa-onnx support
 nuitka_cmd = [
     sys.executable,
@@ -478,6 +501,7 @@ nuitka_cmd = [
     "--standalone",  # Create standalone distribution
     "--onefile",  # Package everything into single .exe
     "--assume-yes-for-downloads",  # Allow required Nuitka helper downloads in non-interactive builds
+    compiler_option,
     "--windows-console-mode=attach",  # Attach to console when launched from cmd, GUI when double-clicked
     "--enable-plugin=pyside6",  # Enable PySide6 plugin for Qt support
     # Package inclusions
@@ -493,7 +517,6 @@ nuitka_cmd = [
     f"--include-data-dir={staged_assets_dir}=assets",  # UI translations/fonts and other assets
     f"--include-data-dir={staged_qml_dir}=.",  # Minimal QML imports used by Fluent surfaces
     "--include-data-dir=src/sonicinput/ui/qml=sonicinput/ui/qml",  # QML UI files
-    f"--include-data-file={sherpa_onnxruntime_dll}=onnxruntime.dll",  # Preloaded before Python ORT
     # Windows API dependencies (for clipboard input and GUI operations)
     "--include-package=win32clipboard",  # Clipboard operations (clipboard input method)
     "--include-package=win32con",  # Windows constants
@@ -524,6 +547,12 @@ nuitka_cmd = [
     "--report-diffable",
     "app.py",
 ]
+
+# MinGW resolves the Sherpa extension dependency automatically and rejects a
+# duplicate data target. MSVC needs the ABI-compatible DLL included explicitly.
+if nuitka_compiler == "msvc":
+    nuitka_cmd.append(f"--include-data-file={sherpa_onnxruntime_dll}=onnxruntime.dll")
+
 nuitka_cmd.extend(_qml_plugin_data_options(staged_qml_dir))
 
 qml_runtime_dll_names = [
@@ -585,7 +614,7 @@ total_elapsed = time.perf_counter() - build_start
 
 if result.returncode == 0:
     try:
-        _validate_nuitka_output(nuitka_output_dir)
+        _validate_nuitka_output(nuitka_output_dir, sherpa_onnxruntime_dll)
     except Exception as exc:
         print(f"\n[ERROR] Packaged output audit failed: {exc}")
         sys.exit(1)

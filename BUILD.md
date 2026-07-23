@@ -23,6 +23,8 @@ uv sync --locked --extra local --extra dev --group dev
 uv run --locked --extra local --extra dev --group dev python build_nuitka.py
 ```
 
+本地发布默认强制使用 MSVC，并显式加入 Sherpa ABI 对应的根 `onnxruntime.dll`。GitHub Release 设置 `SONICINPUT_NUITKA_COMPILER=mingw64`，让 MinGW 从原生扩展依赖自动解析该 DLL；两条路径都会在打包后校验根 DLL 的 SHA-256 与 Sherpa 源文件完全一致。
+
 **输出文件**：`dist/release/v{version}/SonicInput-v{version}-win64.exe`
 **可选离线包**:
 - 设置 `SONICINPUT_OFFLINE_MODELS_DIR` 指向模型根目录（包含两个已解压的模型文件夹）
@@ -179,7 +181,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.8.3-win64.exe
+SonicInput-v0.8.4-win64.exe
 ```
 
 ## 技术细节
@@ -232,7 +234,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 ---
 
 **最后更新**：2026-07-23
-**适用版本**：v0.8.3+
+**适用版本**：v0.8.4+
 
 
 ## Release Script

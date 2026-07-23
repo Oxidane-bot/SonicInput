@@ -1,4 +1,4 @@
-# SonicInput v0.8.3 Release Notes
+# SonicInput v0.8.4 Release Notes
 
 Release date: 2026-07-23
 
@@ -11,15 +11,15 @@ Release date: 2026-07-23
 - Moved manual and scheduled lexicon review to background Qt workers. The review UI exposes a busy state, and the shared settings service rejects concurrent review passes to protect the review cursor and storage.
 - Removed GUI-thread waits from single-history-reprocess cancellation. Cancellation now updates immediately and lets the current operation finish at a safe checkpoint.
 - Made the optional Sherpa runtime test robust against an uninstalled or orphaned namespace package without weakening the packaged local-ASR smoke gate.
-- Fixed clean Nuitka builds by explicitly placing Sherpa's ABI-compatible ONNX Runtime DLL where the native extension expects it. This prevents stale build directories from masking a missing release dependency.
+- Fixed clean MSVC and MinGW Nuitka builds with explicit compiler modes: MSVC adds Sherpa's ABI-compatible ONNX Runtime DLL, while MinGW uses its automatic native-dependency resolution. A post-build SHA-256 audit requires either path to package the exact Sherpa DLL at the root, preventing both missing-DLL builds and duplicate-target collisions.
 - Removed orphaned UI audio/GPU service registrations and the diagnostic import of a GPU module that no longer exists.
 - Updated GitHub Actions to immutable current action revisions and a pinned uv release. CI now enforces locked installs, Ruff, mypy, Vulture, Bandit, non-GUI and offscreen GUI tests, and wheel/sdist construction.
-- Added a Windows tag-release workflow that verifies the version, runs the locked release script, and publishes the executable plus SHA-256 sidecar.
+- Added a Windows tag-release workflow that verifies the version, runs the locked release script, and publishes the executable plus SHA-256 sidecar. Nuitka compiler artifacts are cached and the clean-build timeout accounts for an empty C cache.
 
 ## Upgrade Notes
 
 - No configuration or database migration is required for this release.
-- v0.8.2 was prepared locally but never published. All runtime cleanup and smaller Fluent/QML packaging work prepared after v0.8.1 is included in v0.8.3.
+- v0.8.2 was prepared locally but never published. The v0.8.3 tag's clean-runner build was rejected before publication by the DLL collision fixed here. v0.8.4 includes all work prepared after v0.8.1.
 - A review that is already in progress now reports `review_already_running` instead of starting a second concurrent pass.
 
 ## Validation
@@ -36,8 +36,8 @@ Release date: 2026-07-23
 
 ## Artifacts
 
-- `SonicInput-v0.8.3-win64.exe`
-- `SonicInput-v0.8.3-win64.exe.sha256`
+- `SonicInput-v0.8.4-win64.exe`
+- `SonicInput-v0.8.4-win64.exe.sha256`
 - Optional offline archives when release models are supplied
 
 The GitHub Release attaches the generated SHA-256 sidecar; use it to verify the executable after download.

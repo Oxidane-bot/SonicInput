@@ -13,7 +13,7 @@
 - Local lexicon memory: user-confirmed entries are injected before later AI cleanup only when phonetically relevant
 - Lexicon review: the settings page can ask the configured AI provider to mine raw ASR context for candidate terms
 
-## What's New (v0.8.3)
+## What's New (v0.8.4)
 - **AI output loss protection** now validates normal provider completions. Suspicious over-compression falls back to the original transcript, replacing any live streaming/grouped text in place instead of leaving or duplicating a partial result.
 - **Responsive settings UI**: local model loading plus manual and scheduled lexicon review run in background threads. Busy states prevent duplicate review runs without freezing Qt.
 - **Prompt cancellation**: cancelling one history reprocess no longer waits for the worker on the GUI thread; the worker finishes safely in the background.
@@ -30,7 +30,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.8.3-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
+1. Download `SonicInput-v0.8.4-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
 2. Run the exe; default hotkey is Ctrl+Alt+Space (customize it in settings if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 
