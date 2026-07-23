@@ -103,6 +103,26 @@ def test_ui_settings_service_lexicon_methods_are_safe_without_storage():
     assert service.export_lexicon_entries()["success"] is False
 
 
+def test_ui_settings_service_rejects_concurrent_review_runs():
+    config_service = Mock()
+    config_service.get_setting.return_value = True
+    service = UISettingsService(
+        config_service=config_service,
+        event_service=Mock(),
+        history_service=Mock(),
+        container=object(),
+    )
+
+    service._review_run_lock.acquire()
+    try:
+        result = service.run_review_now()
+    finally:
+        service._review_run_lock.release()
+
+    assert result["ran"] is False
+    assert result["reason"] == "review_already_running"
+
+
 def test_ui_model_service_updates_runtime_speech_service():
     original_speech_service = Mock(name="original_speech_service")
     replacement_speech_service = Mock(name="replacement_speech_service")

@@ -18,8 +18,6 @@ from .interfaces import (
 from .interfaces.audio import IAudioService
 from .services.events import Events
 from .services.ui_services import (
-    UIAudioService,
-    UIGPUService,
     UIMainService,
     UILocalizationService,
     UIModelService,
@@ -613,26 +611,6 @@ def create_container() -> "DIContainer":
 
     container.register_singleton(
         UIModelService, factory=lambda: create_ui_model_service(container)
-    )
-
-    # UI音频服务 - 单例（无依赖）
-    def create_ui_audio_service(container):
-        from .services.ui_services import UIAudioService
-
-        return UIAudioService()
-
-    container.register_singleton(
-        UIAudioService, factory=lambda: create_ui_audio_service(container)
-    )
-
-    # UI GPU服务 - 单例（无依赖）
-    def create_ui_gpu_service(container):
-        from .services.ui_services import UIGPUService
-
-        return UIGPUService()
-
-    container.register_singleton(
-        UIGPUService, factory=lambda: create_ui_gpu_service(container)
     )
 
     # ========================================================================

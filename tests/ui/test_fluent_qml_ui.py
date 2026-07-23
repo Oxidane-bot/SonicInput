@@ -412,6 +412,7 @@ class TestFluentSettingsViewModel:
                 self.progress_updated = Mock()
                 self.reprocessing_completed = Mock()
                 self.reprocessing_failed = Mock()
+                self.finished = Mock()
                 started_workers.append(self)
 
             def start(self):
@@ -617,6 +618,7 @@ class TestFluentSettingsParity:
             "reviewEnabledSwitch",
             "reviewSuggestionCountLabel",
             "runReviewNowButton",
+            "reviewRunProgress",
             "reviewRunMessageLabel",
             "reviewEmptyState",
             "reviewSuggestionList",
@@ -656,6 +658,7 @@ class TestFluentSettingsParity:
         assert "exportLexiconEntries()" in qml_source
         assert "clearLexiconEntries()" in qml_source
         assert "runReviewNow()" in qml_source
+        assert "BusyIndicator" not in qml_source
         assert 'root.setValue("review.enabled", checked)' in qml_source
         assert "exportReviewDebugReportButton" not in qml_source
         assert "reviewJobsFrame" not in qml_source

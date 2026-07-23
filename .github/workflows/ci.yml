@@ -1,152 +1,161 @@
-name: Code Quality
+name: CI
 
-# 触发条件：push到任何分支、pull request到main分支
-# 注意：本项目为Windows专用应用
 on:
   push:
-    branches: [ master, main, develop, feature/*, fix/* ]
+    branches: [master, main, develop, feature/*, fix/*]
+    tags: ["v*"]
   pull_request:
-    branches: [ master, main, develop ]
+    branches: [master, main, develop]
+  workflow_dispatch:
 
-# 环境变量
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.10"
-  UV_CACHE_DIR: "/tmp/.uv-cache"
+  UV_VERSION: "0.11.31"
 
 jobs:
-  # 代码风格和类型检查
   lint:
-    name: Linting & Type Checking
+    name: Lint, Format, Types, and Dead Code
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v2
-      with:
-        version: "latest"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
 
-    - name: Cache uv dependencies
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.UV_CACHE_DIR }}
-        key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-uv-
+      - name: Run Ruff lint
+        run: uv run --no-sync ruff check src tests app.py build_nuitka.py scripts --output-format=github
 
-    - name: Install dependencies
-      run: |
-        uv sync --extra dev
+      - name: Run Ruff format check
+        run: uv run --no-sync ruff format --check src tests app.py build_nuitka.py scripts
 
-    - name: Run ruff (linting)
-      run: |
-        uv run ruff check src/ tests/ app.py build_nuitka.py scripts/ --output-format=github
+      - name: Run mypy
+        run: uv run --no-sync mypy src app.py build_nuitka.py scripts
 
-    - name: Run ruff (formatting check)
-      run: |
-        uv run ruff format --check src/ tests/ app.py build_nuitka.py scripts/
+      - name: Detect dead code
+        run: uv run --no-sync vulture src app.py build_nuitka.py scripts --min-confidence 80
 
-    - name: Run mypy (type checking)
-      # This gate is REAL (no `|| true`).
-      # Baselined UI modules live in pyproject.toml [tool.mypy.overrides];
-      # remove modules from the baseline as their errors get fixed.
-      run: |
-        uv run mypy src/ app.py build_nuitka.py scripts/
-
-  # 核心回归测试（跳过 GUI/GPU/E2E）
   tests:
     name: Core Tests (Windows)
     runs-on: windows-latest
-
+    timeout-minutes: 20
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v2
-      with:
-        version: "latest"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
 
-    - name: Install dependencies
-      run: |
-        uv sync --extra dev
+      - name: Run non-GUI regression suite
+        run: uv run --no-sync pytest -m "not gui and not gpu and not e2e" -v
 
-    - name: Run pytest (non-gui)
-      run: |
-        uv run pytest -m "not gui and not gpu and not e2e" -v
-
-  # GUI / E2E 测试（Windows offscreen 模式）
   ui-tests:
     name: UI Tests (Windows, offscreen)
     runs-on: windows-latest
-
+    timeout-minutes: 20
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v2
-      with:
-        version: "latest"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
 
-    - name: Install dependencies
-      run: |
-        uv sync --extra dev
+      - name: Run offscreen GUI suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --no-sync pytest tests/ui -m "gui" -v
 
-    - name: Run UI suite (offscreen)
-      env:
-        QT_QPA_PLATFORM: offscreen
-      run: |
-        uv run pytest tests/ui/ -m "gui" -v
-
-  # 安全漏洞扫描
   security:
     name: Security Scan
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v2
-      with:
-        version: "latest"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
 
-    - name: Install dependencies
-      run: |
-        uv sync --extra dev
+      - name: Run Bandit security scan
+        run: uv run --no-sync bandit -r src -ll -ii -f json -o bandit-report.json
 
-    - name: Run Bandit security scan
-      run: |
-        uv run bandit -r src/ -ll -ii -f json -o bandit-report.json
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-report
+          path: bandit-report.json
+          if-no-files-found: error
+          retention-days: 30
 
-    - name: Upload security report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: security-report
-        path: bandit-report.json
-        retention-days: 30
+  package:
+    name: Build Python Distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+
+      - name: Build wheel and source distribution
+        run: uv build
+
+      - name: Upload Python distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7

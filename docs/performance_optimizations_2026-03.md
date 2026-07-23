@@ -41,7 +41,7 @@ User impact:
 
 Files:
 - `src/sonicinput/core/services/storage/history_storage_service.py`
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- `src/sonicinput/ui/viewmodels/history.py`
 
 What changed:
 - Added keyset APIs (`get_records_keyset`, `search_records_keyset`).
@@ -66,7 +66,7 @@ User impact:
 ### 5) Batch reprocessing now uses keyset read + batch insert
 
 File:
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- `src/sonicinput/ui/history_workers.py`
 
 What changed:
 - Batch worker reads source records via keyset (`ASC`) traversal.
@@ -78,7 +78,7 @@ User impact:
 ### 6) History diagnostics moved out of crowded main columns
 
 File:
-- `src/sonicinput/ui/settings_tabs/history_tab.py`
+- `src/sonicinput/ui/viewmodels/history.py`
 
 What changed:
 - Main history table is simplified to core columns only:
@@ -90,6 +90,23 @@ What changed:
 User impact:
 - Better readability in day-to-day history browsing.
 - No loss of diagnostics when root-cause analysis is needed.
+
+### 7) Long-running settings actions stay off the GUI thread (v0.8.3)
+
+Files:
+- `src/sonicinput/ui/main_window.py`
+- `src/sonicinput/ui/review_worker.py`
+- `src/sonicinput/ui/viewmodels/review.py`
+- `src/sonicinput/ui/viewmodels/history.py`
+
+What changed:
+- Local model loading and both manual and scheduled lexicon review now execute in QThreads.
+- Review runs expose a busy state and the shared UI service rejects concurrent runs.
+- Cancelling a single history reprocess no longer waits for its worker from the GUI thread.
+
+User impact:
+- Settings continue repainting and accepting Qt events while a model downloads, initializes, or a review reaches an AI provider.
+- Cancelling a reprocess updates the UI immediately while the in-flight operation finishes at its next safe checkpoint.
 
 ## Validation
 

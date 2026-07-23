@@ -254,6 +254,7 @@ class HistoryViewModelMixin(SettingsViewModelBase):
         self._retry_worker.reprocessing_failed.connect(
             self._on_retry_reprocessing_failed
         )
+        self._retry_worker.finished.connect(self._on_retry_worker_finished)
         self._history_action_stage = "running"
         self._history_action_busy = True
         self._history_action_message = "Initializing reprocessing..."
@@ -265,11 +266,6 @@ class HistoryViewModelMixin(SettingsViewModelBase):
         self.changed.emit()
 
     def _on_retry_reprocessing_completed(self, result: dict) -> None:
-        if self._retry_worker:
-            if self._retry_worker.isRunning():
-                self._retry_worker.wait(1000)
-            self._retry_worker = None
-
         new_record_id = result.get("new_record_id")
         history_service = self._get_history_service()
         if new_record_id and history_service:
@@ -288,10 +284,8 @@ class HistoryViewModelMixin(SettingsViewModelBase):
         self.changed.emit()
 
     def _on_retry_reprocessing_failed(self, error_message: str) -> None:
-        if self._retry_worker:
-            if self._retry_worker.isRunning():
-                self._retry_worker.wait(1000)
-            self._retry_worker = None
+        if self._history_action_stage == "canceling":
+            return
 
         self._history_action_stage = "failed"
         self._history_action_busy = False
@@ -304,13 +298,31 @@ class HistoryViewModelMixin(SettingsViewModelBase):
     def _on_retry_reprocessing_canceled(self) -> None:
         if self._retry_worker:
             self._retry_worker.stop()
-            self._retry_worker.wait(2000)
-            self._retry_worker = None
+            self._history_action_stage = "canceling"
+            self._history_action_busy = True
+            self._history_action_message = (
+                "Cancel requested. Waiting for the current operation to stop safely..."
+            )
+            self.changed.emit()
+            return
 
         self._history_action_stage = "canceled"
         self._history_action_busy = False
         self._history_action_message = "Reprocessing operation has been canceled."
         self.changed.emit()
+
+    def _on_retry_worker_finished(self) -> None:
+        worker = self.sender()
+        if isinstance(worker, ReprocessingWorker):
+            worker.deleteLater()
+            if self._retry_worker is worker:
+                self._retry_worker = None
+
+        if self._history_action_stage == "canceling":
+            self._history_action_stage = "canceled"
+            self._history_action_busy = False
+            self._history_action_message = "Reprocessing operation has been canceled."
+            self.changed.emit()
 
     # ---- QML Properties ----
 

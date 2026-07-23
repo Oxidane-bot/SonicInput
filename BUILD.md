@@ -33,9 +33,9 @@ uv run --locked --extra local --extra dev --group dev python build_nuitka.py
 - 包含 sherpa-onnx C 扩展模块（~5MB）
 - 支持本地 Paraformer/Zipformer 模型
 - 无需互联网连接即可使用本地转录
-- 文件大小会随 PySide6、ONNX Runtime 与编译器版本变化；发布前以 `RELEASE_NOTES.md` 中的实测 SHA-256 和大小为准
+- 文件大小会随 PySide6、ONNX Runtime 与编译器版本变化；发布后以 GitHub Release 附带的 `.sha256` 文件校验实际产物
 
-v0.8.2 实测结果：QML 暂存目录由 14.9 MiB 降至 6.64 MiB；Nuitka 报告中的 Python ONNX Runtime 闭包为 12 个模块且未引入 SymPy；最终 onefile EXE 为 68.32 MiB，比 v0.8.1 小约 3 MiB。
+v0.8.2 基线实测结果：QML 暂存目录由 14.9 MiB 降至 6.64 MiB；Nuitka 报告中的 Python ONNX Runtime 闭包为 12 个模块且未引入 SymPy；最终 onefile EXE 为 68.32 MiB，比 v0.8.1 小约 3 MiB。每个新版本的实际大小与 SHA-256 以 GitHub Release 附带的 `.sha256` 文件为准。
 
 ## 构建说明
 
@@ -179,7 +179,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.8.2-win64.exe
+SonicInput-v0.8.3-win64.exe
 ```
 
 ## 技术细节
@@ -231,8 +231,8 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ---
 
-**最后更新**：2026-07-12
-**适用版本**：v0.8.2+
+**最后更新**：2026-07-23
+**适用版本**：v0.8.3+
 
 
 ## Release Script
@@ -260,3 +260,7 @@ Use the helper script to build the exe and (optionally) the offline bundle:
 ```
 
 The script uses `uv sync --locked --extra local --extra dev --group dev`, runs the same Ruff/mypy scope as CI, both non-GUI and offscreen GUI/QML suites, then packaged `--help`, `--validate`, `--package-smoke`, and an isolated 12-second offscreen GUI-startup smoke by default. `--package-smoke` verifies packaged assets, pypinyin dictionaries, ONNX Runtime, the sherpa native runtime, and the Settings/Overlay/About QML roots. When `-ModelSmokeDir` is provided, it additionally loads the named cached model and decodes one second of silent audio without downloading or modifying the model cache. Packaged CLI checks have a 180-second timeout, and a formal build removes same-version stale artifacts before compiling. The script writes the executable, optional offline archive, and `.sha256` file under `dist/release/v{version}/`. Close any running SonicInput process before invoking it so `uv sync` can update the environment.
+
+## GitHub Release
+
+The `.github/workflows/release.yml` workflow is the authoritative publisher. After the local release script has passed, commit the versioned source and release notes, create an annotated `v{version}` tag at that commit, and push the tag. The workflow rebuilds on `windows-latest`, reruns locked validation and packaged smoke checks, then creates the GitHub Release with the exe and SHA-256 sidecar. It refuses a tag whose name does not match `pyproject.toml`.

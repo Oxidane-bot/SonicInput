@@ -93,6 +93,7 @@ ZH_CN: dict[str, str] = {
     "refresh": "刷新",
     "review_suggestions": "词汇候选",
     "review_run_completed": "词汇审查完成：{records} 条记录，{suggestions} 条候选",
+    "review_run_running": "正在运行词汇审查...",
     "review_run_skipped": "词汇审查未运行：{reason}",
     "run_review_now": "运行词汇审查",
     "registered_hotkeys": "已注册快捷键",

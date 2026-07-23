@@ -19,6 +19,7 @@ from ..interfaces import (
     IStateManager,
 )
 from ..quality import (
+    AIOutputValidationError,
     LexiconMatcher,
     RollingTranscriptContext,
     TranscriptQualityValidator,
@@ -814,6 +815,10 @@ class AIProcessingController(
         if not incremental_event_data or not text.strip():
             return
 
+        # The final quality gate may still reject the combined response. Keep
+        # this state as soon as live text is emitted so the input controller
+        # replaces that text with the original transcript instead of appending it.
+        self._last_incremental_output_used = True
         payload = dict(incremental_event_data)
         payload["text"] = text
         payload["incremental"] = True
@@ -1083,6 +1088,10 @@ class AIProcessingController(
                         max_output_tokens,
                     )
 
+            # A provider can stop normally even after a model has summarized or
+            # omitted part of a long transcript. Reject that output before it is
+            # emitted or persisted, just as we do for explicit token truncation.
+            self._quality_validator.validate_or_raise(text, refined_text)
             self._update_rolling_context(text, refined_text)
 
             app_logger.log_audio_event(
@@ -1144,6 +1153,30 @@ class AIProcessingController(
             self.last_ai_provider = provider
             app_logger.log_audio_event(
                 "AI output truncated - AI optimization skipped, using original text",
+                {"error": str(e), "provider": provider},
+            )
+            app_logger.log_error(e, "process_with_ai")
+
+            if update_history and actual_record_id:
+                self._update_ai_status(
+                    record_id=actual_record_id,
+                    ai_text=None,
+                    status="failed",
+                    error=error_msg,
+                    final_text=text,
+                )
+
+            if emit_events:
+                self._events.emit(Events.AI_PROCESSING_ERROR, error_msg)
+            return text
+
+        except AIOutputValidationError as e:
+            error_msg = f"AI output rejected by transcript quality guard: {e}"
+            self.last_ai_status = "failed"
+            self.last_ai_error = error_msg
+            self.last_ai_provider = provider
+            app_logger.log_audio_event(
+                "AI output rejected - AI optimization skipped, using original text",
                 {"error": str(e), "provider": provider},
             )
             app_logger.log_error(e, "process_with_ai")

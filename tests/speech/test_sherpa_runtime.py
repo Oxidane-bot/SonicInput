@@ -11,15 +11,17 @@ from sonicinput.speech.sherpa_runtime import (
 )
 
 
-def test_onnxruntime_package_dll_precedes_system32() -> None:
-    onnxruntime = pytest.importorskip("onnxruntime")
+def _optional_package_dir(package_name: str) -> Path:
+    package = pytest.importorskip(package_name)
+    package_file = getattr(package, "__file__", None)
+    if package_file is None:
+        pytest.skip(f"{package_name} is not installed as an importable package")
+    return Path(package_file).resolve().parent
 
-    ort_dll = Path(onnxruntime.__file__).resolve().parent / "capi" / "onnxruntime.dll"
-    sherpa_dll = (
-        Path(pytest.importorskip("sherpa_onnx").__file__).resolve().parent
-        / "lib"
-        / "onnxruntime.dll"
-    )
+
+def test_onnxruntime_package_dll_precedes_system32() -> None:
+    ort_dll = _optional_package_dir("onnxruntime") / "capi" / "onnxruntime.dll"
+    sherpa_dll = _optional_package_dir("sherpa_onnx") / "lib" / "onnxruntime.dll"
     system32_dll = (
         Path(os.environ.get("SystemRoot", r"C:\Windows"))
         / "System32"
@@ -37,9 +39,7 @@ def test_onnxruntime_package_dll_precedes_system32() -> None:
 
 
 def test_configure_sherpa_dll_search_path_includes_onnxruntime_capi() -> None:
-    onnxruntime = pytest.importorskip("onnxruntime")
-
-    ort_capi_dir = Path(onnxruntime.__file__).resolve().parent / "capi"
+    ort_capi_dir = _optional_package_dir("onnxruntime") / "capi"
 
     configured = [Path(path) for path in configure_sherpa_dll_search_path()]
 

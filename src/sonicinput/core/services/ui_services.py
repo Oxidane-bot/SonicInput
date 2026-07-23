@@ -8,6 +8,7 @@ import copy
 import json
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from sonicinput.resources.runtime_assets import get_assets_dir
@@ -124,6 +125,7 @@ class UISettingsService:
         self._launch_at_login_service = launch_at_login_service
         self._review_storage_service = review_storage_service
         self._container = container
+        self._review_run_lock = Lock()
         app_logger.log_audio_event("UISettingsService initialized", {})
 
     def get_all_settings(self) -> Dict[str, Any]:
@@ -267,85 +269,51 @@ class UISettingsService:
 
     def run_review_now(self) -> dict[str, Any]:
         """手动触发一次词汇候选审查。"""
-        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
-            return {
-                "ran": False,
-                "reason": "review_disabled",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "disabled",
-            }
-        if self._container is None:
-            return {
-                "ran": False,
-                "reason": "review_scheduler_unavailable",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "unavailable",
-            }
-        try:
-            from ..quality import LLMReviewService
-            from .review_scheduler_service import ReviewSchedulerService
-
-            scheduler = self._container.resolve(ReviewSchedulerService)
-            review_service = self._container.resolve(LLMReviewService)
-            result = scheduler.run_once_now(review_service=review_service)
-        except Exception as exc:
-            app_logger.log_audio_event(
-                "UI manual lexicon review failed", {"error": str(exc)}
-            )
-            return {
-                "ran": False,
-                "reason": "review_run_failed",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "error",
-            }
-        return self._format_review_run_result(result)
+        return self._run_review(manual=True)
 
     def run_idle_review_once(self) -> dict[str, Any]:
         """自动触发一次词汇候选审查。"""
-        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
-            return {
-                "ran": False,
-                "reason": "review_disabled",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "disabled",
-            }
-        if self._container is None:
-            return {
-                "ran": False,
-                "reason": "review_scheduler_unavailable",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "unavailable",
-            }
-        try:
-            from ..quality import LLMReviewService
-            from .review_scheduler_service import ReviewSchedulerService
+        return self._run_review(manual=False)
 
-            scheduler = self._container.resolve(ReviewSchedulerService)
-            review_service = self._container.resolve(LLMReviewService)
-            result = scheduler.run_once_if_idle(review_service=review_service)
-        except Exception as exc:
-            app_logger.log_audio_event(
-                "UI idle lexicon review failed", {"error": str(exc)}
-            )
-            return {
-                "ran": False,
-                "reason": "review_run_failed",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-                "reviewSource": "error",
-            }
-        return self._format_review_run_result(result)
+    @staticmethod
+    def _review_not_run(reason: str, source: str) -> dict[str, Any]:
+        return {
+            "ran": False,
+            "reason": reason,
+            "jobId": "",
+            "reviewedRecordCount": 0,
+            "suggestionCount": 0,
+            "reviewSource": source,
+        }
+
+    def _run_review(self, *, manual: bool) -> dict[str, Any]:
+        if not self.config_service.get_setting(ConfigKeys.REVIEW_ENABLED, False):
+            return self._review_not_run("review_disabled", "disabled")
+        if self._container is None:
+            return self._review_not_run("review_scheduler_unavailable", "unavailable")
+        if not self._review_run_lock.acquire(blocking=False):
+            return self._review_not_run("review_already_running", "busy")
+
+        try:
+            try:
+                from ..quality import LLMReviewService
+                from .review_scheduler_service import ReviewSchedulerService
+
+                scheduler = self._container.resolve(ReviewSchedulerService)
+                review_service = self._container.resolve(LLMReviewService)
+                run_review = (
+                    scheduler.run_once_now if manual else scheduler.run_once_if_idle
+                )
+                result = run_review(review_service=review_service)
+            except Exception as exc:
+                run_source = "manual" if manual else "idle"
+                app_logger.log_audio_event(
+                    f"UI {run_source} lexicon review failed", {"error": str(exc)}
+                )
+                return self._review_not_run("review_run_failed", "error")
+            return self._format_review_run_result(result)
+        finally:
+            self._review_run_lock.release()
 
     @staticmethod
     def _format_review_run_result(result: Any) -> dict[str, Any]:
@@ -756,62 +724,3 @@ class UIModelService:
         elif hasattr(self.speech_service, "_engine"):
             return self.speech_service._engine
         return None
-
-
-class UIAudioService:
-    """UI音频服务实现
-
-    提供音频设备管理功能。
-    """
-
-    def __init__(self):
-        """初始化UI音频服务"""
-        app_logger.log_audio_event("UIAudioService initialized", {})
-
-    def get_audio_devices(self) -> list:
-        """获取可用音频设备列表"""
-        try:
-            from ...audio.recorder import AudioRecorder
-
-            temp_recorder = AudioRecorder()
-            devices = temp_recorder.get_audio_devices()
-            temp_recorder.cleanup()
-            return devices
-        except Exception as e:
-            app_logger.log_error(e, "get_audio_devices")
-            return []
-
-    def refresh_audio_devices(self) -> None:
-        """刷新音频设备列表
-
-        主要用于UI刷新，具体实现可能需要重新初始化录音器
-        """
-        pass
-
-
-class UIGPUService:
-    """UI GPU服务实现
-
-    提供GPU信息查询功能。
-    """
-
-    def __init__(self):
-        """初始化UI GPU服务"""
-        app_logger.log_audio_event("UIGPUService initialized", {})
-
-    def get_gpu_info(self) -> Dict[str, Any]:
-        """获取GPU信息"""
-        try:
-            from ...speech.gpu_manager import GPUManager
-
-            temp_gpu_manager = GPUManager()
-            gpu_info = temp_gpu_manager.get_device_info()
-            return gpu_info
-        except Exception as e:
-            app_logger.log_error(e, "get_gpu_info")
-            return {"error": str(e), "cuda_available": False}
-
-    def check_gpu_availability(self) -> bool:
-        """检查GPU是否可用"""
-        gpu_info = self.get_gpu_info()
-        return gpu_info.get("cuda_available", False)

@@ -74,6 +74,8 @@ class FluentSettingsViewModel(
         self._history_action_stage = "idle"
         self._review_suggestions = []
         self._lexicon_entries = []
+        self._review_run_worker = None
+        self._review_run_busy = False
         self._review_run_message = ""
         self._lexicon_export_message = ""
 

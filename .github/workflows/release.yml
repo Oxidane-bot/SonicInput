@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.10"
+  UV_VERSION: "0.11.31"
+
+jobs:
+  publish:
+    name: Build and Publish Windows Release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Select release tag
+        id: release
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.tag }}" } else { "${{ github.ref_name }}" }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Release tag must use vX.Y.Z format: $tag"
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+
+      - name: Verify tag and project version
+        shell: pwsh
+        run: |
+          $projectVersion = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ($projectVersion -ne "${{ steps.release.outputs.version }}") {
+            throw "Tag ${{ steps.release.outputs.tag }} does not match pyproject.toml version $projectVersion"
+          }
+
+      - name: Build and smoke-test release
+        shell: pwsh
+        run: .\scripts\release.ps1 -NoOffline
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $releaseDir = "dist\release\v${{ steps.release.outputs.version }}"
+          $assets = Get-ChildItem -LiteralPath $releaseDir -File | ForEach-Object FullName
+          if ($assets.Count -lt 2) {
+            throw "Expected executable and SHA-256 sidecar in $releaseDir"
+          }
+          gh release create "${{ steps.release.outputs.tag }}" @assets --title "SonicInput ${{ steps.release.outputs.tag }}" --notes-file RELEASE_NOTES.md

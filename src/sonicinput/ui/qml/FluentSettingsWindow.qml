@@ -1448,8 +1448,15 @@ ApplicationWindow {
                             Button {
                                 objectName: "runReviewNowButton"
                                 text: root.t("run_review_now", "Run Lexicon Review")
-                                enabled: root.value("review.enabled", false)
+                                enabled: root.value("review.enabled", false) && root.viewModel && !root.viewModel.reviewRunBusy
                                 onClicked: root.viewModel && root.viewModel.runReviewNow()
+                            }
+                            ProgressBar {
+                                objectName: "reviewRunProgress"
+                                visible: root.viewModel && root.viewModel.reviewRunBusy
+                                indeterminate: true
+                                Layout.preferredWidth: 72
+                                Layout.preferredHeight: 20
                             }
                         }
 
@@ -1945,6 +1952,7 @@ ApplicationWindow {
         footer: DialogButtonBox {
             Button {
                 visible: root.viewModel && root.viewModel.historyActionBusy
+                enabled: root.viewModel && root.viewModel.historyActionStage === "running"
                 text: root.t("cancel", "Cancel")
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
                 onClicked: root.viewModel && root.viewModel.cancelHistoryAction()

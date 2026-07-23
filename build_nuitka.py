@@ -7,6 +7,7 @@ Includes support for sherpa-onnx C extension modules and all required dependenci
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -305,19 +306,17 @@ def _resolve_shiboken6_dll(dll_name: str) -> Path | None:
     return dll_path if dll_path.exists() else None
 
 
-def _bundled_onnxruntime_dll() -> Path:
-    """Verify the ORT DLL provided by the package included in the release."""
-    try:
-        import onnxruntime
-    except Exception as exc:
-        raise RuntimeError(
-            "onnxruntime is required for the local ASR release build."
-        ) from exc
+def _sherpa_onnxruntime_dll() -> Path:
+    """Locate the ORT DLL built for the bundled sherpa-onnx extension."""
+    spec = importlib.util.find_spec("sherpa_onnx")
+    if not spec or not spec.submodule_search_locations:
+        raise RuntimeError("sherpa-onnx is required for the local ASR release build.")
 
-    dll_path = Path(onnxruntime.__file__).resolve().parent / "capi" / "onnxruntime.dll"
-    if not dll_path.is_file():
-        raise RuntimeError(f"Bundled onnxruntime.dll not found: {dll_path}")
-    return dll_path
+    for package_dir in spec.submodule_search_locations:
+        dll_path = Path(package_dir).resolve() / "lib" / "onnxruntime.dll"
+        if dll_path.is_file():
+            return dll_path
+    raise RuntimeError("sherpa-onnx did not provide lib/onnxruntime.dll")
 
 
 def _resolve_offline_models_dir() -> Path | None:
@@ -468,8 +467,8 @@ stage_elapsed = time.perf_counter() - stage_start
 print(f"Using staged assets: {staged_assets_dir}")
 print(f"Using staged QML runtime: {staged_qml_dir}")
 print(f"[TIME] Asset staging: {stage_elapsed:.2f}s")
-bundled_onnxruntime_dll = _bundled_onnxruntime_dll()
-print(f"[INFO] Verified bundled onnxruntime.dll: {bundled_onnxruntime_dll}")
+sherpa_onnxruntime_dll = _sherpa_onnxruntime_dll()
+print(f"[INFO] Sherpa-compatible onnxruntime.dll: {sherpa_onnxruntime_dll}")
 
 # Nuitka command with sherpa-onnx support
 nuitka_cmd = [
@@ -494,6 +493,7 @@ nuitka_cmd = [
     f"--include-data-dir={staged_assets_dir}=assets",  # UI translations/fonts and other assets
     f"--include-data-dir={staged_qml_dir}=.",  # Minimal QML imports used by Fluent surfaces
     "--include-data-dir=src/sonicinput/ui/qml=sonicinput/ui/qml",  # QML UI files
+    f"--include-data-file={sherpa_onnxruntime_dll}=onnxruntime.dll",  # Preloaded before Python ORT
     # Windows API dependencies (for clipboard input and GUI operations)
     "--include-package=win32clipboard",  # Clipboard operations (clipboard input method)
     "--include-package=win32con",  # Windows constants

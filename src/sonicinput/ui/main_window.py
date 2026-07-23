@@ -18,6 +18,27 @@ from PySide6.QtWidgets import (
 from ..core.services.events import Events
 from ..core.services.ui_services import UIMainService, UIModelService, UISettingsService
 from ..utils import app_logger
+from .review_worker import ReviewRunThread
+
+
+class ModelLoadThread(QThread):
+    """Load or download a local model without blocking the Qt event loop."""
+
+    load_complete = Signal(bool, str)
+
+    def __init__(self, model_service: UIModelService, model_name: str, parent=None):
+        super().__init__(parent)
+        self.model_service = model_service
+        self.model_name = model_name
+
+    def run(self) -> None:
+        try:
+            success = self.model_service.load_model(
+                self.model_name, download_if_missing=True
+            )
+            self.load_complete.emit(bool(success), "")
+        except Exception as exc:
+            self.load_complete.emit(False, f"{type(exc).__name__}: {exc}")
 
 
 class ModelTestThread(QThread):
@@ -169,6 +190,10 @@ class MainWindow(QMainWindow):
         self._settings_window: Optional[Any] = (
             None  # FluentSettingsWindow, lazy-init in show_settings
         )
+        self._model_load_thread: ModelLoadThread | None = None
+        self._model_load_progress: QProgressDialog | None = None
+        self._model_load_name = ""
+        self._review_auto_worker: ReviewRunThread | None = None
 
         self.setup_window()
         self.setup_ui()
@@ -299,14 +324,23 @@ class MainWindow(QMainWindow):
             timer.start()
 
     def _on_review_auto_timer(self) -> None:
+        if self._review_auto_worker and self._review_auto_worker.isRunning():
+            return
         run_review = getattr(self.ui_settings_service, "run_idle_review_once", None)
         if not callable(run_review):
             return
-        try:
-            result = run_review()
-        except Exception as e:
-            app_logger.log_error(e, "lexicon_review_auto_timer")
-            return
+
+        worker = ReviewRunThread(run_review, parent=self)
+        worker.completed.connect(self._on_idle_review_completed)
+        worker.finished.connect(self._on_review_auto_thread_finished)
+        self._review_auto_worker = worker
+        worker.start()
+
+    def _on_idle_review_completed(self, result: dict[str, Any]) -> None:
+        if result.get("error"):
+            app_logger.log_error(
+                RuntimeError(str(result["error"])), "lexicon_review_auto_timer"
+            )
         if isinstance(result, dict) and result.get("ran"):
             app_logger.log_audio_event(
                 "Idle lexicon review completed from auto timer",
@@ -319,6 +353,13 @@ class MainWindow(QMainWindow):
             settings = getattr(self, "_settings_window", None)
             if settings is not None and hasattr(settings, "refresh_review_suggestions"):
                 settings.refresh_review_suggestions()
+
+    def _on_review_auto_thread_finished(self) -> None:
+        worker = self.sender()
+        if isinstance(worker, ReviewRunThread):
+            worker.deleteLater()
+            if self._review_auto_worker is worker:
+                self._review_auto_worker = None
 
     def _connect_service_events(self) -> None:
         """连接UI服务事件"""
@@ -468,6 +509,13 @@ class MainWindow(QMainWindow):
         """Handle model load request from settings window."""
         try:
             if self.ui_model_service:
+                if self._model_load_thread and self._model_load_thread.isRunning():
+                    app_logger.log_audio_event(
+                        "Model load request ignored while another load is active",
+                        {"model": model_name},
+                    )
+                    return
+
                 app_logger.log_audio_event(
                     "Model load requested via GUI", {"model": model_name}
                 )
@@ -496,50 +544,18 @@ class MainWindow(QMainWindow):
                 progress.setCancelButton(None)
                 progress.show()
 
-                QApplication.processEvents()
-
-                try:
-                    success = self.ui_model_service.load_model(
-                        model_name, download_if_missing=True
-                    )
-                    progress.close()
-
-                    if not success:
-                        raise Exception(
-                            QCoreApplication.translate(
-                                "MainWindow", "Failed to load model '{model}'."
-                            ).format(model=model_name)
-                        )
-
-                    app_logger.log_audio_event(
-                        "Model load completed successfully via GUI",
-                        {"model_name": model_name},
-                    )
-
-                    QMessageBox.information(
-                        parent_widget,
-                        QCoreApplication.translate("MainWindow", "Model Loaded"),
-                        QCoreApplication.translate(
-                            "MainWindow", "Model '{model}' loaded successfully!"
-                        ).format(model=model_name),
-                    )
-
-                except Exception as load_error:
-                    progress.close()
-                    app_logger.log_error(load_error, "model_load_execution")
-                    QMessageBox.critical(
-                        parent_widget,
-                        QCoreApplication.translate("MainWindow", "Model Load Failed"),
-                        QCoreApplication.translate(
-                            "MainWindow",
-                            "Failed to load model '{model}':\n{error}",
-                        ).format(model=model_name, error=load_error),
-                    )
-
-                if hasattr(self, "_settings_window") and self._settings_window:
-                    QTimer.singleShot(100, self._settings_window.refresh_model_status)
+                load_thread = ModelLoadThread(
+                    self.ui_model_service, model_name, parent=self
+                )
+                load_thread.load_complete.connect(self._on_model_load_completed)
+                load_thread.finished.connect(self._on_model_load_thread_finished)
+                self._model_load_name = model_name
+                self._model_load_progress = progress
+                self._model_load_thread = load_thread
+                load_thread.start()
 
         except Exception as e:
+            self._close_model_load_progress()
             app_logger.log_error(e, "model_load_request_gui")
             QMessageBox.critical(
                 None,
@@ -548,6 +564,55 @@ class MainWindow(QMainWindow):
                     "MainWindow", "Error processing model load request:\n{error}"
                 ).format(error=e),
             )
+
+    def _close_model_load_progress(self) -> None:
+        progress = self._model_load_progress
+        self._model_load_progress = None
+        if progress is not None:
+            progress.close()
+            progress.deleteLater()
+
+    def _on_model_load_completed(self, success: bool, error: str) -> None:
+        model_name = self._model_load_name
+        self._model_load_name = ""
+        self._close_model_load_progress()
+
+        if success:
+            app_logger.log_audio_event(
+                "Model load completed successfully via GUI",
+                {"model_name": model_name},
+            )
+            QMessageBox.information(
+                None,
+                QCoreApplication.translate("MainWindow", "Model Loaded"),
+                QCoreApplication.translate(
+                    "MainWindow", "Model '{model}' loaded successfully!"
+                ).format(model=model_name),
+            )
+        else:
+            error_details = error or QCoreApplication.translate(
+                "MainWindow", "Failed to load model '{model}'."
+            ).format(model=model_name)
+            load_error = RuntimeError(error_details)
+            app_logger.log_error(load_error, "model_load_execution")
+            QMessageBox.critical(
+                None,
+                QCoreApplication.translate("MainWindow", "Model Load Failed"),
+                QCoreApplication.translate(
+                    "MainWindow",
+                    "Failed to load model '{model}':\n{error}",
+                ).format(model=model_name, error=error_details),
+            )
+
+        if self._settings_window:
+            QTimer.singleShot(100, self._settings_window.refresh_model_status)
+
+    def _on_model_load_thread_finished(self) -> None:
+        thread = self.sender()
+        if isinstance(thread, ModelLoadThread):
+            thread.deleteLater()
+            if self._model_load_thread is thread:
+                self._model_load_thread = None
 
     def _on_model_unload_requested(self) -> None:
         """处理模型卸载请求"""

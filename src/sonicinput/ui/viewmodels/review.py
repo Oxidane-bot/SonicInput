@@ -4,6 +4,7 @@ from typing import Any
 
 from PySide6.QtCore import Property, Slot
 
+from ..review_worker import ReviewRunThread
 from .base import SettingsViewModelBase
 
 
@@ -107,6 +108,10 @@ class ReviewViewModelMixin(SettingsViewModelBase):
     def reviewRunMessage(self) -> str:
         return self._review_run_message
 
+    @Property(bool, notify=SettingsViewModelBase.changed)
+    def reviewRunBusy(self) -> bool:
+        return self._review_run_busy
+
     @Slot()
     def refreshReviewSuggestions(self) -> None:
         self._refresh_lexicon_review_state()
@@ -118,27 +123,23 @@ class ReviewViewModelMixin(SettingsViewModelBase):
 
     @Slot(result="QVariant")  # type: ignore[arg-type]
     def runReviewNow(self) -> dict[str, Any]:
-        try:
-            raw = self._settings_service.run_review_now()
-        except Exception as exc:
-            raw = {
-                "ran": False,
-                "reason": str(exc),
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-            }
-        result = (
-            dict(raw)
-            if isinstance(raw, dict)
-            else {
-                "ran": False,
-                "reason": "review_failed",
-                "jobId": "",
-                "reviewedRecordCount": 0,
-                "suggestionCount": 0,
-            }
+        if self._review_run_worker and self._review_run_worker.isRunning():
+            return {"ran": False, "reason": "review_already_running"}
+
+        worker = ReviewRunThread(self._settings_service.run_review_now)
+        worker.completed.connect(self._on_review_run_completed)
+        worker.finished.connect(self._on_review_run_thread_finished)
+        self._review_run_worker = worker
+        self._review_run_busy = True
+        self._review_run_message = self.translate(
+            "review_run_running", "Lexicon review is running..."
         )
+        self.changed.emit()
+        worker.start()
+        return {"ran": False, "reason": "review_started"}
+
+    def _on_review_run_completed(self, result: dict[str, Any]) -> None:
+        self._review_run_busy = False
         if result.get("ran"):
             self._review_run_message = self.translate(
                 "review_run_completed",
@@ -152,8 +153,18 @@ class ReviewViewModelMixin(SettingsViewModelBase):
                 "review_run_skipped",
                 "Lexicon review skipped: {reason}",
             ).format(reason=str(result.get("reason", "unknown") or "unknown"))
-        self.refreshReviewSuggestions()
-        return result
+        self._refresh_lexicon_review_state()
+        self.changed.emit()
+
+    def _on_review_run_thread_finished(self) -> None:
+        worker = self.sender()
+        if isinstance(worker, ReviewRunThread):
+            worker.deleteLater()
+            if self._review_run_worker is worker:
+                self._review_run_worker = None
+        if self._review_run_busy:
+            self._review_run_busy = False
+            self.changed.emit()
 
     @Slot(str, result=bool)
     def acceptReviewSuggestion(self, suggestion_id: str) -> bool:

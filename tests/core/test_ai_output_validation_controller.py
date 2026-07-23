@@ -86,6 +86,18 @@ class _CountingAI:
         return self.output
 
 
+class _StreamingAI(_CountingAI):
+    def refine_text_streaming(
+        self, text, prompt_template, model, on_token, max_tokens=None
+    ):
+        self.calls += 1
+        self.prompt_templates.append(prompt_template)
+        midpoint = max(1, len(self.output) // 2)
+        on_token(self.output[:midpoint])
+        on_token(self.output[midpoint:])
+        return self.output
+
+
 class _ReviewStorage:
     def __init__(self, entries):
         self.entries = entries
@@ -132,9 +144,9 @@ def test_ai_controller_skips_low_information_input_without_calling_ai(monkeypatc
     assert history.record.final_text == "嗯"
 
 
-def test_ai_controller_accepts_refined_text_without_validator_gate(monkeypatch):
-    original = "搜索一下 SonicInput 的历史记录里面 AI 优化经常失败的问题"
-    ai_output = "以下是我为你找到的答案：SonicInput 的问题主要包括转写错误。"
+def test_ai_controller_rejects_over_compressed_refined_text(monkeypatch):
+    original = "搜索一下 SonicInput 的历史记录里面 AI 优化经常失败的问题" * 6
+    ai_output = "SonicInput 的 AI 优化经常失败。"
     controller, events, history, ai_service = _controller(
         monkeypatch,
         original_text=original,
@@ -150,12 +162,73 @@ def test_ai_controller_accepts_refined_text_without_validator_gate(monkeypatch):
     ]
 
     assert ai_service.calls == 1
-    assert processed[-1]["text"] == ai_output
-    assert history.record.ai_status == "success"
-    assert history.record.ai_optimized_text == ai_output
-    assert history.record.ai_provider == "groq"
-    assert history.record.final_text == ai_output
-    assert history.record.ai_error is None
+    assert processed[-1]["text"] == original
+    assert history.record.ai_status == "failed"
+    assert history.record.ai_optimized_text is None
+    assert history.record.final_text == original
+    assert "over_compressed_long_input" in history.record.ai_error
+
+
+def test_rejected_streaming_output_is_reconciled_with_original_text(monkeypatch):
+    original = (
+        "这是一段必须完整保留的语音转写内容，用来验证流式输出失败后的原文恢复。" * 5
+    )
+    controller, events, history, _ai_service = _controller(
+        monkeypatch,
+        original_text=original,
+        ai_output="简短摘要。",
+    )
+    streaming_ai = _StreamingAI("简短摘要。")
+    controller._config.values["ai.streaming_enabled"] = True
+    monkeypatch.setattr(controller, "_get_current_ai_service", lambda: streaming_ai)
+
+    controller._on_transcription_completed(
+        {"record_id": "r1", "text": original, "streaming_mode": "chunked"}
+    )
+
+    processed = [
+        data for event, data in events.emitted if event == Events.AI_PROCESSED_TEXT
+    ]
+    streaming = [
+        data
+        for event, data in events.emitted
+        if event == Events.AI_STREAMING_TOKEN_RECEIVED
+    ]
+
+    assert streaming
+    assert processed[-1]["text"] == original
+    assert processed[-1]["streaming_output_used"] is True
+    assert history.record.final_text == original
+
+
+def test_rejected_incremental_output_is_reconciled_with_original_text(monkeypatch):
+    original = "".join(
+        f"这是必须完整保留上下文和细节的第{index}句话。" for index in range(1, 9)
+    )
+    controller, events, history, _ai_service = _controller(
+        monkeypatch,
+        original_text=original,
+        ai_output="摘要。",
+    )
+    controller._config.values["ai.sentence_split.enabled"] = True
+
+    controller._on_transcription_completed(
+        {"record_id": "r1", "text": original, "streaming_mode": "chunked"}
+    )
+
+    processed = [
+        data for event, data in events.emitted if event == Events.AI_PROCESSED_TEXT
+    ]
+    incremental = [
+        data
+        for event, data in events.emitted
+        if event == Events.AI_INCREMENTAL_TEXT_UPDATED
+    ]
+
+    assert incremental
+    assert processed[-1]["text"] == original
+    assert processed[-1]["incremental_output_used"] is True
+    assert history.record.final_text == original
 
 
 def test_ai_controller_adds_rolling_context_within_recording(monkeypatch):

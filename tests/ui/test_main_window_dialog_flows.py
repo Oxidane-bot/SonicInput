@@ -11,6 +11,7 @@ assert PySide6's parent-type contract; if a regression passes `FluentSettingsWin
 (a QObject) as parent again, these tests fail with a clear message.
 """
 
+from threading import Event, get_ident
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -110,12 +111,48 @@ def test_model_load_failure_routes_through_valid_parent(
     window = _build_window(qtbot, mock_config_service, ui_model_service)
     try:
         window._settings_window.model_load_requested.emit("paraformer")
-        qtbot.wait(100)
+        qtbot.waitUntil(lambda: bool(calls), timeout=2000)
         assert calls, "Expected QMessageBox.critical to be invoked on load failure"
         # The autouse guard already asserted parent type; this is a belt-and-braces check.
         parent = calls[0][1]
         assert parent is None or isinstance(parent, QWidget)
     finally:
+        _teardown_window(window)
+
+
+@pytest.mark.gui
+@pytest.mark.e2e
+def test_model_load_runs_outside_gui_thread(qtbot, mock_config_service) -> None:
+    entered = Event()
+    release = Event()
+    worker_thread_ids = []
+
+    def _load_model(*_args, **_kwargs):
+        worker_thread_ids.append(get_ident())
+        entered.set()
+        release.wait(timeout=2)
+        return True
+
+    ui_model_service = MagicMock()
+    ui_model_service.load_model.side_effect = _load_model
+    window = _build_window(qtbot, mock_config_service, ui_model_service)
+    gui_thread_id = get_ident()
+
+    try:
+        window._settings_window.model_load_requested.emit("paraformer")
+        qtbot.waitUntil(entered.is_set, timeout=1000)
+
+        assert len(worker_thread_ids) == 1
+        assert worker_thread_ids[0] != gui_thread_id
+        assert window._model_load_thread is not None
+        assert window._model_load_thread.isRunning()
+    finally:
+        release.set()
+        qtbot.waitUntil(
+            lambda: window._model_load_thread is None
+            or not window._model_load_thread.isRunning(),
+            timeout=3000,
+        )
         _teardown_window(window)
 
 

@@ -102,10 +102,6 @@ class StartupDiagnostics:
             "sonicinput.audio.recorder",
         ]
 
-        # GPU 后端在大多数用户环境下不是必需，默认跳过；显式开启时再检测
-        if os.getenv("VOICE_INPUT_ENABLE_GPU") or os.getenv("CUDA_VISIBLE_DEVICES"):
-            app_imports.append("sonicinput.speech.gpu_manager")
-
         # External dependencies
         external_imports = ["pynput", "loguru", "requests", "numpy"]
 
@@ -614,11 +610,8 @@ class StartupDiagnostics:
                 f"Critical imports failed: {critical_failures}"
             )
 
-        optional_ignore = {"sonicinput.speech.gpu_manager"}  # GPU 后端非必需
         optional_failures = [
-            imp
-            for imp in failed_imports
-            if imp not in critical_imports and imp not in optional_ignore
+            imp for imp in failed_imports if imp not in critical_imports
         ]
         if optional_failures:
             summary["warnings"].append(f"Optional imports failed: {optional_failures}")

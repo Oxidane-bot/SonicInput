@@ -73,6 +73,8 @@ class SettingsViewModelBase(_TypingBase):
     # review 状态
     _review_suggestions: list[dict[str, Any]]
     _lexicon_entries: list[dict[str, Any]]
+    _review_run_worker: Any
+    _review_run_busy: bool
     _review_run_message: str
     _lexicon_export_message: str
 
