@@ -30,7 +30,7 @@ def test_nuitka_build_uses_cached_trimmed_qml_staging() -> None:
     assert '"--noinclude-data-files=**/NUL"' in build_script
     assert '"--include-package=onnxruntime"' not in build_script
     assert "SONICINPUT_NUITKA_COMPILER" in build_script
-    assert 'compiler_option = "--msvc=latest"' in build_script
+    assert 'compiler_option = "--msvc=14.3"' in build_script
     assert 'compiler_option = "--mingw64"' in build_script
     assert "_validate_nuitka_output(nuitka_output_dir, sherpa_onnxruntime_dll)" in (
         build_script
@@ -78,4 +78,9 @@ def test_release_workflow_builds_and_publishes_the_tagged_version() -> None:
     assert "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" in workflow
     assert "NUITKA_CACHE_DIR" in workflow
     assert "SONICINPUT_NUITKA_COMPILER: msvc" in workflow
-    assert "nuitka-${{ runner.os }}-msvc-py" in workflow
+    assert "runs-on: windows-2022" in workflow
+    assert "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" in workflow
+    assert "vcvars64.bat" in workflow
+    assert "nuitka-msvc-probe.py" in workflow
+    assert "--msvc=14.3" in workflow
+    assert "nuitka-${{ runner.os }}-windows-2022-msvc-py" in workflow

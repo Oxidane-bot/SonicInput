@@ -25,7 +25,8 @@ env:
 jobs:
   publish:
     name: Build and Publish Windows Release
-    runs-on: windows-latest
+    # Nuitka 2.8 supports the VS 2022 toolchain, not the current VS 2026 image.
+    runs-on: windows-2022
     timeout-minutes: 90
     steps:
       - name: Select release tag
@@ -58,9 +59,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\nuitka-cache
-          key: nuitka-${{ runner.os }}-msvc-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
+          key: nuitka-${{ runner.os }}-windows-2022-msvc-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            nuitka-${{ runner.os }}-msvc-py${{ env.PYTHON_VERSION }}-
+            nuitka-${{ runner.os }}-windows-2022-msvc-py${{ env.PYTHON_VERSION }}-
 
       - name: Verify tag and project version
         shell: pwsh
@@ -74,7 +75,51 @@ jobs:
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}\nuitka-cache
         shell: pwsh
-        run: .\scripts\release.ps1 -NoOffline
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+            throw "vswhere was not found: $vswhere"
+          }
+
+          $vsPath = (& $vswhere -latest -products * -version "[17.0,18.0)" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if ([string]::IsNullOrWhiteSpace($vsPath)) {
+            throw "Visual Studio 2022 C++ x64 tools were not found"
+          }
+          $vcvars = Join-Path $vsPath.Trim() "VC\Auxiliary\Build\vcvars64.bat"
+          if (-not (Test-Path -LiteralPath $vcvars -PathType Leaf)) {
+            throw "VS 2022 environment script was not found: $vcvars"
+          }
+
+          $compilerEnvironment = & cmd.exe /d /s /c "`"$vcvars`" >nul && set"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not initialize the VS 2022 x64 environment"
+          }
+          foreach ($line in $compilerEnvironment) {
+            if ($line -match "^([^=]+)=(.*)$") {
+              Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2]
+            }
+          }
+
+          $cl = Get-Command cl.exe -ErrorAction Stop
+          Write-Output "[PRECHECK] MSVC compiler: $($cl.Source)"
+
+          $probeSource = Join-Path $env:RUNNER_TEMP "nuitka-msvc-probe.py"
+          $probeOutput = Join-Path $env:RUNNER_TEMP "nuitka-msvc-probe"
+          Set-Content -LiteralPath $probeSource -Value "print('nuitka-msvc-preflight')" -Encoding ascii
+          uv run --locked --extra local --extra dev --group dev python -m nuitka --standalone --assume-yes-for-downloads --msvc=14.3 --output-dir=$probeOutput $probeSource
+          if ($LASTEXITCODE -ne 0) {
+            throw "Nuitka MSVC preflight failed"
+          }
+          $probeExecutable = Join-Path (Join-Path $probeOutput "nuitka-msvc-probe.dist") "nuitka-msvc-probe.exe"
+          if (-not (Test-Path -LiteralPath $probeExecutable -PathType Leaf)) {
+            throw "Nuitka MSVC preflight executable was not created: $probeExecutable"
+          }
+          & $probeExecutable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Nuitka MSVC preflight executable failed"
+          }
+
+          .\scripts\release.ps1 -NoOffline
 
       - name: Publish GitHub Release
         env:

@@ -486,7 +486,7 @@ print(f"[INFO] Sherpa-compatible onnxruntime.dll: {sherpa_onnxruntime_dll}")
 
 nuitka_compiler = os.environ.get("SONICINPUT_NUITKA_COMPILER", "msvc").strip().lower()
 if nuitka_compiler == "msvc":
-    compiler_option = "--msvc=latest"
+    compiler_option = "--msvc=14.3"
 elif nuitka_compiler == "mingw64":
     compiler_option = "--mingw64"
 else:
