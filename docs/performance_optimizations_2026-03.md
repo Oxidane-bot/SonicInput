@@ -91,7 +91,7 @@ User impact:
 - Better readability in day-to-day history browsing.
 - No loss of diagnostics when root-cause analysis is needed.
 
-### 7) Long-running settings actions stay off the GUI thread (v0.8.6)
+### 7) Long-running settings actions stay off the GUI thread (v0.8.7)
 
 Files:
 - `src/sonicinput/ui/main_window.py`

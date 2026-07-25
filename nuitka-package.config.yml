@@ -1,0 +1,8 @@
+- module-name: 'sherpa_onnx'
+  dlls:
+    - from_filenames:
+        relative_path: 'lib'
+        prefixes:
+          - 'onnxruntime'
+      dest_path: '.'
+      when: 'win32'

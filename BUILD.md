@@ -23,7 +23,7 @@ uv sync --locked --extra local --extra dev --group dev
 uv run --locked --extra local --extra dev --group dev python build_nuitka.py
 ```
 
-本地和 GitHub Release 均使用 MSVC，并显式加入 Sherpa ABI 对应的根 `onnxruntime.dll`。GitHub Release 固定运行在 `windows-2022`，用 `vswhere` 定位 VS 2022 C++ x64 工具链并在完整构建前运行最小 Nuitka 编译预检。打包后会校验该 DLL 的 SHA-256 与 Sherpa 源文件完全一致。`SONICINPUT_NUITKA_COMPILER=mingw64` 仅保留给诊断性构建，不作为正式 Windows 发布路径。
+本地和 GitHub Release 均使用 MSVC。GitHub Release 固定运行在 `windows-2022`，用 `vswhere` 定位 VS 2022 C++ x64 工具链并在完整构建前运行最小 Nuitka 编译预检。`nuitka-package.config.yml` 将 Sherpa ABI 对应的 `lib/onnxruntime.dll` 声明为根目录原生 DLL：未自动解析时会主动加入，dependency walker 已解析时则按同一 DLL 去重，不再与数据文件产生目标冲突。打包后仍会校验根 DLL 的 SHA-256 与 Sherpa 源文件完全一致。`SONICINPUT_NUITKA_COMPILER=mingw64` 仅保留给诊断性构建，不作为正式 Windows 发布路径。
 
 **输出文件**：`dist/release/v{version}/SonicInput-v{version}-win64.exe`
 **可选离线包**:
@@ -181,7 +181,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.8.6-win64.exe
+SonicInput-v0.8.7-win64.exe
 ```
 
 ## 技术细节
@@ -234,7 +234,7 @@ Update UI translations with Qt tools (PySide6 bundle):
 ---
 
 **最后更新**：2026-07-25
-**适用版本**：v0.8.6+
+**适用版本**：v0.8.7+
 
 
 ## Release Script

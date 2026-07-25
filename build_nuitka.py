@@ -502,6 +502,7 @@ nuitka_cmd = [
     "--onefile",  # Package everything into single .exe
     "--assume-yes-for-downloads",  # Allow required Nuitka helper downloads in non-interactive builds
     compiler_option,
+    "--user-package-configuration-file=nuitka-package.config.yml",
     "--windows-console-mode=attach",  # Attach to console when launched from cmd, GUI when double-clicked
     "--enable-plugin=pyside6",  # Enable PySide6 plugin for Qt support
     # Package inclusions
@@ -547,11 +548,6 @@ nuitka_cmd = [
     "--report-diffable",
     "app.py",
 ]
-
-# MinGW resolves the Sherpa extension dependency automatically and rejects a
-# duplicate data target. MSVC needs the ABI-compatible DLL included explicitly.
-if nuitka_compiler == "msvc":
-    nuitka_cmd.append(f"--include-data-file={sherpa_onnxruntime_dll}=onnxruntime.dll")
 
 nuitka_cmd.extend(_qml_plugin_data_options(staged_qml_dir))
 

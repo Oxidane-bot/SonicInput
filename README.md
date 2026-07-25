@@ -13,13 +13,13 @@
 - 本地词汇记忆：用户确认后的词条会在后续 AI 清理前按同音/近音匹配注入
 - 词汇审查：设置页可调用当前 AI 提供商从 raw 转写上下文中挖掘候选词条
 
-## v0.8.6 更新
+## v0.8.7 更新
 - **AI 输出防丢失**：即使供应商正常结束响应，也会执行质量校验；对长转写的异常压缩会回退到原始文本，已实时输入的流式/分组增量内容会原位替换，不会残留或重复追加。
 - **设置页保持响应**：本地模型加载、手动词汇审查和自动空闲审查均移到后台线程；执行期间有明确忙碌状态，不会阻塞 Qt 事件循环或重复启动同一审查。
 - **取消更及时**：单条历史重处理不再在 GUI 线程等待 worker 退出，取消请求会立即更新界面并在后台安全收尾。
 - **更可靠的可选依赖测试**：未安装或残留的 Sherpa 命名空间不再被误当作有效运行时；真正的发布包仍执行本地 ASR 冒烟验证。
 - **运行时与发布包瘦身**：清除未使用的插件、兼容层和服务，以正式 `sonicinput` 入口统一运行路径；Nuitka 仅携带验证过的 QML/本地 ASR 运行闭包，并显式打包 Sherpa 所需的 ONNX Runtime DLL。
-- **可复现发布**：Windows 正式发布固定使用 `windows-2022` 的 VS 2022 C++ x64 工具链；工作流会显式初始化开发环境并先完成最小 Nuitka 编译预检，再执行完整打包、Sherpa ONNX Runtime DLL SHA-256 审计和冒烟测试。
+- **可复现发布**：Windows 正式发布固定使用 `windows-2022` 的 VS 2022 C++ x64 工具链；工作流会先完成最小 Nuitka 编译预检，再通过原生 DLL 包配置加入 Sherpa ONNX Runtime，并用 SHA-256 审计确认根 DLL 与 Sherpa 运行时完全一致。
 - **持续集成与发布**：CI 固定 action/uv 版本，强制锁文件、类型/格式/死代码/安全检查和 Python 分发包构建；推送 `v*` tag 会在 Windows 上构建、验证并发布可执行文件。
 
 ## 性能优化记录
@@ -31,7 +31,7 @@
 - 内存 4GB+，磁盘 500MB
 
 ## 快速开始
-1. 从 [Releases](https://github.com/Oxidane-bot/SonicInput/releases) 下载 `SonicInput-v0.8.6-win64.exe`
+1. 从 [Releases](https://github.com/Oxidane-bot/SonicInput/releases) 下载 `SonicInput-v0.8.7-win64.exe`
 2. 双击运行，默认热键 Ctrl+Alt+Space（若冲突可在设置中自定义）
 3. 在设置中填写需要的云端 API Key（可选），或直接使用本地模型
 

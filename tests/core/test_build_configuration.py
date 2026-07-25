@@ -10,9 +10,14 @@ def test_nuitka_build_includes_pypinyin_runtime_dictionaries() -> None:
     assert '"Qt6QuickControls2FluentWinUI3StyleImpl.dll"' in build_script
     assert '"Qt6QuickLayouts.dll"' in build_script
     assert "def _sherpa_onnxruntime_dll" in build_script
-    assert 'f"--include-data-file={sherpa_onnxruntime_dll}=onnxruntime.dll"' in (
+    assert '"--user-package-configuration-file=nuitka-package.config.yml"' in (
         build_script
     )
+    package_config = Path("nuitka-package.config.yml").read_text(encoding="utf-8")
+    assert "module-name: 'sherpa_onnx'" in package_config
+    assert "relative_path: 'lib'" in package_config
+    assert "- 'onnxruntime'" in package_config
+    assert "dest_path: '.'" in package_config
 
 
 def test_nuitka_build_uses_cached_trimmed_qml_staging() -> None:
@@ -32,6 +37,7 @@ def test_nuitka_build_uses_cached_trimmed_qml_staging() -> None:
     assert "SONICINPUT_NUITKA_COMPILER" in build_script
     assert 'compiler_option = "--msvc=14.3"' in build_script
     assert 'compiler_option = "--mingw64"' in build_script
+    assert "=onnxruntime.dll" not in build_script
     assert "_validate_nuitka_output(nuitka_output_dir, sherpa_onnxruntime_dll)" in (
         build_script
     )
