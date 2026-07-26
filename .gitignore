@@ -62,8 +62,6 @@ build/
 *.egg-info/
 
 # Nuitka build files
-build_nuitka.py
-!build_nuitka.py
 *.build/
 *.dist/
 *.onefile-build/
@@ -120,7 +118,6 @@ verify_*.py
 
 # Old release notes (keep only latest version)
 RELEASE_NOTES_v0.*.md
-CLAUDE.md
 
 # Packaging documentation (superseded by BUILD.md)
 PACKAGING_SUMMARY.md

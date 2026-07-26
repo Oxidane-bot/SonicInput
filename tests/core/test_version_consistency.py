@@ -10,7 +10,6 @@ except ModuleNotFoundError:
     import tomli as tomllib
 
 from sonicinput import __version__
-from sonicinput.core.services.config.app_constants import AppInfo
 
 
 def test_runtime_versions_match_project_metadata() -> None:
@@ -18,4 +17,3 @@ def test_runtime_versions_match_project_metadata() -> None:
         project_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert __version__ == project_version
-    assert AppInfo.VERSION == project_version

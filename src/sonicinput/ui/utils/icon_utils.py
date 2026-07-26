@@ -48,19 +48,3 @@ def get_app_icon() -> QIcon:
         _ICON_CACHE["app"] = icon
 
     return _ICON_CACHE["app"]
-
-
-def create_app_icon(size: int = 32, recording: bool = False) -> QIcon:
-    """Deprecated: Use get_app_icon() instead
-
-    This function is kept for backward compatibility.
-    All icons are now pre-generated and loaded from files.
-
-    Args:
-        size: Ignored (kept for API compatibility)
-        recording: Ignored (kept for API compatibility)
-
-    Returns:
-        QIcon loaded from resources
-    """
-    return get_app_icon()

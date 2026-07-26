@@ -1,6 +1,5 @@
 """Shared diagnostics, exceptions, and logging."""
 
-from .dependency_diagnostics import dependency_diagnostics  # noqa: F401
 from .environment_validator import environment_validator  # noqa: F401
 from .error_messages import ErrorMessageTranslator, get_user_friendly_error
 from .exceptions import *  # noqa: F403, F401
@@ -31,15 +30,9 @@ __all__ = [  # noqa: F405
     "TextInputError",
     "ConfigurationError",
     "HotkeyRegistrationError",
-    "GPUError",
-    "ComponentInitializationError",
-    "ComponentStateError",
-    "NetworkError",
-    "ValidationError",
     # Core utilities
     "environment_validator",
     "startup_diagnostics",
-    "dependency_diagnostics",
     "ErrorMessageTranslator",
     "get_user_friendly_error",
 ]

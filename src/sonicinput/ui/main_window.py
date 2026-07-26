@@ -209,10 +209,10 @@ class MainWindow(QMainWindow):
 
     def setup_window(self) -> None:
         """配置窗口基本属性"""
-        from .utils import create_app_icon
+        from .utils import get_app_icon
 
         self.setWindowTitle(QCoreApplication.translate("MainWindow", "Sonic Input"))
-        self.setWindowIcon(create_app_icon())
+        self.setWindowIcon(get_app_icon())
         self.setFixedSize(400, 300)  # 固定小尺寸
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
 

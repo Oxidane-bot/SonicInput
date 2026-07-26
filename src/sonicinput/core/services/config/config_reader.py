@@ -65,7 +65,7 @@ class ConfigReader:
         """获取配置项
 
         Args:
-            key: 配置项键名，支持嵌套路径 (例如: "whisper.model")
+            key: 配置项键名，支持嵌套路径 (例如: "transcription.local.model")
             default: 默认值
 
         Returns:

@@ -145,26 +145,6 @@ class AudioRecordingError(VoiceInputError):
         )
 
 
-class AudioProcessingError(VoiceInputError):
-    """音频处理相关异常"""
-
-    def __init__(self, message: str, **kwargs):
-        super().__init__(
-            message=message,
-            category=ErrorCategory.AUDIO,
-            severity=kwargs.pop("severity", ErrorSeverity.MEDIUM),
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Check audio quality and recording conditions",
-                    "Try recording again with less background noise",
-                    "Verify microphone sensitivity settings",
-                ],
-            ),
-            **kwargs,
-        )
-
-
 # =============================================================================
 # AI Service Exceptions
 # =============================================================================
@@ -321,26 +301,6 @@ class TextInputError(VoiceInputError):
         )
 
 
-class UIComponentError(VoiceInputError):
-    """UI组件相关异常"""
-
-    def __init__(self, message: str, **kwargs):
-        super().__init__(
-            message=message,
-            category=ErrorCategory.UI,
-            severity=kwargs.pop("severity", ErrorSeverity.MEDIUM),
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Try restarting the application",
-                    "Check display settings and scaling",
-                    "Verify Windows theme compatibility",
-                ],
-            ),
-            **kwargs,
-        )
-
-
 # =============================================================================
 # Configuration and System Exceptions
 # =============================================================================
@@ -382,146 +342,6 @@ class HotkeyRegistrationError(VoiceInputError):
                     "Check if hotkey is used by another application",
                     "Run application as administrator",
                     "Restart the application",
-                ],
-            ),
-            **kwargs,
-        )
-
-
-class GPUError(VoiceInputError):
-    """GPU相关异常"""
-
-    def __init__(self, message: str, **kwargs):
-        super().__init__(
-            message=message,
-            category=ErrorCategory.GPU,
-            severity=kwargs.pop("severity", ErrorSeverity.MEDIUM),
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Update GPU drivers",
-                    "Check GPU memory availability",
-                    "Try using CPU instead of GPU",
-                    "Restart the application",
-                ],
-            ),
-            **kwargs,
-        )
-
-
-# =============================================================================
-# Lifecycle and Component Exceptions
-# =============================================================================
-
-
-class ComponentInitializationError(VoiceInputError):
-    """组件初始化异常"""
-
-    def __init__(self, message: str, component_name: str = "unknown", **kwargs):
-        context = kwargs.pop("context", {})
-        context["component_name"] = component_name
-
-        super().__init__(
-            message=message,
-            category=ErrorCategory.LIFECYCLE,
-            severity=kwargs.pop("severity", ErrorSeverity.HIGH),
-            context=context,
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Check component dependencies",
-                    "Verify configuration settings",
-                    "Restart the application",
-                    "Check system requirements",
-                ],
-            ),
-            **kwargs,
-        )
-
-
-class ComponentStateError(VoiceInputError):
-    """组件状态异常"""
-
-    def __init__(
-        self,
-        message: str,
-        component_name: str = "unknown",
-        current_state: str = "unknown",
-        expected_state: str = "unknown",
-        **kwargs,
-    ):
-        context = kwargs.pop("context", {})
-        context.update(
-            {
-                "component_name": component_name,
-                "current_state": current_state,
-                "expected_state": expected_state,
-            }
-        )
-
-        super().__init__(
-            message=message,
-            category=ErrorCategory.LIFECYCLE,
-            severity=kwargs.pop("severity", ErrorSeverity.MEDIUM),
-            context=context,
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Wait for component to reach expected state",
-                    "Restart the component",
-                    "Check component health status",
-                    "Restart the application",
-                ],
-            ),
-            **kwargs,
-        )
-
-
-# =============================================================================
-# Network and Validation Exceptions
-# =============================================================================
-
-
-class NetworkError(VoiceInputError):
-    """网络相关异常"""
-
-    def __init__(self, message: str, **kwargs):
-        super().__init__(
-            message=message,
-            category=ErrorCategory.NETWORK,
-            severity=kwargs.pop("severity", ErrorSeverity.MEDIUM),
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Check internet connection",
-                    "Verify firewall and proxy settings",
-                    "Try again after a few moments",
-                    "Check service status",
-                ],
-            ),
-            **kwargs,
-        )
-
-
-class ValidationError(VoiceInputError):
-    """验证相关异常"""
-
-    def __init__(self, message: str, field_name: str = "unknown", **kwargs):
-        context = kwargs.pop("context", {})
-        context["field_name"] = field_name
-
-        super().__init__(
-            message=message,
-            category=ErrorCategory.VALIDATION,
-            severity=kwargs.pop("severity", ErrorSeverity.LOW),
-            context=context,
-            recovery_suggestions=kwargs.pop(
-                "recovery_suggestions",
-                [
-                    "Check input format and values",
-                    "Verify required fields are filled",
-                    "Reset to default values",
-                    "Check help documentation",
                 ],
             ),
             **kwargs,

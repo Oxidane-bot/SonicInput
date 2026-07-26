@@ -277,7 +277,7 @@ class EnvironmentValidator:
         """Check versions of critical dependencies"""
         versions = {}
 
-        critical_deps = ["PySide6", "pynput", "loguru", "requests", "whisper"]
+        critical_deps = ["PySide6", "pynput", "loguru", "requests", "numpy"]
 
         for dep in critical_deps:
             try:

@@ -323,7 +323,6 @@ class RecordingController(LifecycleComponent, IRecordingController):
             # transcription_controller 会在获取转录结果时调用 stop_streaming()
             # 如果在这里提前停止，pending chunks 会被清空，导致转录失败
             # 关键修复：移除此处的 stop_streaming_session() 调用
-            # self._streaming_manager.stop_streaming_session()
 
             # 注销回调
             self._callback_router.unregister_callbacks()
