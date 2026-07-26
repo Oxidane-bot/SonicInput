@@ -6,9 +6,11 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QObject, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -213,7 +215,7 @@ def _base_config(language: str) -> dict[str, object]:
     }
 
 
-def _grab(root, app: QApplication, output: Path, name: str) -> None:
+def _grab(root: QQuickWindow, app: QApplication, output: Path, name: str) -> None:
     app.processEvents()
     app.processEvents()
     image = root.grabWindow()
@@ -229,7 +231,12 @@ def main() -> int:
         shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
 
-    app = QApplication.instance() or QApplication(sys.argv)
+    app_instance = QApplication.instance()
+    app = (
+        cast(QApplication, app_instance)
+        if app_instance is not None
+        else QApplication(sys.argv)
+    )
     QQuickStyle.setStyle("FluentWinUI3")
 
     sections = [
@@ -250,7 +257,7 @@ def main() -> int:
         engine.load(QUrl.fromLocalFile(str(qml_path("FluentSettingsWindow.qml"))))
         if not engine.rootObjects():
             raise RuntimeError("Failed to load FluentSettingsWindow.qml")
-        root = engine.rootObjects()[0]
+        root = cast(QQuickWindow, engine.rootObjects()[0])
         root.setWidth(1080)
         root.setHeight(760)
         root.setProperty("visible", True)
