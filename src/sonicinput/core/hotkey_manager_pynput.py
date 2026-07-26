@@ -787,10 +787,6 @@ class PynputHotkeyManager(LifecycleComponent, IHotkeyService):
         """注销所有快捷键 (delegates to LifecycleComponent.stop())"""
         self.stop()
 
-    def is_hotkey_registered(self, hotkey: str) -> bool:
-        """检查快捷键是否已注册"""
-        return hotkey in self.registered_hotkeys
-
     def get_registered_hotkeys(self) -> Dict[str, str]:
         """获取所有已注册的快捷键
 

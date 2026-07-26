@@ -194,42 +194,6 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
                     },
                 )
 
-    def unregister_event_type(self, event_name: str) -> None:
-        """注销事件类型
-
-        Args:
-            event_name: 事件名称
-        """
-        with self._lock:
-            if event_name not in self._registered_events:
-                if self.logger:
-                    self.logger.warning(f"Event '{event_name}' not registered")
-                return
-
-            # 检查是否有监听器
-            if event_name in self._listeners and self._listeners[event_name]:
-                if self.logger:
-                    self.logger.warning(
-                        f"Cannot unregister event '{event_name}' - has active listeners"
-                    )
-                return
-
-            # 移除事件
-            metadata = self._event_metadata.get(event_name)
-            if metadata:
-                self._event_namespaces[metadata.namespace].discard(event_name)
-                del self._event_metadata[event_name]
-
-            self._registered_events.discard(event_name)
-
-            # 清除缓存
-            self._invalidate_cache_for_event(event_name)
-
-            if self.logger:
-                self.logger.log_audio_event(
-                    "Event type unregistered", {"event_name": event_name}
-                )
-
     def emit(
         self,
         event_name: str,
@@ -443,44 +407,6 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
         if event_name in self._listener_version:
             del self._listener_version[event_name]
 
-    def get_registered_events(self, namespace: Optional[str] = None) -> List[str]:
-        """获取已注册的事件列表
-
-        Args:
-            namespace: 命名空间过滤
-
-        Returns:
-            事件名称列表
-        """
-        with self._lock:
-            if namespace:
-                return list(self._event_namespaces.get(namespace, set()))
-            return list(self._registered_events)
-
-    def get_event_metadata(self, event_name: str) -> Optional[EventMetadata]:
-        """获取事件元数据
-
-        Args:
-            event_name: 事件名称
-
-        Returns:
-            事件元数据
-        """
-        return self._event_metadata.get(event_name)
-
-    def get_event_stats(self) -> Dict[str, Any]:
-        """获取事件统计（简化版）"""
-        with self._lock:
-            return {
-                "total_events": len(self._registered_events),
-                "total_listeners": sum(
-                    len(listeners) for listeners in self._listeners.values()
-                ),
-                "events_with_listeners": len(
-                    [e for e in self._listeners if self._listeners[e]]
-                ),
-            }
-
     def enable(self) -> None:
         """启用事件系统"""
         self._enabled = True
@@ -494,10 +420,6 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
 
         if self.logger:
             self.logger.log_audio_event("DynamicEventSystem disabled", {})
-
-    def is_enabled(self) -> bool:
-        """检查事件系统是否启用"""
-        return self._enabled
 
     # IEventService接口的额外方法
     def on(
@@ -521,29 +443,6 @@ class DynamicEventSystem(LifecycleComponent, IEventService):
     ) -> str:
         """一次性监听事件（IEventService接口）"""
         return self.subscribe(event_name, callback, priority, is_once=True)
-
-    def get_listener_count(self, event_name: str) -> int:
-        """获取监听器数量（IEventService接口）"""
-        with self._lock:
-            return len(self._listeners.get(event_name, []))
-
-    def get_event_names(self) -> List[str]:
-        """获取所有事件名称（IEventService接口）"""
-        with self._lock:
-            return list(self._listeners.keys())
-
-    def total_listeners(self) -> int:
-        """获取监听器总数（IEventService接口）"""
-        with self._lock:
-            return sum(len(listeners) for listeners in self._listeners.values())
-
-    def clear_listeners(self, event_name: Optional[str] = None) -> int:
-        """清除监听器（IEventService接口）"""
-        if event_name:
-            return self.unsubscribe_all(event_name)
-        else:
-            self.clear_all_listeners()
-            return 0
 
     def clear_all_listeners(self) -> None:
         """清除所有监听器"""

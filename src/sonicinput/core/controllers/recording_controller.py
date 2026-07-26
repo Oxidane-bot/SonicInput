@@ -361,14 +361,6 @@ class RecordingController(LifecycleComponent, IRecordingController):
         """是否正在录音"""
         return self._state_manager.get_recording_state() == RecordingState.RECORDING
 
-    def get_last_audio_duration(self) -> float:
-        """获取最后一次录音的时长（用于性能统计）"""
-        return self._last_audio_duration
-
-    def get_recording_stop_time(self) -> Optional[float]:
-        """获取最后一次录音停止时间（用于性能统计）"""
-        return self._recording_stop_time
-
     def _submit_final_audio(self, audio_data) -> None:
         """提交最后的音频块到流式转录
 

@@ -3,20 +3,15 @@
 重构后的核心模块，包含统一的服务组件和应用组件。
 """
 
-# 核心服务组件
-# 原有组件（保持向后兼容）
 from .hotkey_manager import HotkeyManager
 
 # 接口定义（仅保留多实现接口）
 from .interfaces import IAIService, IInputService, ISpeechService
-from .services import ConfigService, EventBus, StateManager
+from .services import StateManager
 from .services.events import Events
 
 __all__ = [
-    # 核心服务组件
-    "EventBus",
     "Events",
-    "ConfigService",
     "StateManager",
     # 接口 (仅保留多实现接口)
     "IAIService",

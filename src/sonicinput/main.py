@@ -466,10 +466,10 @@ def run_gui_with_diagnostics() -> int:
 
     # Early-load logger configuration to suppress console output if configured
     try:
-        from sonicinput.core.services.config_service import ConfigService
+        from sonicinput.core.services.config import RefactoredConfigService
         from sonicinput.utils.unified_logger import logger
 
-        early_config = ConfigService()
+        early_config = RefactoredConfigService()
         logger.set_config_service(early_config)
         # Logger config now loaded - diagnostics will respect console_output setting
     except Exception as e:

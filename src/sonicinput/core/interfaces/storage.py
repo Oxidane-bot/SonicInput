@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 
 class IStorageService(ABC):
@@ -158,15 +158,6 @@ class ICacheService(ABC):
 
         Returns:
             清理的过期缓存项数量
-        """
-        pass
-
-    @abstractmethod
-    def get_cache_info(self) -> Dict[str, Any]:
-        """获取缓存统计信息
-
-        Returns:
-            缓存统计信息
         """
         pass
 

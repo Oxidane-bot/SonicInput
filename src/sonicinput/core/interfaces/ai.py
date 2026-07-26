@@ -27,15 +27,6 @@ class IAIService(ABC):
         """
         pass
 
-    @abstractmethod
-    def set_api_key(self, api_key: str) -> None:
-        """设置API密钥
-
-        Args:
-            api_key: API密钥
-        """
-        pass
-
     def refine_text_streaming(
         self,
         text: str,

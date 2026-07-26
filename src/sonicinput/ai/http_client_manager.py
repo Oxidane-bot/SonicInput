@@ -4,8 +4,6 @@
 从BaseAIClient中提取出来以提高代码的内聚性。
 """
 
-from typing import Dict
-
 import requests
 
 from ..utils import app_logger
@@ -67,34 +65,6 @@ class HTTPClientManager:
             配置好的requests.Session实例
         """
         return self.session
-
-    def update_session_config(self, **kwargs) -> None:
-        """更新session配置
-
-        Args:
-            **kwargs: session配置参数
-        """
-        try:
-            for key, value in kwargs.items():
-                if hasattr(self.session, key):
-                    setattr(self.session, key, value)
-
-            app_logger.log_audio_event(
-                "Session config updated", {"config_keys": list(kwargs.keys())}
-            )
-        except Exception as e:
-            app_logger.log_error(e, "update_session_config")
-
-    def set_default_headers(self, headers: Dict[str, str]) -> None:
-        """设置默认请求头
-
-        Args:
-            headers: 默认请求头字典
-        """
-        self.session.headers.update(headers)
-        app_logger.log_audio_event(
-            "Default headers set", {"header_count": len(headers)}
-        )
 
     def close(self) -> None:
         """关闭HTTP客户端"""

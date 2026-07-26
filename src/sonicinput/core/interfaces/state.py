@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -57,44 +57,6 @@ class IStateManager(ABC):
 
         Returns:
             状态值，不存在时返回默认值
-        """
-        pass
-
-    @abstractmethod
-    def has_state(self, key: str) -> bool:
-        """检查状态是否存在
-
-        Args:
-            key: 状态键名
-
-        Returns:
-            状态是否存在
-        """
-        pass
-
-    @abstractmethod
-    def delete_state(self, key: str) -> bool:
-        """删除状态
-
-        Args:
-            key: 状态键名
-
-        Returns:
-            是否删除成功
-        """
-        pass
-
-    @abstractmethod
-    def clear_all_states(self) -> None:
-        """清除所有状态"""
-        pass
-
-    @abstractmethod
-    def get_all_states(self) -> Dict[str, Any]:
-        """获取所有状态
-
-        Returns:
-            状态字典的副本
         """
         pass
 
@@ -196,19 +158,6 @@ class IStateManager(ABC):
 
         Returns:
             是否准备好接收输入
-        """
-        pass
-
-    @abstractmethod
-    def get_state_history(self, key: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """获取状态变更历史
-
-        Args:
-            key: 状态键名
-            limit: 历史记录限制数量
-
-        Returns:
-            状态变更历史列表
         """
         pass
 

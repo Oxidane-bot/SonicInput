@@ -128,66 +128,6 @@ class AIPerformanceMonitor:
         """
         return self._last_tps
 
-    def get_average_tps(self, last_n_requests: int = 10) -> float:
-        """获取最近N次请求的平均TPS
-
-        Args:
-            last_n_requests: 考虑的最近请求数量
-
-        Returns:
-            平均TPS值
-        """
-        try:
-            if not self._request_history:
-                return 0.0
-
-            recent_requests = self._request_history[-last_n_requests:]
-            if not recent_requests:
-                return 0.0
-
-            total_tps = sum(req["tps"] for req in recent_requests)
-            return total_tps / len(recent_requests)
-        except Exception as e:
-            app_logger.log_error(e, "get_average_tps")
-            return 0.0
-
-    def get_performance_summary(self) -> Dict[str, Any]:
-        """获取性能摘要
-
-        Returns:
-            包含各种性能指标的字典
-        """
-        try:
-            if not self._request_history:
-                return {
-                    "total_requests": 0,
-                    "average_tps": 0.0,
-                    "last_tps": 0.0,
-                    "average_response_time": 0.0,
-                }
-
-            total_requests = len(self._request_history)
-            average_tps = self.get_average_tps()
-            last_tps = self._last_tps
-            average_response_time = (
-                sum(req["duration"] for req in self._request_history) / total_requests
-            )
-
-            return {
-                "total_requests": total_requests,
-                "average_tps": average_tps,
-                "last_tps": last_tps,
-                "average_response_time": average_response_time,
-            }
-        except Exception as e:
-            app_logger.log_error(e, "get_performance_summary")
-            return {
-                "total_requests": 0,
-                "average_tps": 0.0,
-                "last_tps": 0.0,
-                "average_response_time": 0.0,
-            }
-
     def reset_stats(self) -> None:
         """重置性能统计"""
         self._last_tps = 0.0

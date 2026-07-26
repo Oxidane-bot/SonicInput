@@ -934,16 +934,6 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
         return task_id
 
-    def unload_model_async(self) -> None:
-        """卸载模型（异步）"""
-        if not self.is_running:
-            raise RuntimeError("Transcription service is not started")
-
-        self.model_manager.unload_model()
-        self.transcription_core = None
-
-        app_logger.audio("Model unloaded", {})
-
     def reload_model(
         self,
         model_name: Optional[str] = None,
@@ -975,31 +965,6 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
 
         return task_id
 
-    def reload_model_sync(
-        self, model_name: Optional[str] = None, use_gpu: Optional[bool] = None
-    ) -> bool:
-        """重新加载模型（同步）
-
-        Args:
-            model_name: 新模型名称（可选）
-            use_gpu: 是否使用GPU（可选）
-
-        Returns:
-            True如果重载成功
-        """
-        if not self.is_running:
-            raise RuntimeError("Transcription service is not started")
-
-        success = self.model_manager.reload_model(model_name, use_gpu)
-
-        if success:
-            # 更新转录核心
-            whisper_engine = self.model_manager.get_whisper_engine()
-            if whisper_engine:
-                self.transcription_core = TranscriptionCore(whisper_engine)
-
-        return success
-
     def is_ready(self) -> bool:
         """检查服务是否就绪
 
@@ -1011,22 +976,6 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
             and self.model_manager.is_model_loaded()
             and self.transcription_core is not None
         )
-
-    def get_service_status(self) -> Dict[str, Any]:
-        """获取服务状态
-
-        Returns:
-            服务状态信息
-        """
-        status = {
-            "service_started": self.is_running,
-            "model_status": self.model_manager.get_model_info(),
-            "streaming_status": self.streaming_coordinator.get_stats(),
-            "task_queue_status": self.task_queue_manager.get_stats(),
-            "error_recovery_status": self.error_recovery_service.get_error_stats(),
-        }
-
-        return status
 
     def get_available_models_async(self) -> list:
         """获取可用模型列表（异步）
@@ -1333,26 +1282,6 @@ class RefactoredTranscriptionService(LifecycleComponent, ISpeechService):
                 "submitted_count": submitted_count,
             },
         )
-
-    def reload_streaming_mode(self) -> None:
-        """重新加载流式模式配置"""
-        if not self.config_service:
-            return
-
-        new_mode = self.config_service.get_setting(
-            ConfigKeys.TRANSCRIPTION_LOCAL_STREAMING_MODE, "chunked"
-        )
-
-        # 只有在非活动状态下才能更改
-        if self.streaming_coordinator.set_streaming_mode(new_mode):
-            app_logger.audio(
-                "Streaming mode reloaded from config", {"new_mode": new_mode}
-            )
-        else:
-            app_logger.audio(
-                "Cannot reload streaming mode while active",
-                {"current_mode": self.streaming_coordinator.get_streaming_mode()},
-            )
 
     def cleanup(self) -> None:
         """清理资源 - 向后兼容方法，内部调用 stop()"""

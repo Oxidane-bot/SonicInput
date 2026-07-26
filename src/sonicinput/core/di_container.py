@@ -319,7 +319,7 @@ def create_container() -> "DIContainer":
     from .services.application_orchestrator import ApplicationOrchestrator
 
     # 服务实现
-    from .services.config.config_service_refactored import RefactoredConfigService
+    from .services.config import RefactoredConfigService
     from .services.dynamic_event_system import DynamicEventSystem
     from .services.hot_reload_manager import HotReloadManager
     from .services.hotkey_service import HotkeyService

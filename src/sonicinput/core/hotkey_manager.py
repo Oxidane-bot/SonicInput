@@ -125,69 +125,11 @@ def create_hotkey_manager(
         raise HotkeyBackendError(error_msg)
 
 
-def get_backend_info(backend: str) -> dict:
-    """Get information about a hotkey backend
-
-    Args:
-        backend: Backend name ("win32" or "pynput")
-
-    Returns:
-        Dict with backend information
-    """
-    if backend == "win32":
-        return {
-            "name": "Win32 RegisterHotKey",
-            "description": "使用 Windows RegisterHotKey API，无需管理员权限",
-            "admin_required": False,
-            "can_suppress_events": False,
-            "performance": "excellent",
-            "compatibility": "Windows 2000+",
-            "recommended": True,
-            "pros": [
-                "无需管理员权限",
-                "跨权限边界工作（不受 UIPI 限制）",
-                "性能优秀（无钩子开销）",
-                "Windows 官方 API",
-            ],
-            "cons": ["无法阻止快捷键事件传递到活动窗口", "可能与其他应用的快捷键冲突"],
-        }
-    elif backend == "pynput":
-        return {
-            "name": "pynput (Low-Level Hooks)",
-            "description": "使用底层键盘钩子，管理员模式下体验最佳",
-            "admin_required": False,
-            "admin_recommended": True,
-            "can_suppress_events": True,
-            "performance": "good",
-            "compatibility": "Windows XP+",
-            "recommended": False,
-            "pros": ["可以阻止快捷键事件传递", "完全控制键盘事件处理"],
-            "cons": [
-                "需要管理员权限才能可靠工作",
-                "受 UIPI 限制（无法监听提升权限的窗口）",
-                "性能开销较高（钩住所有键盘事件）",
-            ],
-        }
-    else:
-        return {
-            "name": "Unknown",
-            "description": f"未知后端: {backend}",
-            "admin_required": None,
-            "can_suppress_events": None,
-            "performance": "unknown",
-            "compatibility": "unknown",
-            "recommended": False,
-            "pros": [],
-            "cons": [f"未知后端: {backend}"],
-        }
-
-
 # Re-export for backward compatibility
 from .hotkey_manager_pynput import PynputHotkeyManager as HotkeyManager  # noqa: E402
 
 __all__ = [
     "create_hotkey_manager",
-    "get_backend_info",
     "HotkeyBackendError",
     "HotkeyManager",  # For backward compatibility
 ]

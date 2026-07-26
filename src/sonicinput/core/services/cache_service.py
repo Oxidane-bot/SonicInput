@@ -85,18 +85,6 @@ class InMemoryCacheService(ICacheService):
                 del self._cache[key]
             return len(expired_keys)
 
-    def get_cache_info(self) -> Dict[str, Any]:
-        with self._lock:
-            self.cleanup_expired()
-            total = self._hits + self._misses
-            hit_rate = self._hits / total if total > 0 else 0.0
-            return {
-                "size": len(self._cache),
-                "hits": self._hits,
-                "misses": self._misses,
-                "hit_rate": round(hit_rate, 4),
-            }
-
     @property
     def size(self) -> int:
         with self._lock:

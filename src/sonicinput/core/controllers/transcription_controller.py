@@ -7,8 +7,6 @@ import time
 from datetime import datetime
 from typing import Optional
 
-import numpy as np
-
 from ...utils import ErrorMessageTranslator, app_logger
 from ..base.lifecycle_component import LifecycleComponent
 from ..interfaces import (
@@ -168,60 +166,6 @@ class TranscriptionController(
 
         # 启动流式转录处理
         self.process_streaming_transcription()
-
-    def process_transcription(self, audio_data: np.ndarray) -> None:
-        """处理普通转录（非流式）
-
-        Args:
-            audio_data: 音频数据
-        """
-        try:
-            ControllerLogging.log_state_change(
-                "app",
-                AppState.IDLE,
-                AppState.PROCESSING,
-                {"mode": "sync_transcription"},
-            )
-            self._state_manager.set_app_state(AppState.PROCESSING)
-            self._events.emit(Events.TRANSCRIPTION_STARTED)
-
-            # 获取语言配置
-            language = self._config.get_setting(
-                ConfigKeys.TRANSCRIPTION_LOCAL_LANGUAGE, "auto"
-            )
-            if language == "auto":
-                language = None
-
-            # 执行转录 - 使用新的TranscriptionService API
-            transcribe_start = time.time()
-            result = self._speech_service.transcribe_sync(audio_data, language=language)
-            transcribe_duration = time.time() - transcribe_start
-
-            text = result.get("text", "")
-
-            app_logger.log_audio_event(
-                "Transcription completed",
-                {"text_length": len(text), "duration": f"{transcribe_duration:.2f}s"},
-            )
-
-            # 发送转录完成事件
-            self._events.emit(Events.TRANSCRIPTION_COMPLETED, {"text": text})
-
-        except Exception as e:
-            app_logger.log_error(e, "process_transcription")
-            # 转换为用户友好消息
-            error_info = ErrorMessageTranslator.translate(e, "transcription")
-            self._events.emit(Events.TRANSCRIPTION_ERROR, error_info["user_message"])
-
-            # 错误时也要重置状态，否则无法进行下一次录音
-            ControllerLogging.log_state_change(
-                "app",
-                AppState.PROCESSING,
-                AppState.IDLE,
-                {"reason": "transcription_error"},
-                is_forced=True,
-            )
-            self._state_manager.set_app_state(AppState.IDLE)
 
     def process_streaming_transcription(self) -> None:
         """处理流式转录（使用新的TranscriptionService API）"""

@@ -215,63 +215,6 @@ class StateManager(LifecycleComponent, IStateManager):
         with self._lock:
             return cast(T, self._states.get(key, default))
 
-    def has_state(self, key: str) -> bool:
-        """检查状态是否存在
-
-        Args:
-            key: 状态键名
-
-        Returns:
-            状态是否存在
-        """
-        with self._lock:
-            return key in self._states
-
-    def delete_state(self, key: str) -> bool:
-        """删除状态
-
-        Args:
-            key: 状态键名
-
-        Returns:
-            是否删除成功
-        """
-        with self._lock:
-            if key in self._states:
-                old_value = self._states[key]
-                del self._states[key]
-
-                # 记录删除操作
-                change = StateChange(
-                    key=key, old_value=old_value, new_value=None, source="state_manager"
-                )
-                self._history[key].append(change)
-
-                app_logger.log_audio_event(
-                    "State deleted", {"key": key, "old_value": str(old_value)}
-                )
-
-                return True
-            return False
-
-    def clear_all_states(self) -> None:
-        """清除所有状态"""
-        with self._lock:
-            count = len(self._states)
-            self._states.clear()
-            self._history.clear()
-
-            app_logger.log_audio_event("All states cleared", {"cleared_count": count})
-
-    def get_all_states(self) -> Dict[str, Any]:
-        """获取所有状态
-
-        Returns:
-            状态字典的副本
-        """
-        with self._lock:
-            return self._states.copy()
-
     def subscribe(self, key: str, callback: Callable[[Any, Any], None]) -> str:
         """订阅状态变更
 
@@ -444,68 +387,6 @@ class StateManager(LifecycleComponent, IStateManager):
         """
         app_state = self.get_app_state()
         return app_state == AppState.INPUT_READY
-
-    def get_state_history(self, key: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """获取状态变更历史
-
-        Args:
-            key: 状态键名
-            limit: 历史记录限制数量
-
-        Returns:
-            状态变更历史列表
-        """
-        with self._lock:
-            if key not in self._history:
-                return []
-
-            history = list(self._history[key])[-limit:]
-            return [
-                {
-                    "key": change.key,
-                    "old_value": change.old_value,
-                    "new_value": change.new_value,
-                    "timestamp": change.timestamp,
-                    "timestamp_iso": datetime.fromtimestamp(
-                        change.timestamp
-                    ).isoformat(),
-                    "source": change.source,
-                }
-                for change in history
-            ]
-
-    def get_state_statistics(self) -> Dict[str, Any]:
-        """获取状态统计信息
-
-        Returns:
-            状态统计信息
-        """
-        with self._lock:
-            return {
-                "total_states": len(self._states),
-                "total_subscribers": self.total_subscribers,
-                "total_history_entries": sum(
-                    len(history) for history in self._history.values()
-                ),
-                "states_with_subscribers": len(self._subscribers),
-                "current_app_state": self.get_app_state().value,
-                "current_recording_state": self.get_recording_state().value,
-                "is_recording": self.is_recording(),
-                "is_processing": self.is_processing(),
-                "is_ready_for_input": self.is_ready_for_input(),
-                "timestamp": datetime.now().isoformat(),
-            }
-
-    def reset_to_idle(self) -> None:
-        """重置到空闲状态"""
-        with self._lock:
-            self.set_app_state(AppState.IDLE)
-            self.set_recording_state(RecordingState.IDLE)
-            self.set_state("processing_progress", 0.0)
-            self.set_state("error_message", None)
-            self.set_state("last_error_time", None)
-
-            app_logger.log_audio_event("State reset to idle", {})
 
     @property
     def total_subscribers(self) -> int:

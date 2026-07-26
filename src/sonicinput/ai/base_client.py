@@ -249,52 +249,6 @@ class BaseAIClient(IAIService):
             },
         )
 
-    def health_check(self) -> Dict[str, Any]:
-        """服务健康检查"""
-        try:
-            start_time = time.time()
-            # 尝试访问提供商的健康检查端点（如果有的话）
-            health_url = f"{self.get_base_url()}/health"
-
-            response = self.session.get(
-                health_url,
-                timeout=5,  # 短超时用于健康检查
-                headers=self.session.headers,
-            )
-            response_time = time.time() - start_time
-
-            return {
-                "healthy": response.status_code == 200,
-                "response_time": response_time,
-                "status_code": response.status_code,
-                "provider": self.get_provider_name(),
-                "base_url": self.get_base_url(),
-            }
-
-        except Exception as e:
-            return {
-                "healthy": False,
-                "error": str(e),
-                "response_time": 0,
-                "provider": self.get_provider_name(),
-                "base_url": self.get_base_url(),
-            }
-
-    def _get_secure_api_key(self) -> str:
-        """获取安全的API密钥（用于日志和调试）"""
-        if not self._raw_api_key:
-            return ""
-
-        # 返回密钥的掩码版本用于日志
-        if len(self._raw_api_key) <= 8:
-            return "*" * len(self._raw_api_key)
-        else:
-            return (
-                self._raw_api_key[:4]
-                + "*" * (len(self._raw_api_key) - 8)
-                + self._raw_api_key[-4:]
-            )
-
     @property
     def api_key(self) -> str:
         """获取API密钥（兼容性属性）"""
@@ -323,19 +277,6 @@ class BaseAIClient(IAIService):
         headers.update(self.get_extra_headers())
 
         self.session.headers.update(headers)
-
-    def set_api_key(self, api_key: str) -> None:
-        """设置 API 密钥
-
-        Args:
-            api_key: 新的 API 密钥
-        """
-        self._raw_api_key = api_key
-        self._update_headers()
-        app_logger.log_audio_event(
-            f"API key updated for {self.get_provider_name()}",
-            {"has_key": bool(api_key)},
-        )
 
     def _prepare_messages(self, text: str, prompt_template: str) -> Tuple[str, str]:
         """准备聊天消息

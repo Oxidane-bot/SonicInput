@@ -6,9 +6,7 @@ from pathlib import Path
 import pytest
 
 from sonicinput.core.services.config import ConfigKeys
-from sonicinput.core.services.config.config_service_refactored import (
-    RefactoredConfigService,
-)
+from sonicinput.core.services.config import RefactoredConfigService
 from sonicinput.speech.null_speech_service import NullSpeechService
 from sonicinput.utils.exceptions import ConfigurationError
 

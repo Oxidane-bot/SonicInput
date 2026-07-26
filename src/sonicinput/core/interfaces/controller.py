@@ -6,8 +6,6 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-import numpy as np
-
 
 class IRecordingController(ABC):
     """录音控制器接口
@@ -45,15 +43,6 @@ class ITranscriptionController(ABC):
 
     负责音频转文本的处理逻辑。
     """
-
-    @abstractmethod
-    def process_transcription(self, audio_data: np.ndarray) -> None:
-        """处理转录
-
-        Args:
-            audio_data: 音频数据
-        """
-        pass
 
     @abstractmethod
     def process_streaming_transcription(self) -> None:

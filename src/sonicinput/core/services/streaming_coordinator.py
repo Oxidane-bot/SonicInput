@@ -463,40 +463,6 @@ class StreamingCoordinator(LifecycleComponent):
                 self._streaming_chunks_by_id.values(), key=lambda chunk: chunk.chunk_id
             )
 
-    def get_next_chunk(
-        self, timeout: Optional[float] = None
-    ) -> Optional[StreamingChunk]:
-        """获取下一个待处理的流式块
-
-        Args:
-            timeout: 超时时间（秒）
-
-        Returns:
-            流式块对象，如果没有块则返回None
-        """
-        deadline = None if timeout is None else (time.monotonic() + timeout)
-
-        with self._streaming_condition:
-            while True:
-                if self._pending_chunk_ids:
-                    chunk_id, _ = self._pending_chunk_ids.popitem(last=False)
-                    chunk = self._streaming_chunks_by_id.get(chunk_id)
-                    if chunk and not chunk.result_event.is_set():
-                        return chunk
-
-                # 检查是否仍在流式模式
-                if not self._streaming_active:
-                    return None
-
-                if deadline is None:
-                    self._streaming_condition.wait()
-                    continue
-
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return None
-                self._streaming_condition.wait(timeout=remaining)
-
     def complete_chunk(self, chunk_id: int, result: Dict[str, Any]) -> None:
         """标记流式块处理完成
 
@@ -543,41 +509,6 @@ class StreamingCoordinator(LifecycleComponent):
                 Events.STREAMING_CHUNK_COMPLETED,
                 {"chunk_id": chunk_id, "result": result},
             )
-
-    def get_chunk_result(
-        self, chunk_id: int, timeout: Optional[float] = None
-    ) -> Optional[Dict[str, Any]]:
-        """获取流式块的处理结果
-
-        Args:
-            chunk_id: 块ID
-            timeout: 超时时间（秒）
-
-        Returns:
-            处理结果，如果超时则返回None
-        """
-        with self._streaming_lock:
-            chunk = self._streaming_chunks_by_id.get(chunk_id)
-            if not chunk:
-                chunk = self._completed_chunks_by_id.get(chunk_id)
-
-        if not chunk:
-            return None
-
-        # 等待结果
-        if chunk.result_event.wait(timeout=timeout):
-            return chunk.result_container.copy()
-        else:
-            return None
-
-    def get_pending_chunk_count(self) -> int:
-        """获取待处理的块数量
-
-        Returns:
-            待处理块数量
-        """
-        with self._streaming_lock:
-            return len(self._pending_chunk_ids)
 
     def is_streaming(self) -> bool:
         """检查是否在流式模式

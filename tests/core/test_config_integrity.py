@@ -4,9 +4,7 @@ import copy
 import json
 
 from sonicinput.core.services.config.config_reader import ConfigReader
-from sonicinput.core.services.config.config_service_refactored import (
-    RefactoredConfigService,
-)
+from sonicinput.core.services.config import RefactoredConfigService
 
 
 def test_config_reader_does_not_mutate_defaults(tmp_path):

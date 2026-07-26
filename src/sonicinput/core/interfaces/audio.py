@@ -1,7 +1,7 @@
 """音频服务接口定义"""
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -34,32 +34,11 @@ class IAudioService(ABC):
         pass
 
     @abstractmethod
-    def set_audio_callback(self, callback: Callable[[np.ndarray], None]) -> None:
-        """设置音频数据回调
-
-        Args:
-            callback: 音频数据处理回调函数
-        """
-        pass
-
-    @abstractmethod
     def get_audio_devices(self) -> List[Dict[str, Any]]:
         """获取可用的音频设备列表
 
         Returns:
             音频设备信息列表，包含设备ID、名称等
-        """
-        pass
-
-    @abstractmethod
-    def set_audio_device(self, device_id: int) -> bool:
-        """设置音频设备
-
-        Args:
-            device_id: 音频设备ID
-
-        Returns:
-            是否设置成功
         """
         pass
 
@@ -79,13 +58,4 @@ class IAudioService(ABC):
     @abstractmethod
     def sample_rate(self) -> int:
         """采样率"""
-        pass
-
-    @abstractmethod
-    def get_audio_level(self) -> float:
-        """获取当前音频电平
-
-        Returns:
-            音频电平 (0.0 - 1.0)
-        """
         pass

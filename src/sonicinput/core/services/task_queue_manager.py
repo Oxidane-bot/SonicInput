@@ -254,55 +254,6 @@ class TaskQueueManager(LifecycleComponent):
         except queue.Full:
             raise RuntimeError("Task queue is full")
 
-    def cancel_task(self, task_id: str) -> bool:
-        """取消任务
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            True如果成功取消
-        """
-        # 首先检查是否在运行中
-        with self._tasks_lock:
-            if task_id in self._running_tasks:
-                task = self._running_tasks[task_id]
-                task.status = TaskStatus.CANCELLED
-                app_logger.log_audio_event(
-                    "Running task cancelled", {"task_id": task_id}
-                )
-                return True
-
-        # 尝试从队列中移除（这个比较困难，因为PriorityQueue不支持直接移除）
-        # 这里简化处理，通过标记来取消
-        app_logger.log_audio_event("Task cancel requested", {"task_id": task_id})
-
-        return False
-
-    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """获取任务状态
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            任务状态信息，如果任务不存在则返回None
-        """
-        with self._tasks_lock:
-            if task_id in self._running_tasks:
-                task = self._running_tasks[task_id]
-                return self._task_to_dict(task)
-
-        return None
-
-    def get_queue_size(self) -> int:
-        """获取队列大小
-
-        Returns:
-            队列中的任务数量
-        """
-        return self._task_queue.qsize()
-
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息
 
