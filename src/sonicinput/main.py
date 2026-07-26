@@ -5,12 +5,11 @@ Sonic Input - Application Entry Point
 Unified entry point providing:
 - Warning suppression for cleaner output
 - CLI argument parsing and mode selection
-- Diagnostic and testing capabilities
+- Environment validation and package smoke checks
 
 Usage:
   sonicinput --gui          # Start GUI (default)
-  sonicinput --test         # Run tests
-  sonicinput --diagnostics  # Run diagnostics
+  sonicinput --validate     # Validate the runtime environment
 
 The repository-root ``app.py`` remains a compatibility launcher for source
 checkouts and Nuitka builds.
@@ -45,7 +44,6 @@ from sonicinput.utils import (
     LogCategory,
     app_logger,
     environment_validator,
-    startup_diagnostics,
 )
 from sonicinput.resources.runtime_assets import get_assets_dir
 
@@ -392,284 +390,6 @@ def handle_shutdown(signum, _frame):
 
     finally:
         sys.exit(0)
-
-
-def run_tests():
-    """
-    Run all application tests including model transcription.
-
-    Automatically loads the model if not already loaded.
-    """
-    print("Running application tests...")
-
-    # Store references for cleanup
-    global _app_instance, _container_instance
-    container = None
-    app = None
-
-    try:
-        # Test core imports
-        from sonicinput.core.voice_input_app import VoiceInputApp
-        from sonicinput.core.interfaces import IConfigService
-
-        # Test dependency injection
-        from sonicinput.core.di_container import create_container
-
-        container = create_container()
-        app = VoiceInputApp(container)
-
-        # Save to global for signal handler
-        _container_instance = container
-        _app_instance = app
-
-        print("SUCCESS: Core application components loaded")
-
-        # sherpa-onnx uses CPU only, no GPU check needed
-        print("INFO: Using sherpa-onnx (CPU-only, no GPU required)")
-
-        # Test configuration
-        config = container.get(IConfigService)
-        model = config.get_setting("transcription.local.model", "paraformer")
-        print(f"SUCCESS: Configuration loaded: {model}")
-
-        # Test EventBus core functionality
-        print("\n--- EventBus Tests ---")
-        test_eventbus()
-
-        # Moved from GUI mode: System environment checks
-        print("\n--- System Environment Tests ---")
-        if startup_diagnostics:
-            try:
-                # System information collection
-                print("Collecting system information...")
-                system_info = startup_diagnostics._collect_system_info()
-                print(
-                    f"SUCCESS: System info collected - OS: {system_info.get('platform', 'unknown')}"
-                )
-
-                # Python environment information
-                print("Collecting Python environment information...")
-                python_info = startup_diagnostics._collect_python_info()
-                print(
-                    f"SUCCESS: Python {python_info.get('version', 'unknown')} on {python_info.get('platform', 'unknown')}"
-                )
-
-                # Dependency version check
-                print("Checking dependency versions...")
-                dep_versions = startup_diagnostics.check_dependency_versions()
-                print(
-                    f"SUCCESS: {len(dep_versions.get('dependencies', []))} dependencies checked"
-                )
-
-                # File system check
-                print("Checking file system access...")
-                fs_check = startup_diagnostics._check_file_system()
-                if fs_check.get("accessible", False):
-                    print("SUCCESS: File system access verified")
-                else:
-                    print("WARNING: Some file system access issues detected")
-
-                # Process information
-                print("Collecting process information...")
-                process_info = startup_diagnostics._collect_process_info()
-                print(
-                    f"SUCCESS: Process info collected - PID: {process_info.get('pid', 'unknown')}"
-                )
-
-            except Exception as e:
-                print(f"WARNING: System environment tests failed: {e}")
-        else:
-            print("SKIP: System environment tests (startup_diagnostics not available)")
-
-        # Model transcription test (always run, auto-load model)
-        print("\n--- Model Transcription Test ---")
-        run_model_test(container, auto_load_model=True)
-
-        print("\nAll tests passed! Use --gui to start the application.")
-
-    except Exception as e:
-        print(f"\nERROR: Tests failed: {e}")
-        print("Check your installation and dependencies")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)
-
-    finally:
-        # Clean up test resources
-        print("\n[CLEANUP] Cleaning up test resources...")
-        try:
-            if app:
-                print("[CLEANUP] Shutting down voice app...")
-                app.shutdown()
-                print("[CLEANUP] Voice app shutdown completed")
-
-            if container:
-                print("[CLEANUP] Cleaning up container...")
-                container.cleanup()
-                print("[CLEANUP] Container cleanup completed")
-
-            # Clear global references
-            _app_instance = None
-            _container_instance = None
-
-            print("[CLEANUP] Test cleanup completed successfully")
-
-        except Exception as cleanup_error:
-            print(f"[CLEANUP] Warning during cleanup: {cleanup_error}")
-            import traceback
-
-            traceback.print_exc()
-
-
-def run_model_test(container, auto_load_model=False):
-    """
-    Run sherpa-onnx model transcription test.
-
-    Args:
-        container: DIContainer instance
-        auto_load_model: If True, load model before testing
-    """
-    from sonicinput.core.interfaces import ISpeechService
-    from sonicinput.utils.cli_model_tester import CLIModelTester
-
-    print("Initializing model test...")
-
-    # Get sherpa-onnx engine from DI container
-    speech_engine = container.get(ISpeechService)
-
-    # Create tester
-    tester = CLIModelTester(speech_engine, timeout_seconds=120)
-
-    # Run test
-    result = tester.run_test(auto_load_model=auto_load_model)
-
-    # Display results
-    print(tester.format_results(result))
-
-    if not result["success"]:
-        sys.exit(1)
-
-
-def test_eventbus():
-    """Test EventBus core functionality"""
-    from sonicinput.core.services.event_bus import EventBus, Events
-    from sonicinput.core.interfaces.event import EventPriority
-    import threading
-
-    print("Testing EventBus...")
-
-    # Test 1: Basic emit and on
-    bus = EventBus()
-    results = []
-
-    bus.on(Events.RECORDING_STARTED, lambda data: results.append("callback"))
-    bus.emit(Events.RECORDING_STARTED)
-
-    assert results == ["callback"], "Basic emit/on failed"
-    print("  [PASS] Basic emit/on works")
-
-    # Test 2: Priority queue
-    bus2 = EventBus()
-    order = []
-    test_event = "test_priority"
-
-    bus2.on(test_event, lambda data: order.append("LOW"), priority=EventPriority.LOW)
-    bus2.on(
-        test_event, lambda data: order.append("NORMAL"), priority=EventPriority.NORMAL
-    )
-    bus2.on(test_event, lambda data: order.append("HIGH"), priority=EventPriority.HIGH)
-
-    bus2.emit(test_event)
-
-    assert order == ["HIGH", "NORMAL", "LOW"], f"Priority queue failed: {order}"
-    print("  [PASS] Priority queue works (HIGH > NORMAL > LOW)")
-
-    # Test 3: Once listener
-    bus3 = EventBus()
-    count = {"value": 0}
-    test_event2 = "test_once"
-
-    bus3.once(test_event2, lambda data: count.update({"value": count["value"] + 1}))
-
-    bus3.emit(test_event2)
-    bus3.emit(test_event2)
-    bus3.emit(test_event2)
-
-    assert count["value"] == 1, (
-        f"Once listener called {count['value']} times (should be 1)"
-    )
-    print("  [PASS] Once listener only triggers once")
-
-    # Test 4: Exception isolation
-    bus4 = EventBus()
-    executed = []
-    test_event3 = "test_exception"
-
-    def bad_listener(data):
-        executed.append("bad")
-        raise ValueError("Test error")
-
-    def good_listener(data):
-        executed.append("good")
-
-    bus4.on(test_event3, bad_listener)
-    bus4.on(test_event3, good_listener)
-
-    bus4.emit(test_event3)
-
-    assert executed == ["bad", "good"], f"Error isolation failed: {executed}"
-    print("  [PASS] Listener exceptions don't stop other listeners")
-
-    # Test 5: Concurrent safety (simplified)
-    bus5 = EventBus()
-    concurrent_results = []
-    lock = threading.Lock()
-    test_event4 = "test_concurrent"
-
-    def concurrent_callback(value):
-        with lock:
-            concurrent_results.append(value)
-
-    bus5.on(test_event4, concurrent_callback)
-
-    threads = []
-    for i in range(10):
-        thread = threading.Thread(
-            target=lambda idx: bus5.emit(test_event4, idx), args=(i,)
-        )
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    assert len(concurrent_results) == 10, (
-        f"Concurrent emit failed: {len(concurrent_results)}/10"
-    )
-    print(
-        f"  [PASS] Concurrent safety: 10 threads, {len(concurrent_results)} events received"
-    )
-
-    # Test 6: Statistics (simplified)
-    bus6 = EventBus()
-    test_event5 = "test_stats"
-    bus6.on(test_event5, lambda data: None)
-    bus6.emit(test_event5)
-    bus6.emit(test_event5)
-
-    stats = bus6.get_event_stats()
-    assert stats["total_listeners"] >= 1, (
-        f"Stats total_listeners wrong: {stats['total_listeners']}"
-    )
-    assert stats["total_events"] >= 1, (
-        f"Stats total_events wrong: {stats['total_events']}"
-    )
-    print(
-        f"  [PASS] Statistics: {stats['total_events']} events, {stats['total_listeners']} listeners"
-    )
-
-    print("[OK] EventBus: All 6 tests passed!")
 
 
 def validate_environment() -> Tuple[bool, Dict[str, Any]]:
@@ -1144,43 +864,7 @@ def run_gui():
         import traceback
 
         traceback.print_exc()
-        print("Use --test to run diagnostics")
         sys.exit(1)
-
-
-def run_diagnostics():
-    """Run comprehensive diagnostics without starting the application"""
-    print("=== Comprehensive Diagnostics ===")
-
-    if startup_diagnostics is None:
-        print("[FAIL] Startup diagnostics not available")
-        return
-
-    try:
-        report = startup_diagnostics.generate_environment_report()
-        startup_diagnostics.print_diagnostic_summary(report)
-
-        # Offer to save report
-        try:
-            from datetime import datetime
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_file = f"diagnostic_report_{timestamp}.json"
-
-            import json
-
-            with open(report_file, "w") as f:
-                json.dump(report, f, indent=2, default=str)
-
-            print(f"\n[SAVE] Detailed report saved to: {report_file}")
-
-        except Exception as e:
-            print(f"Warning: Could not save report file: {e}")
-
-    except Exception as e:
-        print(f"[FAIL] Diagnostics failed: {e}")
-        if app_logger:
-            app_logger.log_error(e, "run_diagnostics")
 
 
 class _PackageSmokeSettingsService:
@@ -1375,12 +1059,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Sonic Input")
     parser.add_argument("--gui", action="store_true", help="Launch with GUI")
     parser.add_argument(
-        "--test", action="store_true", help="Run all tests (auto-loads model)"
-    )
-    parser.add_argument(
-        "--diagnostics", action="store_true", help="Run comprehensive diagnostics"
-    )
-    parser.add_argument(
         "--validate", action="store_true", help="Validate environment only"
     )
     parser.add_argument(
@@ -1400,13 +1078,7 @@ def main() -> None:
 
     print("=== Sonic Input ===")
 
-    if args.test:
-        _update_runtime_state(stage="run_tests")
-        run_tests()
-    elif args.diagnostics:
-        _update_runtime_state(stage="run_diagnostics")
-        run_diagnostics()
-    elif args.validate:
+    if args.validate:
         _update_runtime_state(stage="run_validate")
         success, _report = validate_environment()
         sys.exit(0 if success else 1)
