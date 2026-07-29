@@ -181,7 +181,7 @@ SonicInput-v{version}-win64.exe        # 本地版（包含 sherpa-onnx）
 
 示例：
 ```
-SonicInput-v0.8.7-win64.exe
+SonicInput-v0.8.8-win64.exe
 ```
 
 ## 技术细节
@@ -233,8 +233,8 @@ Update UI translations with Qt tools (PySide6 bundle):
 
 ---
 
-**最后更新**：2026-07-25
-**适用版本**：v0.8.7+
+**最后更新**：2026-07-29
+**适用版本**：v0.8.8+
 
 
 ## Release Script

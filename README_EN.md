@@ -13,14 +13,13 @@
 - Local lexicon memory: user-confirmed entries are injected before later AI cleanup only when phonetically relevant
 - Lexicon review: the settings page can ask the configured AI provider to mine raw ASR context for candidate terms
 
-## What's New (v0.8.7)
-- **AI output loss protection** now validates normal provider completions. Suspicious over-compression falls back to the original transcript, replacing any live streaming/grouped text in place instead of leaving or duplicating a partial result.
-- **Responsive settings UI**: local model loading plus manual and scheduled lexicon review run in background threads. Busy states prevent duplicate review runs without freezing Qt.
-- **Prompt cancellation**: cancelling one history reprocess no longer waits for the worker on the GUI thread; the worker finishes safely in the background.
-- **Reliable optional-runtime testing**: absent or orphaned Sherpa namespace packages are no longer mistaken for an installed runtime, while release builds retain real local-ASR smoke coverage.
-- **Lean runtime and packaging**: unused plugins, compatibility layers, and services are gone; the supported paths share the `sonicinput` entry point, and Nuitka carries only the verified QML/local-ASR closure plus Sherpa's required ONNX Runtime DLL.
-- **Reproducible Windows releases**: official builds use the VS 2022 C++ x64 toolchain on `windows-2022`, complete a minimal Nuitka preflight, then include Sherpa's ONNX Runtime through a native-DLL package rule and verify the packaged root DLL against the Sherpa source by SHA-256.
-- **Hardened CI and release automation**: pinned action/uv versions, locked dependency installs, type/format/dead-code/security/package gates, and a Windows tag workflow that builds, verifies, and publishes the executable.
+## What's New (v0.8.8)
+- **Legacy API cleanup** removes the old `ConfigService` and `EventBus` compatibility modules plus unused service, interface, and exception methods. Supported code now uses `RefactoredConfigService` and `DynamicEventSystem` directly.
+- **Focused CLI** removes the old `--test` and `--diagnostics` harness while retaining default GUI startup, `--gui`, `--validate`, and the release-only `--package-smoke` gate.
+- **Lean diagnostics and assets** remove orphaned constants, dependency diagnostics, an unused QML page, and recording tray images while preserving legacy Whisper configuration migration.
+- **Maintained visual audit** moves the settings audit into `scripts/`, fixes its Qt typing explicitly, and continues to cover 34 offscreen screenshot scenarios.
+- **Retired temporary observability tools** remove the complete Stage 6 inspection chain without changing production database fields, migrations, runtime events, or long-term quality audits.
+- **Release validation** passes Ruff, mypy, Vulture, Bandit, 393 non-GUI regressions, 69 offscreen GUI regressions, and a Nuitka/MSVC onefile build.
 
 ## Performance Notes
 - 2026-03 optimization summary (chunk-stop path, history search/pagination, batch reprocess):  
@@ -31,7 +30,7 @@
 - 4GB RAM+, ~500MB disk
 
 ## Quick Start
-1. Download `SonicInput-v0.8.7-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
+1. Download `SonicInput-v0.8.8-win64.exe` from [Releases](https://github.com/Oxidane-bot/SonicInput/releases)
 2. Run the exe; default hotkey is Ctrl+Alt+Space (customize it in settings if it conflicts)
 3. Enter cloud API keys in settings (optional) or use the local model
 

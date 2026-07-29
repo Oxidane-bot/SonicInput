@@ -5,7 +5,7 @@
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.8.7"
+__version__ = "0.8.8"
 __author__ = "Oxidane-bot"
 __description__ = "SonicInput"
 
